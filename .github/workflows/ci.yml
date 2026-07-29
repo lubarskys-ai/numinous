@@ -45,10 +45,23 @@ jobs:
         run: xcodegen generate
 
       - name: Build app (iOS Simulator SDK)
-        run: >
-          xcodebuild build
-          -project Numinous.xcodeproj
-          -scheme Numinous
-          -sdk iphonesimulator
-          -destination 'generic/platform=iOS Simulator'
-          CODE_SIGNING_ALLOWED=NO
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Numinous.xcodeproj \
+            -scheme Numinous \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee build.log
+
+      # Logs are sign-in gated for anonymous viewers, so echo the real compiler
+      # errors as annotations (readable via the public check-runs API).
+      - name: Surface build errors
+        if: failure()
+        run: |
+          echo "===== extracted errors ====="
+          if grep -qE "error:" build.log; then
+            grep -nE "error:" build.log | while IFS= read -r l; do echo "::error::$l"; done
+          else
+            tail -60 build.log | while IFS= read -r l; do echo "::error::$l"; done
+          fi
