@@ -1,0 +1,35 @@
+# XcodeGen spec. CI runs `xcodegen generate` to produce Numinous.xcodeproj, then
+# builds it — so the iOS app compiles on GitHub's full-Xcode runners even though
+# this dev machine only has Command Line Tools. Regenerate locally the same way
+# once a full Xcode is available.
+name: Numinous
+options:
+  bundleIdPrefix: com.lubarskys
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+
+packages:
+  NuminousCore:
+    path: .
+
+targets:
+  Numinous:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+    dependencies:
+      - package: NuminousCore
+        product: NuminousCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lubarskys.numinous
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Numinous
+        CODE_SIGNING_ALLOWED: NO

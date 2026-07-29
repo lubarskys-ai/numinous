@@ -207,4 +207,24 @@ h.group("Axis classifier") {
     }
 }
 
+// MARK: - Markdown round-trip
+
+h.group("Note serialization round-trips") {
+    let original = Note(
+        title: "Golf: back nine", categoryID: "golf", date: day(29),
+        body: "Played with [[Sam]] after [[Atomic Habits]].",
+        interaction: .inPerson, depth: 4, source: .manual, sessionID: "evening-1"
+    )
+    let text = NoteSerializer.markdown(for: original)
+    let reparsed = NoteParser.parse(text, fallbackTitle: "wrong")
+
+    h.eq(reparsed.title, original.title, "title survives (even with a colon)")
+    h.eq(reparsed.categoryID, original.categoryID, "category survives")
+    h.eq(reparsed.date, original.date, "date survives")
+    h.eq(reparsed.interaction, original.interaction, "interaction survives")
+    h.eq(reparsed.depth, original.depth, "depth survives")
+    h.eq(reparsed.sessionID, original.sessionID, "session survives")
+    h.eq(reparsed.linkTargets, original.linkTargets, "links survive in the body")
+}
+
 exit(Int32(h.summarize()))

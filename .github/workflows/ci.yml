@@ -7,8 +7,8 @@ on:
 jobs:
   core:
     name: Build & check (NuminousCore)
-    # GitHub's macOS runners ship a full Xcode — so CI can build and test the
-    # iOS app that a Command-Line-Tools-only machine cannot.
+    # GitHub's macOS runners ship a full Xcode — so CI can build and test what a
+    # Command-Line-Tools-only machine cannot.
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -27,18 +27,28 @@ jobs:
       - name: Run checks
         run: swift run numinous-checks
 
-  # Once a SwiftUI iOS app target exists, this job builds it against the
-  # Simulator SDK. Kept here (disabled) as the ready-to-flip next step.
-  # ios-app:
-  #   name: Build iOS app
-  #   runs-on: macos-15
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: maxim-lobanov/setup-xcode@v1
-  #       with:
-  #         xcode-version: latest-stable
-  #     - name: Build app
-  #       run: |
-  #         xcodebuild build \
-  #           -scheme Numinous \
-  #           -destination 'platform=iOS Simulator,name=iPhone 16'
+  ios-app:
+    name: Build iOS app
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select latest stable Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build app (iOS Simulator SDK)
+        run: >
+          xcodebuild build
+          -project Numinous.xcodeproj
+          -scheme Numinous
+          -sdk iphonesimulator
+          -destination 'generic/platform=iOS Simulator'
+          CODE_SIGNING_ALLOWED=NO
