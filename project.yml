@@ -22,6 +22,11 @@ targets:
     dependencies:
       - package: NuminousCore
         product: NuminousCore
+    entitlements:
+      path: App/Numinous.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+        com.apple.developer.healthkit.access: []
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lubarskys.numinous
@@ -40,4 +45,5 @@ targets:
         INFOPLIST_KEY_NSContactsUsageDescription: "Numinous reads your contacts on your device to fill your People folder. They are never uploaded."
         INFOPLIST_KEY_NSCalendarsUsageDescription: "Numinous reads your calendar on your device so you can turn events into notes. Nothing is uploaded."
         INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: "Numinous reads your calendar on your device so you can turn events into notes. Nothing is uploaded."
+        INFOPLIST_KEY_NSHealthShareUsageDescription: "Numinous reads workouts and mindful minutes on your device so you can turn them into notes that grow Body and Spirit. Nothing is uploaded."
         CODE_SIGNING_ALLOWED: NO

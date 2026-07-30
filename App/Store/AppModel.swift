@@ -308,6 +308,32 @@ final class AppModel: ObservableObject {
         return notes.first { $0.origin?.source == "calendar" && $0.origin?.externalID == event.id }?.id
     }
 
+    /// Create (or re-open) a note from a health activity. Workouts grow Body,
+    /// mindful sessions grow Spirit. Idempotent by sample id.
+    func createNote(from item: HealthItem) -> UUID? {
+        let (folder, category, axis): (String, String, String) = item.kind == .workout
+            ? ("health/workouts", "Fitness", "body")
+            : ("health/mindful", "Mindfulness", "spirit")
+
+        let df = DateFormatter(); df.dateStyle = .medium; df.timeStyle = .short
+        let name = "\(item.title) · \(Self.shortDate(item.start))"
+        let minutes = max(1, Int(item.duration / 60))
+        let body = "\(df.string(from: item.start))\n⏱ \(minutes) min"
+
+        let imported = ImportedItem(
+            folder: folder, name: name, body: body, date: item.start,
+            origin: NoteOrigin(source: "healthkit", externalID: item.id),
+            folderCategory: category, folderAxisID: axis, isDormant: false
+        )
+        ingest([imported])
+        return notes.first { $0.origin?.source == "healthkit" && $0.origin?.externalID == item.id }?.id
+    }
+
+    private static func shortDate(_ date: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "MMM d"
+        return f.string(from: date)
+    }
+
     private static func mergeDetails(_ existing: [NoteDetail], _ incoming: [NoteDetail]) -> [NoteDetail] {
         var result = existing
         for detail in incoming {

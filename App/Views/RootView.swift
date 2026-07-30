@@ -17,6 +17,9 @@ struct RootView: View {
             CalendarView()
                 .tabItem { Label("Calendar", systemImage: "calendar") }
                 .tag("calendar")
+            HealthView()
+                .tabItem { Label("Health", systemImage: "heart.text.square") }
+                .tag("health")
         }
     }
 }
