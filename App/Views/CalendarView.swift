@@ -11,12 +11,20 @@ struct CalendarView: View {
     }
     @State private var state: LoadState = .loading
     @State private var path: [UUID] = []
+    @State private var showSubscribe = false
 
     var body: some View {
         NavigationStack(path: $path) {
             content
                 .navigationTitle("Calendar")
                 .navigationDestination(for: UUID.self) { id in NoteDetailView(noteID: id) }
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button { showSubscribe = true } label: { Image(systemName: "link.badge.plus") }
+                            .accessibilityLabel("Subscribe to a calendar")
+                    }
+                }
+                .sheet(isPresented: $showSubscribe) { CalendarSubscribeSheet() }
                 .task { await load() }
                 .refreshable { await load() }
         }
@@ -116,5 +124,52 @@ struct CalendarView: View {
         if event.isAllDay { return "All day" }
         let f = DateFormatter(); f.timeStyle = .short; f.dateStyle = .none
         return f.string(from: event.start)
+    }
+}
+
+/// Subscribe to any public calendar feed (an .ics / webcal:// URL — TripIt,
+/// a sports schedule, holidays, a shared Google/Outlook calendar). We hand the
+/// URL to iOS, which subscribes and keeps it synced; its events then appear in
+/// the Calendar tab like any other calendar.
+struct CalendarSubscribeSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    @State private var urlText = ""
+
+    /// Any scheme (or none) is coerced to `webcal://` so iOS shows the subscribe prompt.
+    private var subscribeURL: URL? {
+        var s = urlText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return nil }
+        if let range = s.range(of: "://") { s = String(s[range.upperBound...]) }
+        return URL(string: "webcal://" + s)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("https://…/calendar.ics or webcal://…", text: $urlText)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                } header: {
+                    Text("Calendar URL")
+                } footer: {
+                    Text("Paste a public calendar link — e.g. your TripIt feed, a team schedule, or a shared calendar. iOS will ask you to subscribe; afterward, pull down to refresh and its events show up here.")
+                }
+                Section {
+                    Button("Subscribe") {
+                        if let url = subscribeURL { openURL(url) }
+                        dismiss()
+                    }
+                    .disabled(subscribeURL == nil)
+                }
+            }
+            .navigationTitle("Subscribe to Calendar")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+            }
+        }
     }
 }
