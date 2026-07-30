@@ -41,15 +41,16 @@ struct NoteDetailView: View {
                     }
                 }
 
-                let suggestions = model.suggestedConnections(for: note)
+                let suggestions = model.connectionSuggestions(for: note)
                 if !suggestions.isEmpty {
                     Section {
-                        ForEach(suggestions) { candidate in
+                        ForEach(suggestions) { suggestion in
+                            let candidate = suggestion.note
                             HStack(spacing: 10) {
                                 Circle().fill(model.axis(for: candidate)?.color ?? .gray).frame(width: 8, height: 8)
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(candidate.displayName)
-                                    Text(candidate.folderName.isEmpty ? "around the same time" : "\(candidate.folderName) · around the same time")
+                                    Text(suggestion.reason)
                                         .font(.caption2).foregroundStyle(.secondary)
                                 }
                                 Spacer()
@@ -60,7 +61,7 @@ struct NoteDetailView: View {
                     } header: {
                         Text("Suggested connections")
                     } footer: {
-                        Text("Things that happened around the same time. Linking one connects it into your web.")
+                        Text("People and moments from around this time. Linking one connects it into your web.")
                     }
                 }
 

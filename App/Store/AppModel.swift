@@ -148,27 +148,65 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Generative connection suggestions: other notes that happened *near this
-    /// one in time*, not already linked, with cross-axis candidates first (a
-    /// workout suggests the person or reflection from that window — turning
-    /// co-occurrence into a cross-axis connection you confirm with a tap).
-    func suggestedConnections(for note: Note, within hours: Double = 18) -> [Note] {
+    /// A suggested connection plus a human reason for why we're proposing it.
+    struct Suggestion: Identifiable {
+        let note: Note
+        let reason: String
+        var id: UUID { note.id }
+    }
+
+    /// Generative connection suggestions, strongest signal first:
+    ///  1. **Who you were with** — people linked by a calendar event that overlaps
+    ///     this note's time. A workout at 8am that overlaps "Run with [[people/Sam]]"
+    ///     proposes Sam even though Sam's own note isn't dated to today. This is the
+    ///     strongest signal (a real event places you two together) and, for a
+    ///     workout, a Body↔Heart cross-axis link.
+    ///  2. **Around this time** — any other real note near this one in time, not
+    ///     already linked, cross-axis first (co-occurrence you confirm with a tap).
+    func connectionSuggestions(for note: Note, within hours: Double = 18) -> [Suggestion] {
         guard !note.isStub else { return [] }
+        let noteKey = Self.norm(note.title)
         let noteAxis = axis(for: note)?.id
-        let linked = Set(note.linkTargets.map { Self.norm($0) })
         let window = hours * 3600
-        let candidates = notes.filter { other in
-            guard other.id != note.id, !other.isStub, axis(for: other) != nil else { return false }
-            if linked.contains(Self.norm(other.title)) { return false }
-            if other.linkTargets.contains(where: { Self.norm($0) == Self.norm(note.title) }) { return false }
-            return abs(other.date.timeIntervalSince(note.date)) <= window
+        var out: [Suggestion] = []
+        var seen: Set<UUID> = [note.id]
+
+        func alreadyConnected(_ other: Note) -> Bool {
+            if note.linkTargets.contains(where: { Self.norm($0) == Self.norm(other.title) }) { return true }
+            if other.linkTargets.contains(where: { Self.norm($0) == noteKey }) { return true }
+            return false
         }
-        return candidates.sorted { a, b in
-            let aCross = (axis(for: a)?.id != noteAxis) ? 0 : 1
-            let bCross = (axis(for: b)?.id != noteAxis) ? 0 : 1
-            if aCross != bCross { return aCross < bCross }
+
+        // 1. People placed with you by a time-overlapping calendar event.
+        let calendarNotes = notes.filter {
+            $0.origin?.source == "calendar" && abs($0.date.timeIntervalSince(note.date)) <= window
+        }
+        for event in calendarNotes {
+            for target in event.linkTargets {
+                guard let person = self.note(titled: target),
+                      !person.isStub, axis(for: person) != nil,
+                      !seen.contains(person.id), !alreadyConnected(person) else { continue }
+                seen.insert(person.id)
+                out.append(Suggestion(note: person, reason: "With you at \(event.displayName)"))
+            }
+        }
+
+        // 2. Other real notes near this one in time (cross-axis first).
+        let temporal = notes.filter { other in
+            guard !seen.contains(other.id), !other.isStub, axis(for: other) != nil else { return false }
+            if alreadyConnected(other) { return false }
+            return abs(other.date.timeIntervalSince(note.date)) <= window
+        }.sorted { a, b in
+            let aSame = (axis(for: a)?.id == noteAxis) ? 1 : 0
+            let bSame = (axis(for: b)?.id == noteAxis) ? 1 : 0
+            if aSame != bSame { return aSame < bSame }
             return abs(a.date.timeIntervalSince(note.date)) < abs(b.date.timeIntervalSince(note.date))
-        }.prefix(5).map { $0 }
+        }
+        for other in temporal {
+            out.append(Suggestion(note: other, reason: "Around this time"))
+        }
+
+        return Array(out.prefix(5))
     }
 
     /// Notes that link *to* the given note (Obsidian-style backlinks).
