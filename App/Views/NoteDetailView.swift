@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 import NuminousCore
 
 struct NoteDetailView: View {
@@ -6,10 +7,9 @@ struct NoteDetailView: View {
     @Environment(\.dismiss) private var dismiss
     let noteID: UUID
 
-    @State private var newKey = ""
-    @State private var newValue = ""
     @State private var editedBody = ""
     @State private var loadedBodyFor: UUID?
+    @State private var photoItem: PhotosPickerItem?
 
     var body: some View {
         if let note = model.note(id: noteID) {
@@ -43,28 +43,34 @@ struct NoteDetailView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
-                Section("Details") {
-                    ForEach(note.details.indices, id: \.self) { index in
-                        let detail = note.details[index]
-                        HStack {
-                            Text(detail.key).foregroundStyle(.secondary)
-                            Spacer()
-                            Text(detail.value)
+                Section("Photos") {
+                    let photos = note.photos ?? []
+                    if !photos.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 10) {
+                                ForEach(photos, id: \.self) { name in
+                                    if let image = ImageStore.load(name) {
+                                        Image(uiImage: image)
+                                            .resizable().scaledToFill()
+                                            .frame(width: 84, height: 84)
+                                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                                            .overlay(alignment: .topTrailing) {
+                                                Button {
+                                                    model.removePhoto(from: note.id, name: name)
+                                                } label: {
+                                                    Image(systemName: "xmark.circle.fill")
+                                                        .foregroundStyle(.white, .black.opacity(0.5))
+                                                }
+                                                .padding(3)
+                                            }
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 2)
                         }
                     }
-                    .onDelete { offsets in offsets.forEach { model.removeDetail(from: note.id, at: $0) } }
-
-                    HStack {
-                        TextField("Field", text: $newKey)
-                        TextField("Value", text: $newValue)
-                        Button("Add") {
-                            model.addDetail(to: note.id,
-                                            key: newKey.trimmingCharacters(in: .whitespaces),
-                                            value: newValue.trimmingCharacters(in: .whitespaces))
-                            newKey = ""; newValue = ""
-                        }
-                        .disabled(newKey.trimmingCharacters(in: .whitespaces).isEmpty
-                                  || newValue.trimmingCharacters(in: .whitespaces).isEmpty)
+                    PhotosPicker(selection: $photoItem, matching: .images) {
+                        Label("Add photo", systemImage: "photo.badge.plus")
                     }
                 }
 
@@ -102,6 +108,15 @@ struct NoteDetailView: View {
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
                 if loadedBodyFor != note.id { editedBody = note.body; loadedBodyFor = note.id }
+            }
+            .onChange(of: photoItem) { newItem in
+                guard let newItem else { return }
+                Task {
+                    if let data = try? await newItem.loadTransferable(type: Data.self) {
+                        model.addPhoto(to: note.id, data: data)
+                    }
+                    photoItem = nil
+                }
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

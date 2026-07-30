@@ -152,6 +152,22 @@ final class AppModel: ObservableObject {
         persist()
     }
 
+    func addPhoto(to noteID: UUID, data: Data) {
+        guard let i = notes.firstIndex(where: { $0.id == noteID }),
+              let name = ImageStore.save(data) else { return }
+        var photos = notes[i].photos ?? []
+        photos.append(name)
+        notes[i].photos = photos
+        persist()
+    }
+
+    func removePhoto(from noteID: UUID, name: String) {
+        guard let i = notes.firstIndex(where: { $0.id == noteID }) else { return }
+        notes[i].photos?.removeAll { $0 == name }
+        ImageStore.delete(name)
+        persist()
+    }
+
     func removeDetail(from noteID: UUID, at index: Int) {
         guard let i = notes.firstIndex(where: { $0.id == noteID }),
               notes[i].details.indices.contains(index) else { return }
