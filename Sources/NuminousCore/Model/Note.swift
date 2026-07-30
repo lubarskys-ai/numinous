@@ -49,6 +49,9 @@ public struct Note: Identifiable, Hashable, Codable, Sendable {
     public var location: String?
     /// Free-form key/value details (phone number, favorite team, …).
     public var details: [NoteDetail]
+    /// Filenames of attached photos (stored on disk by the app). Optional for
+    /// backward-compatible decoding of notes saved before photos existed.
+    public var photos: [String]?
 
     public var source: NoteSource
     /// Where this note was imported from (nil = hand-written). Used to re-import
@@ -68,6 +71,7 @@ public struct Note: Identifiable, Hashable, Codable, Sendable {
         intensity: Int = 3,
         location: String? = nil,
         details: [NoteDetail] = [],
+        photos: [String]? = nil,
         source: NoteSource = .manual,
         origin: NoteOrigin? = nil,
         sessionID: String? = nil,
@@ -80,6 +84,7 @@ public struct Note: Identifiable, Hashable, Codable, Sendable {
         self.intensity = intensity
         self.location = location
         self.details = details
+        self.photos = photos
         self.source = source
         self.origin = origin
         self.sessionID = sessionID

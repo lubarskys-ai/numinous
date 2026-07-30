@@ -122,6 +122,25 @@ public struct ScoreEngine {
             }
         }
 
+        // MARK: 2b. Connection complexity — reward notes that bridge many
+        // distinct axes (super-linear in the number of axis-pairs bridged).
+        if config.breadthBonus != 0 {
+            var neighborAxes: [UUID: Set<String>] = [:]
+            for link in links where link.isCounted {
+                if let axisA = link.axisA { neighborAxes[link.b, default: []].insert(axisA) }
+                if let axisB = link.axisB { neighborAxes[link.a, default: []].insert(axisB) }
+            }
+            for note in notes {
+                guard !note.isStub, note.source == .manual, let axis = axisID(for: note) else { continue }
+                var touched = neighborAxes[note.id] ?? []
+                touched.insert(axis)
+                let d = touched.count
+                guard d >= 2 else { continue }
+                let bonus = config.breadthBonus * Double(d * (d - 1) / 2)
+                addToSession(sessionKey(for: note), date: note.date, [axis: bonus])
+            }
+        }
+
         // MARK: 3. Order sessions, apply caps, split revealed vs pending.
         let orderedKeys = sessionRaw.keys.sorted { lhs, rhs in
             let dl = sessionDate[lhs] ?? .distantFuture

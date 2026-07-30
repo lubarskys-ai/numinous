@@ -87,8 +87,9 @@ h.group("Links — cross-axis beats same-axis") {
     let b2 = Note(title: "books/Habit", date: day(1), intensity: 3, sessionID: "s")
     let cross = engine.score(notes: [a2, b2], folders: allFolders)
 
-    h.eq(same.rawTotals.total - 20, 5, "same-axis link: one axis × 5")
-    h.eq(cross.rawTotals.total - 20, 30, "cross-axis link: two axes × 15")
+    h.eq(same.links.first?.bonusPerAxis ?? 0, 5, "same-axis edge bonus 5")
+    h.eq(cross.links.first?.bonusPerAxis ?? 0, 15, "cross-axis edge bonus 15")
+    h.eq(same.rawTotals.total - 20, 5, "same-axis link total (no breadth: only 1 axis)")
     h.check(cross.rawTotals.total > same.rawTotals.total, "cross-axis out-earns same-axis")
 }
 
@@ -198,10 +199,35 @@ h.group("Note origin (idempotent imports)") {
 
     // Origin is metadata only — it must not change scoring.
     let engine = ScoreEngine()
-    let a = Note(title: "sport/A", date: day(1), body: "[[books/B]]", intensity: 3,
-                 origin: NoteOrigin(source: "contacts", externalID: "1"), sessionID: "s")
-    let b = Note(title: "books/B", date: day(1), intensity: 3, sessionID: "s")
-    h.eq(engine.score(notes: [a, b], folders: allFolders).rawTotals.total, 50, "origin doesn't affect scoring")
+    let withOrigin = engine.score(
+        notes: [Note(title: "sport/A", date: day(1), body: "[[books/B]]", intensity: 3,
+                     origin: NoteOrigin(source: "contacts", externalID: "1"), sessionID: "s"),
+                Note(title: "books/B", date: day(1), intensity: 3, sessionID: "s")],
+        folders: allFolders)
+    let without = engine.score(
+        notes: [Note(title: "sport/A", date: day(1), body: "[[books/B]]", intensity: 3, sessionID: "s"),
+                Note(title: "books/B", date: day(1), intensity: 3, sessionID: "s")],
+        folders: allFolders)
+    h.eq(withOrigin.rawTotals.total, without.rawTotals.total, "origin doesn't affect scoring")
+}
+
+h.group("Connection complexity (bridging more axes grows more)") {
+    let engine = ScoreEngine()
+    // X (Body) bridges Mind + Heart via links → touches 3 distinct axes.
+    let x = Note(title: "sport/X", date: day(1), body: "[[books/A]] and [[people/B]]", intensity: 3, sessionID: "s")
+    let a = Note(title: "books/A", date: day(1), intensity: 3, sessionID: "s")
+    let b = Note(title: "people/B", date: day(1), intensity: 3, sessionID: "s")
+    let r = engine.score(notes: [x, a, b], folders: allFolders)
+    // body: base 10 + edge(x-A)15 + edge(x-B)15 + breadth 6×C(3,2)=18 = 58
+    h.eq(r.rawTotals.points("body"), 58, "hub bridging 3 axes earns breadth 6×C(3,2)=18")
+    // A bridges Mind+Body (D=2): base 10 + edge 15 + breadth 6 = 31
+    h.eq(r.rawTotals.points("mind"), 31, "2-axis note earns breadth 6×C(2,2)=6")
+
+    // A note whose links stay within one axis bridges nothing → no breadth bonus.
+    let p = Note(title: "sport/P", date: day(1), body: "[[sport/Q]]", intensity: 3, sessionID: "s")
+    let q = Note(title: "sport/Q", date: day(1), intensity: 3, sessionID: "s")
+    let same = engine.score(notes: [p, q], folders: allFolders)
+    h.eq(same.rawTotals.points("body"), 25, "same-axis links earn no breadth (base 20 + edge 5)")
 }
 
 exit(Int32(h.summarize()))

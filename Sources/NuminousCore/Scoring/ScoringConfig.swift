@@ -30,6 +30,13 @@ public struct ScoringConfig: Codable, Sendable, Equatable {
     /// Applied to base credit and (averaged over endpoints) to link bonuses.
     public var intensityMultipliers: [Int: Double]
 
+    /// Rewards the *complexity* of a note's connections: a note that bridges more
+    /// distinct axes grows you super-linearly more. Credited to the note's axis
+    /// as `breadthBonus × (pairs of distinct axes it bridges)` — i.e. bridging
+    /// D axes pays `breadthBonus × D(D−1)/2` (D=2→×1, 3→×3, 4→×6). The more
+    /// different parts of your life a single note ties together, the better.
+    public var breadthBonus: Double
+
     // MARK: Anti-binge caps (consistency beats binge-logging)
 
     public var sessionGrowthCap: Double
@@ -42,6 +49,7 @@ public struct ScoringConfig: Codable, Sendable, Equatable {
         sameAxisLinkBonus: Double = 5,
         crossAxisLinkBonus: Double = 15,
         intensityMultipliers: [Int: Double] = [1: 0.5, 2: 0.75, 3: 1, 4: 1.5, 5: 2],
+        breadthBonus: Double = 6,
         sessionGrowthCap: Double = 90,
         softDailyCap: Double = 150,
         softCapScale: Double = 0.25
@@ -51,6 +59,7 @@ public struct ScoringConfig: Codable, Sendable, Equatable {
         self.sameAxisLinkBonus = sameAxisLinkBonus
         self.crossAxisLinkBonus = crossAxisLinkBonus
         self.intensityMultipliers = intensityMultipliers
+        self.breadthBonus = breadthBonus
         self.sessionGrowthCap = sessionGrowthCap
         self.softDailyCap = softDailyCap
         self.softCapScale = softCapScale
