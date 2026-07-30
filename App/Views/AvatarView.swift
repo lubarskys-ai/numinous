@@ -8,6 +8,8 @@ import NuminousCore
 struct AvatarView: View {
     @EnvironmentObject var model: AppModel
     @State private var reflection: ReflectionRecord?
+    @State private var zoom: Double = 1
+    @State private var committedZoom: Double = 1
 
     var body: some View {
         let balance = model.score.axisBalance(over: model.axes)
@@ -25,9 +27,16 @@ struct AvatarView: View {
                     color: { UIColor(model.axis(id: $0)?.color ?? .gray) },
                     growth: { min(1, model.score.revealedTotals.points($0) / 150) },
                     nodes: graphNodes,
-                    links: graphLinks
+                    links: graphLinks,
+                    zoom: zoom
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .gesture(
+                    MagnificationGesture()
+                        .onChanged { zoom = min(5, max(0.5, committedZoom * $0)) }
+                        .onEnded { _ in committedZoom = zoom }
+                )
+                .overlay(alignment: .bottomTrailing) { zoomControls.padding(14) }
 
                 if let reflection {
                     reflectionCard(reflection, tint: dominantColor(balance))
@@ -70,5 +79,30 @@ struct AvatarView: View {
 
     private func dominantColor(_ b: AxisTotals) -> Color {
         (model.axes.max { (b[$0.id] ?? 0) < (b[$1.id] ?? 0) })?.color ?? .accentColor
+    }
+
+    /// +/- buttons — a zoom that works with a single tap/click (no pinch needed).
+    private var zoomControls: some View {
+        VStack(spacing: 1) {
+            zoomButton("plus") { setZoom(zoom * 1.4) }
+            Divider().frame(width: 28)
+            zoomButton("minus") { setZoom(zoom / 1.4) }
+        }
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.secondary.opacity(0.2)))
+    }
+
+    private func zoomButton(_ icon: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "\(icon).magnifyingglass")
+                .font(.body).frame(width: 40, height: 40)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func setZoom(_ z: Double) {
+        let clamped = min(5, max(0.5, z))
+        zoom = clamped
+        committedZoom = clamped
     }
 }
