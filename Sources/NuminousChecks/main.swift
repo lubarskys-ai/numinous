@@ -187,4 +187,21 @@ h.group("Note serialization round-trips") {
     h.eq(reparsed.linkTargets, original.linkTargets, "links survive in body")
 }
 
+// MARK: - Import identity (origin)
+
+h.group("Note origin (idempotent imports)") {
+    let n = Note(title: "people/Sam", origin: NoteOrigin(source: "contacts", externalID: "ABC-123"))
+    let back = try! JSONDecoder().decode(Note.self, from: JSONEncoder().encode(n))
+    h.check(back.origin?.source == "contacts", "origin source survives Codable")
+    h.check(back.origin?.externalID == "ABC-123", "origin id survives Codable")
+    h.check(Note(title: "x").origin == nil, "hand-written notes have no origin")
+
+    // Origin is metadata only — it must not change scoring.
+    let engine = ScoreEngine()
+    let a = Note(title: "sport/A", date: day(1), body: "[[books/B]]", intensity: 3,
+                 origin: NoteOrigin(source: "contacts", externalID: "1"), sessionID: "s")
+    let b = Note(title: "books/B", date: day(1), intensity: 3, sessionID: "s")
+    h.eq(engine.score(notes: [a, b], folders: allFolders).rawTotals.total, 50, "origin doesn't affect scoring")
+}
+
 exit(Int32(h.summarize()))

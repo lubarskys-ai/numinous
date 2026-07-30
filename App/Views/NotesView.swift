@@ -57,11 +57,11 @@ struct NotesView: View {
     private func importContacts() {
         Task {
             do {
-                let names = try await ContactsImporter.fetchNames()
-                let added = model.importPeople(names: names)
-                importMessage = names.isEmpty
-                    ? "No contacts found."
-                    : "Imported \(added) new \(added == 1 ? "person" : "people") into your People folder."
+                let contacts = try await ContactsImporter.fetchContacts()
+                let (added, updated) = model.importContacts(contacts)
+                importMessage = contacts.isEmpty
+                    ? "No contacts found on this device."
+                    : "Imported \(added) new, updated \(updated) in your People folder."
             } catch ContactsImporter.ImportError.accessDenied {
                 importMessage = "Contacts access was declined. You can enable it in Settings → Numinous."
             } catch {

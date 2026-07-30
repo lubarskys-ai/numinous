@@ -9,6 +9,21 @@ struct FolderGroup: Identifiable {
     let notes: [Note]
 }
 
+/// A normalized item any import source (Contacts, Calendar, Health…) produces.
+/// `AppModel.ingest` upserts these into notes idempotently by `origin`, creating
+/// the target folder if needed. Adding a new source means mapping it to these.
+struct ImportedItem {
+    var folder: String
+    var name: String
+    var body: String = ""
+    var details: [NoteDetail] = []
+    var date: Date = Date()
+    var intensity: Int = 3
+    var origin: NoteOrigin
+    var folderCategory: String
+    var folderAxisID: String?
+}
+
 /// The app's single source of truth. Everything the UI shows flows from here;
 /// mutations recompute the whole score from scratch (the engine is a pure
 /// function), which is what makes remapping a folder's axis reflow all history.
@@ -130,21 +145,64 @@ final class AppModel: ObservableObject {
     }
 
     /// Adds each contact name as a `people/<Name>` note (skipping duplicates).
-    /// Ensures the People folder exists. Returns how many were newly added.
+    // MARK: - Imports (idempotent by origin)
+
+    /// Insert or update notes from any import source, keyed by `origin` so
+    /// re-importing updates instead of duplicating. Returns (added, updated).
     @discardableResult
-    func importPeople(names: [String]) -> Int {
-        if folder(named: "people") == nil {
-            folders.append(Folder(name: "people", category: "Relationships", axisID: "heart"))
+    func ingest(_ items: [ImportedItem]) -> (added: Int, updated: Int) {
+        var added = 0, updated = 0
+        for item in items {
+            if folder(named: item.folder) == nil {
+                folders.append(Folder(name: item.folder, category: item.folderCategory, axisID: item.folderAxisID))
+            }
+            let title = item.folder + "/" + item.name
+            if let i = notes.firstIndex(where: { $0.origin == item.origin }) {
+                notes[i].title = title
+                notes[i].details = Self.mergeDetails(notes[i].details, item.details)
+                if notes[i].body.isEmpty { notes[i].body = item.body }
+                updated += 1
+            } else if let i = notes.firstIndex(where: { Self.norm($0.title) == Self.norm(title) }) {
+                // A hand-made note with this title already exists — adopt it rather than duplicate.
+                if notes[i].origin == nil { notes[i].origin = item.origin }
+                notes[i].details = Self.mergeDetails(notes[i].details, item.details)
+                updated += 1
+            } else {
+                notes.append(Note(title: title, date: item.date, body: item.body,
+                                  intensity: item.intensity, details: item.details, origin: item.origin))
+                added += 1
+            }
         }
-        var added = 0
-        for name in names {
-            let title = "people/" + name
-            if notes.contains(where: { Self.norm($0.title) == Self.norm(title) }) { continue }
-            notes.append(Note(title: title))
-            added += 1
+        if added + updated > 0 { persist() }
+        return (added, updated)
+    }
+
+    /// Import contacts into the People folder (idempotent by contact identifier).
+    @discardableResult
+    func importContacts(_ contacts: [ImportedContact]) -> (added: Int, updated: Int) {
+        let items: [ImportedItem] = contacts.compactMap { contact in
+            let name = contact.name.trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty else { return nil }
+            var details: [NoteDetail] = []
+            if let phone = contact.phones.first { details.append(NoteDetail(key: "Phone", value: phone)) }
+            if let email = contact.emails.first { details.append(NoteDetail(key: "Email", value: email)) }
+            return ImportedItem(folder: "people", name: name, details: details,
+                                origin: NoteOrigin(source: "contacts", externalID: contact.id),
+                                folderCategory: "Relationships", folderAxisID: "heart")
         }
-        if added > 0 { persist() }
-        return added
+        return ingest(items)
+    }
+
+    private static func mergeDetails(_ existing: [NoteDetail], _ incoming: [NoteDetail]) -> [NoteDetail] {
+        var result = existing
+        for detail in incoming {
+            if let i = result.firstIndex(where: { Self.norm($0.key) == Self.norm(detail.key) }) {
+                result[i].value = detail.value
+            } else {
+                result.append(detail)
+            }
+        }
+        return result
     }
 
     func setFolderAxis(_ axisID: String, forFolder folderID: String) {

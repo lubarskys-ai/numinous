@@ -18,6 +18,18 @@ public struct NoteDetail: Hashable, Codable, Sendable {
     }
 }
 
+/// Where an imported note came from, so re-importing updates instead of
+/// duplicating. `nil` means the note was written by hand. `externalID` is stable
+/// within its `source` (a contact identifier, calendar event id, HealthKit uuid…).
+public struct NoteOrigin: Hashable, Codable, Sendable {
+    public var source: String
+    public var externalID: String
+    public init(source: String, externalID: String) {
+        self.source = source
+        self.externalID = externalID
+    }
+}
+
 /// A single markdown note — a diary entry, a person, a book, an activity, a trip.
 ///
 /// The `title` may be a path like `people/Sam`: the part before the last `/` is
@@ -39,6 +51,9 @@ public struct Note: Identifiable, Hashable, Codable, Sendable {
     public var details: [NoteDetail]
 
     public var source: NoteSource
+    /// Where this note was imported from (nil = hand-written). Used to re-import
+    /// idempotently.
+    public var origin: NoteOrigin?
     /// Groups notes logged in one sitting so growth can be capped per session.
     /// `nil` falls back to bucketing by calendar day.
     public var sessionID: String?
@@ -54,6 +69,7 @@ public struct Note: Identifiable, Hashable, Codable, Sendable {
         location: String? = nil,
         details: [NoteDetail] = [],
         source: NoteSource = .manual,
+        origin: NoteOrigin? = nil,
         sessionID: String? = nil,
         isStub: Bool = false
     ) {
@@ -65,6 +81,7 @@ public struct Note: Identifiable, Hashable, Codable, Sendable {
         self.location = location
         self.details = details
         self.source = source
+        self.origin = origin
         self.sessionID = sessionID
         self.isStub = isStub
     }

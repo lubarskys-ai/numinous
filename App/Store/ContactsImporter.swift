@@ -1,15 +1,22 @@
 import Foundation
 import Contacts
 
-/// Reads the device's contacts (with permission) and returns their display
-/// names. On-device only — nothing is uploaded; this just seeds the People
-/// folder so linking a person is a tap, not typing.
+/// A contact read from the device — its stable identifier plus the bits worth
+/// keeping as note details. On-device only; nothing is uploaded.
+struct ImportedContact {
+    let id: String
+    let name: String
+    let phones: [String]
+    let emails: [String]
+}
+
+/// Reads the device's contacts (with permission). Seeds the People folder so
+/// linking a person is a tap, not typing — and re-imports update, not duplicate.
 enum ContactsImporter {
 
     enum ImportError: Error { case accessDenied }
 
-    /// Requests Contacts access and returns contact display names.
-    static func fetchNames() async throws -> [String] {
+    static func fetchContacts() async throws -> [ImportedContact] {
         let store = CNContactStore()
 
         let granted: Bool = try await withCheckedThrowingContinuation { cont in
@@ -19,17 +26,23 @@ enum ContactsImporter {
         }
         guard granted else { throw ImportError.accessDenied }
 
-        let keys = [CNContactGivenNameKey, CNContactFamilyNameKey] as [CNKeyDescriptor]
+        let keys = [
+            CNContactGivenNameKey, CNContactFamilyNameKey,
+            CNContactPhoneNumbersKey, CNContactEmailAddressesKey,
+        ] as [CNKeyDescriptor]
         let request = CNContactFetchRequest(keysToFetch: keys)
 
-        var names: [String] = []
+        var out: [ImportedContact] = []
         try store.enumerateContacts(with: request) { contact, _ in
             let name = [contact.givenName, contact.familyName]
                 .filter { !$0.isEmpty }
                 .joined(separator: " ")
                 .trimmingCharacters(in: .whitespaces)
-            if !name.isEmpty { names.append(name) }
+            guard !name.isEmpty else { return }
+            let phones = contact.phoneNumbers.map { $0.value.stringValue }
+            let emails = contact.emailAddresses.map { $0.value as String }
+            out.append(ImportedContact(id: contact.identifier, name: name, phones: phones, emails: emails))
         }
-        return names
+        return out
     }
 }
