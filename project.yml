@@ -34,4 +34,7 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_CFBundleDisplayName: Numinous
+        # Declares no non-exempt encryption, so TestFlight skips the export-
+        # compliance prompt on every upload.
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         CODE_SIGNING_ALLOWED: NO
