@@ -17,6 +17,13 @@ struct HealthView: View {
                 .navigationDestination(for: UUID.self) { id in NoteDetailView(noteID: id) }
                 .task { await load() }
                 .refreshable { await load() }
+                #if DEBUG
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button("Seed") { Task { await HealthKitService.seedSampleData(); await load() } }
+                    }
+                }
+                #endif
         }
     }
 

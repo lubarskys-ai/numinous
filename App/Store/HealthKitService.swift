@@ -58,6 +58,45 @@ enum HealthKitService {
         }
     }
 
+    #if DEBUG
+    /// Test-only: writes a few sample workouts + mindful sessions to HealthKit so
+    /// the Health tab has something to read in the simulator.
+    static func seedSampleData() async {
+        guard HKHealthStore.isHealthDataAvailable() else { return }
+        let store = HKHealthStore()
+        let workoutType = HKObjectType.workoutType()
+        guard let mindfulType = HKObjectType.categoryType(forIdentifier: .mindfulSession) else { return }
+        try? await store.requestAuthorization(toShare: [workoutType, mindfulType], read: [])
+
+        let cal = Calendar.current
+        let workouts: [(Int, HKWorkoutActivityType, Int)] = [
+            (0, .running, 32), (1, .traditionalStrengthTraining, 47), (2, .yoga, 25), (4, .cycling, 55),
+        ]
+        for (daysAgo, type, minutes) in workouts {
+            let base = cal.date(byAdding: .day, value: -daysAgo, to: Date()) ?? Date()
+            let end = cal.date(bySettingHour: 8, minute: 0, second: 0, of: base) ?? base
+            let start = end.addingTimeInterval(-Double(minutes) * 60)
+            let builder = HKWorkoutBuilder(healthStore: store, configuration: {
+                let c = HKWorkoutConfiguration(); c.activityType = type; return c
+            }(), device: nil)
+            do {
+                try await builder.beginCollection(at: start)
+                try await builder.endCollection(at: end)
+                _ = try await builder.finishWorkout()   // saves the workout itself
+            } catch { }
+        }
+        // Mindful sessions aren't saved by a builder, so save them explicitly.
+        var mindful: [HKSample] = []
+        for (daysAgo, minutes) in [(0, 10), (2, 15)] {
+            let base = cal.date(byAdding: .day, value: -daysAgo, to: Date()) ?? Date()
+            let end = cal.date(bySettingHour: 21, minute: 0, second: 0, of: base) ?? base
+            let start = end.addingTimeInterval(-Double(minutes) * 60)
+            mindful.append(HKCategorySample(type: mindfulType, value: HKCategoryValue.notApplicable.rawValue, start: start, end: end))
+        }
+        try? await store.save(mindful)
+    }
+    #endif
+
     private static func workoutName(_ type: HKWorkoutActivityType) -> String {
         switch type {
         case .running: return "Run"

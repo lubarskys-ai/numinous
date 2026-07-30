@@ -46,4 +46,8 @@ targets:
         INFOPLIST_KEY_NSCalendarsUsageDescription: "Numinous reads your calendar on your device so you can turn events into notes. Nothing is uploaded."
         INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: "Numinous reads your calendar on your device so you can turn events into notes. Nothing is uploaded."
         INFOPLIST_KEY_NSHealthShareUsageDescription: "Numinous reads workouts and mindful minutes on your device so you can turn them into notes that grow Body and Spirit. Nothing is uploaded."
+        # DEV ONLY — supports HealthKitService.seedSampleData() (#if DEBUG). The app
+        # never writes to Health in a release build. Remove this key before App Store
+        # submission so we don't declare write access we don't use.
+        INFOPLIST_KEY_NSHealthUpdateUsageDescription: "Used only in development to write sample workouts and mindful sessions for testing."
         CODE_SIGNING_ALLOWED: NO
