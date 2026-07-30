@@ -106,6 +106,10 @@ final class AppModel: ObservableObject {
 
     func noteExists(titled title: String) -> Bool { note(titled: title) != nil }
 
+    func noteID(forCalendarEvent eventID: String) -> UUID? {
+        notes.first { $0.origin?.source == "calendar" && $0.origin?.externalID == eventID }?.id
+    }
+
     /// Notes grouped by folder path, folders alphabetized, "Unfiled" last.
     var groupedByFolder: [FolderGroup] {
         let groups = Dictionary(grouping: notes) { $0.folderName }
@@ -245,6 +249,35 @@ final class AppModel: ObservableObject {
                                 isDormant: true)
         }
         return ingest(items)
+    }
+
+    /// Create (or re-open) a note from a calendar event. Filed under a folder
+    /// named after the event's calendar (so multiple calendars become folders);
+    /// the body carries the date, location, and [[people/…]] links for attendees.
+    /// Returns the note id so the UI can open it. Idempotent by event id.
+    func createNote(from event: CalendarEvent) -> UUID? {
+        let folder = event.calendarTitle.replacingOccurrences(of: "/", with: "-").trimmingCharacters(in: .whitespaces)
+        let name = event.title.replacingOccurrences(of: "/", with: "-").trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty, !folder.isEmpty else { return nil }
+
+        let df = DateFormatter()
+        df.dateStyle = .medium
+        df.timeStyle = event.isAllDay ? .none : .short
+        var lines = [df.string(from: event.start)]
+        if let location = event.location, !location.isEmpty { lines.append("📍 \(location)") }
+        let people = event.attendees
+            .map { $0.replacingOccurrences(of: "/", with: "-") }
+            .filter { !$0.isEmpty }
+            .map { "[[people/\($0)]]" }
+        if !people.isEmpty { lines.append("With " + people.joined(separator: ", ")) }
+
+        let item = ImportedItem(
+            folder: folder, name: name, body: lines.joined(separator: "\n"), date: event.start,
+            origin: NoteOrigin(source: "calendar", externalID: event.id),
+            folderCategory: folder, folderAxisID: nil, isDormant: false
+        )
+        ingest([item])
+        return notes.first { $0.origin?.source == "calendar" && $0.origin?.externalID == event.id }?.id
     }
 
     private static func mergeDetails(_ existing: [NoteDetail], _ incoming: [NoteDetail]) -> [NoteDetail] {

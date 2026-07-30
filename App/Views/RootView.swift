@@ -20,6 +20,9 @@ struct RootView: View {
             FoldersView()
                 .tabItem { Label("Folders", systemImage: "folder") }
                 .tag("folders")
+            CalendarView()
+                .tabItem { Label("Calendar", systemImage: "calendar") }
+                .tag("calendar")
         }
     }
 }
