@@ -129,6 +129,24 @@ final class AppModel: ObservableObject {
         return folder
     }
 
+    /// Adds each contact name as a `people/<Name>` note (skipping duplicates).
+    /// Ensures the People folder exists. Returns how many were newly added.
+    @discardableResult
+    func importPeople(names: [String]) -> Int {
+        if folder(named: "people") == nil {
+            folders.append(Folder(name: "people", category: "Relationships", axisID: "heart"))
+        }
+        var added = 0
+        for name in names {
+            let title = "people/" + name
+            if notes.contains(where: { Self.norm($0.title) == Self.norm(title) }) { continue }
+            notes.append(Note(title: title))
+            added += 1
+        }
+        if added > 0 { persist() }
+        return added
+    }
+
     func setFolderAxis(_ axisID: String, forFolder folderID: String) {
         guard let i = folders.firstIndex(where: { $0.id == folderID }) else { return }
         folders[i].axisID = axisID

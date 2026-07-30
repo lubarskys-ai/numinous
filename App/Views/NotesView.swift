@@ -5,6 +5,7 @@ struct NotesView: View {
     @EnvironmentObject var model: AppModel
     @State private var showCompose = false
     @State private var composePrefill: String?
+    @State private var importMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -24,8 +25,15 @@ struct NotesView: View {
             .navigationDestination(for: UUID.self) { id in NoteDetailView(noteID: id) }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button { composePrefill = "diary/" + Self.stamp(); showCompose = true } label: {
-                        Label("Diary", systemImage: "calendar.badge.plus")
+                    Menu {
+                        Button { composePrefill = "diary/" + Self.stamp(); showCompose = true } label: {
+                            Label("New diary entry", systemImage: "calendar.badge.plus")
+                        }
+                        Button { importContacts() } label: {
+                            Label("Import Contacts", systemImage: "person.crop.circle.badge.plus")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
@@ -37,6 +45,27 @@ struct NotesView: View {
             }
             .sheet(isPresented: $showCompose) {
                 ComposeView(prefillTitle: composePrefill)
+            }
+            .alert("Contacts", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(importMessage ?? "")
+            }
+        }
+    }
+
+    private func importContacts() {
+        Task {
+            do {
+                let names = try await ContactsImporter.fetchNames()
+                let added = model.importPeople(names: names)
+                importMessage = names.isEmpty
+                    ? "No contacts found."
+                    : "Imported \(added) new \(added == 1 ? "person" : "people") into your People folder."
+            } catch ContactsImporter.ImportError.accessDenied {
+                importMessage = "Contacts access was declined. You can enable it in Settings → Numinous."
+            } catch {
+                importMessage = "Couldn't import contacts: \(error.localizedDescription)"
             }
         }
     }

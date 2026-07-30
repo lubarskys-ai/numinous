@@ -37,4 +37,5 @@ targets:
         # Declares no non-exempt encryption, so TestFlight skips the export-
         # compliance prompt on every upload.
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        INFOPLIST_KEY_NSContactsUsageDescription: "Numinous reads your contacts on your device to fill your People folder. They are never uploaded."
         CODE_SIGNING_ALLOWED: NO
