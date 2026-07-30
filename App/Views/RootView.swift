@@ -14,9 +14,6 @@ struct RootView: View {
             GraphView()
                 .tabItem { Label("Graph", systemImage: "point.3.connected.trianglepath.dotted") }
                 .tag("graph")
-            NotesView()
-                .tabItem { Label("Notes", systemImage: "note.text") }
-                .tag("notes")
             FoldersView()
                 .tabItem { Label("Folders", systemImage: "folder") }
                 .tag("folders")

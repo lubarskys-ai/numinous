@@ -45,13 +45,14 @@ final class AppModel: ObservableObject {
 
     init() {
         let loaded = storage.load()
-        let f = loaded?.folders.isEmpty == false ? loaded!.folders : SampleData.folders
+        var f = loaded?.folders.isEmpty == false ? loaded!.folders : SampleData.folders
         var n = loaded?.notes.isEmpty == false ? loaded!.notes : SampleData.notes
         let a = (loaded?.axes.isEmpty == false) ? loaded!.axes : Axis.defaultSet
 
         let version = loaded?.schemaVersion ?? 0
         var didMigrate = false
-        if version < 1 { didMigrate = Self.migrateContactsToDormantMarkdown(&n) }
+        if version < 1, Self.migrateContactsToDormantMarkdown(&n) { didMigrate = true }
+        if version < 2, Self.migrateDiaryUnderNotes(&n, &f) { didMigrate = true }
 
         self.folders = f
         self.notes = n
@@ -62,7 +63,28 @@ final class AppModel: ObservableObject {
         }
     }
 
-    static let schemaVersion = 1
+    static let schemaVersion = 2
+
+    /// One-time (v2): make `diary` a subfolder of `notes` (`diary/x` → `notes/diary/x`).
+    private static func migrateDiaryUnderNotes(_ notes: inout [Note], _ folders: inout [Folder]) -> Bool {
+        var changed = false
+        for i in notes.indices where notes[i].folderName == "diary" {
+            notes[i].title = "notes/diary/" + notes[i].displayName
+            changed = true
+        }
+        if !folders.contains(where: { $0.id == "notes/diary" }) {
+            let old = folders.first { $0.id == "diary" }
+            folders.removeAll { $0.id == "diary" }
+            folders.append(Folder(name: "notes/diary", category: old?.category ?? "Journal",
+                                  axisID: old?.axisID ?? "spirit", defaultIntensity: old?.defaultIntensity ?? 4))
+            changed = true
+        }
+        if !folders.contains(where: { $0.id == "notes" }) {
+            folders.append(Folder(name: "notes", category: "Notes", axisID: nil))
+            changed = true
+        }
+        return changed
+    }
 
     /// One-time (v1): older contact imports granted growth just by existing and
     /// stored info as structured details. Convert those details to a markdown
@@ -296,6 +318,20 @@ final class AppModel: ObservableObject {
         guard let i = folders.firstIndex(where: { $0.id == folderID }) else { return }
         folders[i].axisID = axisID
         persist()
+    }
+
+    func setFolderIntensity(_ intensity: Int?, forFolder name: String) {
+        if let i = folders.firstIndex(where: { $0.id == Folder.normalize(name) }) {
+            folders[i].defaultIntensity = intensity
+        } else {
+            folders.append(Folder(name: name, category: name.capitalized, axisID: nil, defaultIntensity: intensity))
+        }
+        persist()
+    }
+
+    /// The intensity a new note in this folder should start at (3 if unset).
+    func defaultIntensity(forFolderNamed name: String) -> Int {
+        folder(named: name)?.defaultIntensity ?? 3
     }
 
     /// Set a folder's axis, creating the folder mapping if it doesn't exist yet

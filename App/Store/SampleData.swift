@@ -12,7 +12,8 @@ enum SampleData {
         Folder(name: "people", category: "Relationships", axisID: "heart"),
         Folder(name: "books",  category: "Cognition",     axisID: "mind"),
         Folder(name: "sport",  category: "Fitness",       axisID: "body"),
-        Folder(name: "diary",  category: "Journal",       axisID: "spirit"),
+        Folder(name: "notes",       category: "Notes",   axisID: nil),
+        Folder(name: "notes/diary", category: "Journal", axisID: "spirit", defaultIntensity: 4),
     ]
 
     static let notes: [Note] = [
@@ -34,7 +35,7 @@ enum SampleData {
              """,
              intensity: 4, location: "Pebble Beach"),
 
-        Note(title: "diary/Evening reflection", date: daysAgo(3),
+        Note(title: "notes/diary/Evening reflection", date: daysAgo(3),
              body: "Quiet night. I feel better when I actually see [[people/Sam]] in person instead of just texting.",
              intensity: 4),
     ]

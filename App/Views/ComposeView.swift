@@ -102,6 +102,8 @@ struct ComposeView: View {
     }
 
     private func updateSuggestion() {
+        // A note inherits its folder's default intensity (still overridable here).
+        if let folder = knownFolder, let d = folder.defaultIntensity { intensity = d }
         guard isNewFolder, newFolderCategory.isEmpty else { return }
         if case let .suggest(axisID, _) = model.suggestAxis(forNewFolderNamed: folderName) {
             newFolderAxis = axisID
