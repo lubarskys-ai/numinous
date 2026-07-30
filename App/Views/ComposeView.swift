@@ -31,6 +31,8 @@ struct ComposeView: View {
                 Section {
                     TextField("e.g. people/Sam, books/Dune", text: $title)
                         .autocorrectionDisabled()
+                        // Folder paths are lowercase; don't auto-capitalize into a new folder.
+                        .textInputAutocapitalization(.never)
                 } header: {
                     Text("Title")
                 } footer: {

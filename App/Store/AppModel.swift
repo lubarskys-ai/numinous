@@ -12,6 +12,13 @@ struct FolderGroup: Identifiable {
 /// A normalized item any import source (Contacts, Calendar, Health…) produces.
 /// `AppModel.ingest` upserts these into notes idempotently by `origin`, creating
 /// the target folder if needed. Adding a new source means mapping it to these.
+/// A signal that a new connection just formed, and which axis it lit up. Carries
+/// a fresh id each time so the UI re-fires even for the same axis twice in a row.
+struct ConnectionSpark: Equatable {
+    let id: UUID
+    let axisID: String
+}
+
 struct ImportedItem {
     var folder: String
     var name: String
@@ -594,15 +601,38 @@ final class AppModel: ObservableObject {
     /// about it, adding [[links]]) activates it so it starts growing you.
     func updateBody(_ id: UUID, body: String) {
         guard let i = notes.firstIndex(where: { $0.id == id }) else { return }
+        let oldTargets = Set(notes[i].linkTargets.map { Self.norm($0) })
         notes[i].body = body
         // Editing a note engages it — except a Readwise book, which counts only
         // once you mark it finished (adding links to highlights mustn't do it).
         if notes[i].origin?.source != "readwise" { notes[i].isStub = false }
+        // A new connection just formed → spark the matching axis: a person beats
+        // the heart, a book/idea lights the mind.
+        let added = Set(notes[i].linkTargets.map { Self.norm($0) }).subtracting(oldTargets)
+        if !added.isEmpty {
+            let noteIsPerson = Folder.normalize(notes[i].folderName) == "people"
+            let addedAxes = added.compactMap { target -> String? in
+                folders.first { $0.id == Self.targetFolder(target) }?.axisID
+            }
+            var sparkAxis = addedAxes.first { $0 == "heart" } ?? addedAxes.first { $0 == "mind" }
+            if sparkAxis == nil, noteIsPerson { sparkAxis = "heart" }
+            if let sparkAxis { spark = ConnectionSpark(id: UUID(), axisID: sparkAxis) }
+        }
         for target in notes[i].linkTargets where !noteExists(titled: target) {
             notes.append(Note(title: target, date: notes[i].date, isStub: true))
         }
         persist()
     }
+
+    /// The folder segment of a `[[folder/Name]]` link target ("" if unqualified).
+    private static func targetFolder(_ normedTarget: String) -> String {
+        let parts = normedTarget.split(separator: "/")
+        return parts.count >= 2 ? String(parts[0]) : ""
+    }
+
+    /// Fires each time a fresh connection is made, carrying which axis it touched
+    /// so the UI can play the matching flourish (heart beat, mind's light, …).
+    @Published private(set) var spark: ConnectionSpark?
 
     /// Mark a book finished (or un-finish it). A finished book leaves dormancy and
     /// starts counting — base credit plus any cross-axis links in its highlights.

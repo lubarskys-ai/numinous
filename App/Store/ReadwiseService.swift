@@ -144,42 +144,58 @@ enum ReadwiseService {
             coverImageUrl: "https://images-na.ssl-images-amazon.com/images/P/B00X47ZVXM.jpg",
             summary: "On focus as a superpower in a distracted world.",
             asin: "B00X47ZVXM", bookTags: [ReadwiseTag(name: "self-help"), ReadwiseTag(name: "productivity")],
-            highlights: (1...20).map { i in
-                ReadwiseHighlight(
-                    text: "Clarity about what matters provides clarity about what does not. (#\(i))",
-                    note: i == 1 ? "reminds me of [[people/Sam]]'s advice about single-tasking" : nil,
-                    location: i, highlightedAt: nil, isFavorite: i == 1, tags: nil)
-            }),
+            highlights: sampleHighlights([
+                "Clarity about what matters provides clarity about what does not.",
+                "Human beings are at their best when immersed deeply in something challenging.",
+                "Busyness is not a proxy for productivity.",
+                "To produce at your peak you must work for long periods with full concentration.",
+                "What you choose to focus on quietly defines the quality of your life.",
+            ], count: 20, firstNote: "reminds me of [[people/Sam]]'s advice about single-tasking")),
         ReadwiseBook(
             userBookId: 90002, title: "Sapiens", author: "Yuval Noah Harari", readableTitle: nil,
             category: "books", source: "kindle",
             coverImageUrl: "https://images-na.ssl-images-amazon.com/images/P/B00ICN066A.jpg",
             summary: "A brief history of humankind.",
             asin: "B00ICN066A", bookTags: [ReadwiseTag(name: "non-fiction"), ReadwiseTag(name: "history")],
-            highlights: (1...8).map { i in
-                ReadwiseHighlight(text: "Fiction has enabled us to imagine things collectively. (#\(i))",
-                                  note: nil, location: i, highlightedAt: nil, isFavorite: false, tags: nil)
-            }),
+            highlights: sampleHighlights([
+                "Fiction has enabled us not merely to imagine things, but to do so collectively.",
+                "We did not domesticate wheat. It domesticated us.",
+                "Money is the most universal system of mutual trust ever devised.",
+                "Culture tends to argue that it forbids only that which is unnatural.",
+            ], count: 8)),
         ReadwiseBook(
             userBookId: 90003, title: "The Midnight Library", author: "Matt Haig", readableTitle: nil,
             category: "books", source: "kindle",
             coverImageUrl: "https://images-na.ssl-images-amazon.com/images/P/B0851LXCH3.jpg",
             summary: "A novel about the lives we might have lived.",
             asin: "B0851LXCH3", bookTags: [ReadwiseTag(name: "fiction"), ReadwiseTag(name: "novel")],
-            highlights: (1...5).map { i in
-                ReadwiseHighlight(text: "The only way to learn is to live. (#\(i))",
-                                  note: nil, location: i, highlightedAt: nil, isFavorite: false, tags: nil)
-            }),
+            highlights: sampleHighlights([
+                "The only way to learn is to live.",
+                "Never underestimate the big importance of small things.",
+                "Regret doesn't leave. But it can transform into something else.",
+            ], count: 5)),
         ReadwiseBook(
             userBookId: 90004, title: "Beach Read", author: "Emily Henry", readableTitle: nil,
             category: "books", source: "kindle",
             coverImageUrl: "https://images-na.ssl-images-amazon.com/images/P/B07X7VZ7DF.jpg",
             summary: "Two writers, one summer, opposite genres.",
             asin: "B07X7VZ7DF", bookTags: [ReadwiseTag(name: "romance")],
-            highlights: (1...3).map { i in
-                ReadwiseHighlight(text: "Maybe happy endings weren't real, but people were. (#\(i))",
-                                  note: nil, location: i, highlightedAt: nil, isFavorite: false, tags: nil)
-            }),
+            highlights: sampleHighlights([
+                "Maybe happy endings weren't real, but people were.",
+                "Sometimes what feels like the end is really the middle.",
+                "Writing is just professional daydreaming.",
+            ], count: 3)),
     ]
+
+    /// Cycles a book's quotes into `count` highlights (keeps the highlight count —
+    /// which drives the engagement grade — while the text stays varied).
+    private static func sampleHighlights(_ quotes: [String], count: Int,
+                                         firstNote: String? = nil) -> [ReadwiseHighlight] {
+        (0..<count).map { i in
+            ReadwiseHighlight(text: quotes[i % quotes.count],
+                              note: i == 0 ? firstNote : nil,
+                              location: i, highlightedAt: nil, isFavorite: i == 0, tags: nil)
+        }
+    }
     #endif
 }

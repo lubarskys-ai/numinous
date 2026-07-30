@@ -21,5 +21,8 @@ struct RootView: View {
                 .tabItem { Label("Health", systemImage: "heart.text.square") }
                 .tag("health")
         }
+        // A full-screen flourish whenever a new connection forms — a heart beat
+        // for a person, a bulb lighting up for the mind.
+        .overlay { ConnectionSparkOverlay() }
     }
 }
