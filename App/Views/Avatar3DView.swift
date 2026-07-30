@@ -125,25 +125,54 @@ struct Avatar3DView: UIViewRepresentable {
         var degree: [UUID: Int] = [:]
         for e in links { degree[e.a, default: 0] += 1; degree[e.b, default: 0] += 1 }
 
+        // Faint translucent organs drawn inside the body (grey→axis color with
+        // growth). Their nodes live inside them, which keeps them within the body.
+        let organRadius: [String: Double] = ["mind": 0.10, "meaning": 0.10, "heart": 0.115, "spirit": 0.10, "gut": 0.13]
+        for (axisKey, orr) in organRadius {
+            let c = region(axisKey)
+            let g = CGFloat(min(1, max(0, growth(axisKey))))
+            let col = GLTFBody.blend(UIColor(white: 0.6, alpha: 1), color(axisKey), g * 0.9)
+            let s = ball(orr); s.segmentCount = 24
+            let m = SCNMaterial(); m.lightingModel = .constant
+            m.diffuse.contents = col; m.emission.contents = col; m.emission.intensity = 0.12
+            m.transparency = 0.16; m.writesToDepthBuffer = false; m.isDoubleSided = true
+            s.materials = [m]
+            let organ = SCNNode(geometry: s)
+            organ.position = v(c.0, c.1, c.2)
+            organ.scale = axisKey == "gut" ? v(1.05, 0.8, 0.9) : v(1, 1, 1)
+            organ.renderingOrder = 8
+            figure.addChildNode(organ)
+        }
+
+        // Anchor points inside the limbs/torso so Body nodes stay within the body.
+        let bodyAnchors: [(Double, Double, Double)] = [
+            (0, -0.02, 0), (-0.20, 0.30, 0), (0.20, 0.30, 0),
+            (-0.23, 0.06, 0), (0.23, 0.06, 0),
+            (-0.10, -0.42, 0), (0.10, -0.42, 0),
+            (-0.11, -0.70, 0), (0.11, -0.70, 0),
+        ]
+
         var pos: [UUID: SCNVector3] = [:]
         for (axisKey, group) in Dictionary(grouping: nodes, by: { $0.axis }) {
             let c = region(axisKey)
-            let n = Double(group.count)
-            let spreadXZ = axisKey == "body" ? 0.26 : 0.08   // organs cluster tight
-            let spreadY  = axisKey == "body" ? 0.55 : 0.09
+            let orr = organRadius[axisKey] ?? 0.1
             for (i, gn) in group.enumerated() {
-                let t = (Double(i) + 0.5) / max(1, n)
                 let ga = Double(i) * 2.399963
-                let rr = spreadXZ * t.squareRoot()
-                let p = v(c.0 + rr * cos(ga),
-                          c.1 + (t - 0.5) * 2 * spreadY,
-                          c.2 - 0.03 + rr * sin(ga) * 0.7)
+                let p: SCNVector3
+                if axisKey == "body" {
+                    let a = bodyAnchors[i % bodyAnchors.count]
+                    p = v(a.0 + cos(ga) * 0.05, a.1 + Double(i / bodyAnchors.count) * -0.06, a.2 + sin(ga) * 0.05)
+                } else {
+                    let t = (Double(i) + 0.5) / Double(max(1, group.count))
+                    let rr = orr * 0.6 * t.squareRoot()
+                    p = v(c.0 + rr * cos(ga), c.1 + (t - 0.5) * orr, c.2 + rr * sin(ga) * 0.7)
+                }
                 pos[gn.id] = p
-                let r = min(0.028, 0.007 + 0.007 * Double(degree[gn.id] ?? 0).squareRoot())  // grows with connections
+                let r = min(0.026, 0.007 + 0.006 * Double(degree[gn.id] ?? 0).squareRoot())  // grows with connections
                 let s = ball(r); s.segmentCount = 12
                 let m = SCNMaterial(); m.lightingModel = .constant
                 let col = color(gn.axis); m.diffuse.contents = col; m.emission.contents = col
-                m.emission.intensity = 0.55; m.transparency = 0.9
+                m.emission.intensity = 0.6; m.transparency = 0.88
                 s.materials = [m]
                 let node = SCNNode(geometry: s); node.position = p; node.renderingOrder = 12
                 figure.addChildNode(node)
