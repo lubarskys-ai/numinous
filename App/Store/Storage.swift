@@ -7,6 +7,18 @@ struct StoredData: Codable {
     var axes: [Axis]
     /// Bumped when a one-time data migration runs (nil = pre-versioning / 0).
     var schemaVersion: Int? = nil
+    /// Reflections already shown, so the app varies them and can reference the
+    /// past ("last month your Heart was quiet"). Optional = backward-compatible.
+    var reflections: [ReflectionRecord]? = nil
+}
+
+/// A reflection the app has surfaced. `signature` ties back to the grounding
+/// `Observation` so we don't repeat one too soon and can notice when it changes.
+struct ReflectionRecord: Codable, Identifiable, Equatable {
+    var id: String { signature + date.timeIntervalSinceReferenceDate.description }
+    var signature: String
+    var text: String
+    var date: Date
 }
 
 /// Local-first persistence. For this model iteration everything is one JSON file

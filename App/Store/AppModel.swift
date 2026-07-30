@@ -57,6 +57,7 @@ final class AppModel: ObservableObject {
         self.folders = f
         self.notes = n
         self.axes = a
+        self.reflectionLog = loaded?.reflections ?? []
         self.readwiseToken = UserDefaults.standard.string(forKey: Self.readwiseTokenKey)
         self.score = ScoreEngine().score(notes: n, folders: f, axes: a)
         if loaded == nil || didMigrate || version < Self.schemaVersion {
@@ -556,7 +557,37 @@ final class AppModel: ObservableObject {
 
     private func persist() {
         score = engine.score(notes: notes, folders: folders, axes: axes)
-        storage.save(StoredData(notes: notes, folders: folders, axes: axes, schemaVersion: Self.schemaVersion))
+        storage.save(StoredData(notes: notes, folders: folders, axes: axes,
+                                schemaVersion: Self.schemaVersion, reflections: reflectionLog))
+    }
+
+    // MARK: - Reflections (the app noticing things about your web)
+
+    /// Log of reflections already surfaced — drives variation + continuity.
+    @Published private(set) var reflectionLog: [ReflectionRecord] = []
+    private let reflectionEngine = ReflectionEngine()
+    /// Don't repeat the same observation within this window.
+    private static let reflectionCooldown: TimeInterval = 6 * 24 * 3600
+
+    /// The reflection to show right now, if any: the most resonant grounded
+    /// observation not surfaced within the cooldown, phrased warmly. Returns nil
+    /// when there's nothing new worth saying (the app stays quiet rather than
+    /// repeating itself).
+    func currentReflection(now: Date = Date()) -> ReflectionRecord? {
+        let recent = Set(reflectionLog
+            .filter { now.timeIntervalSince($0.date) < Self.reflectionCooldown }
+            .map(\.signature))
+        let observations = reflectionEngine.observe(notes: notes, folders: folders, axes: axes, result: score)
+        guard let pick = observations.first(where: { !recent.contains($0.signature) }) else { return nil }
+        let text = ReflectionPhrasing.text(for: pick, axes: axes, notes: notes, history: reflectionLog)
+        return ReflectionRecord(signature: pick.signature, text: text, date: now)
+    }
+
+    /// Mark a reflection as seen so the next one can surface next time.
+    func acknowledgeReflection(_ record: ReflectionRecord) {
+        reflectionLog.append(record)
+        if reflectionLog.count > 50 { reflectionLog.removeFirst(reflectionLog.count - 50) }
+        persist()
     }
 
     /// Edit a note's markdown body. Engaging a dormant/imported note (writing

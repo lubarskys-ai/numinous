@@ -230,4 +230,37 @@ h.group("Connection complexity (bridging more axes grows more)") {
     h.eq(same.rawTotals.points("body"), 25, "same-axis links earn no breadth (base 20 + edge 5)")
 }
 
+h.group("Reflection engine (grounded observations)") {
+    let engine = ScoreEngine()
+    let reflect = ReflectionEngine()
+    let axes = Axis.defaultSet
+
+    // Sam is a crossroads: linked from a Body note, a Mind note, and a diary note.
+    let golf = Note(title: "sport/Golf", date: day(1), body: "[[people/Sam]] and [[books/Atomic Habits]]", intensity: 3, sessionID: "s")
+    let read = Note(title: "books/Atomic Habits", date: day(1), body: "[[people/Sam]]", intensity: 3, sessionID: "s")
+    let jrnl = Note(title: "diary/Evening", date: day(1), body: "grateful for [[people/Sam]]", intensity: 3, sessionID: "s")
+    let sam  = Note(title: "people/Sam", date: day(1), intensity: 3, sessionID: "s")
+    let notes = [golf, read, jrnl, sam]
+    let result = engine.score(notes: notes, folders: allFolders, axes: axes)
+    let obs = reflect.observe(notes: notes, folders: allFolders, axes: axes, result: result)
+
+    h.check(!obs.isEmpty, "produces at least one observation")
+    h.check(obs.contains { $0.kind == .hub && $0.noteTitles.contains("people/Sam") },
+            "spots the hub note (Sam)")
+    h.check(obs.contains { $0.kind == .firstBridge }, "spots a fresh axis bridge")
+
+    // Observations are grounded: an empty graph says nothing.
+    let empty = reflect.observe(notes: [], folders: allFolders, axes: axes,
+                                result: engine.score(notes: [], folders: allFolders, axes: axes))
+    h.check(empty.isEmpty, "no graph → no observations (never invents)")
+
+    // A dormant note contributes no hub/observation weight.
+    let stub = Note(title: "people/Ghost", intensity: 3, isStub: true)
+    let withStub = notes + [stub]
+    let obs2 = reflect.observe(notes: withStub, folders: allFolders, axes: axes,
+                               result: engine.score(notes: withStub, folders: allFolders, axes: axes))
+    h.check(!obs2.contains { $0.noteTitles.contains("people/Ghost") },
+            "dormant notes don't drive reflections")
+}
+
 exit(Int32(h.summarize()))
