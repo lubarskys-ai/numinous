@@ -8,6 +8,7 @@ struct AvatarView: View {
     @EnvironmentObject var model: AppModel
     @State private var path: [UUID] = []
     @State private var reflection: ReflectionRecord?
+    @State private var show3D = false
 
     var body: some View {
         let balance = model.score.axisBalance(over: model.axes)
@@ -26,6 +27,13 @@ struct AvatarView: View {
             }
             .navigationTitle("Numinous")
             .navigationDestination(for: UUID.self) { id in NoteDetailView(noteID: id) }
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { show3D = true } label: { Image(systemName: "rotate.3d") }
+                        .accessibilityLabel("3D preview")
+                }
+            }
+            .sheet(isPresented: $show3D) { Avatar3DScreen() }
             .onAppear { if reflection == nil { reflection = model.currentReflection() } }
         }
     }

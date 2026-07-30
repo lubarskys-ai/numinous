@@ -61,6 +61,7 @@ final class AppModel: ObservableObject {
         if version < 1, Self.migrateContactsToDormantMarkdown(&n) { didMigrate = true }
         if version < 2, Self.migrateDiaryUnderNotes(&n, &f) { didMigrate = true }
         if version < 3, Self.migrateAddMeaningAxis(&a) { didMigrate = true }
+        if version < 4, Self.migrateAddGutAxis(&a) { didMigrate = true }
 
         self.folders = f
         self.notes = n
@@ -73,7 +74,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    static let schemaVersion = 3
+    static let schemaVersion = 4
 
     /// One-time (v3): add the right-brain `meaning` axis to installs that stored
     /// the original four, placing it just after `mind` (its left-brain twin).
@@ -83,6 +84,18 @@ final class AppModel: ObservableObject {
             axes.insert(.meaning, at: mindIndex + 1)
         } else {
             axes.append(.meaning)
+        }
+        return true
+    }
+
+    /// One-time (v4): add the `gut` (gut-biome) axis, placed just after `body`
+    /// (its fellow physical axis; fed by nutrition data via HealthKit).
+    private static func migrateAddGutAxis(_ axes: inout [Axis]) -> Bool {
+        guard !axes.contains(where: { $0.id == "gut" }) else { return false }
+        if let bodyIndex = axes.firstIndex(where: { $0.id == "body" }) {
+            axes.insert(.gut, at: bodyIndex + 1)
+        } else {
+            axes.append(.gut)
         }
         return true
     }

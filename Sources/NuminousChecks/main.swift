@@ -165,6 +165,7 @@ h.group("Folder axis classifier") {
         Folder(name: "gym",     category: "Fitness",   axisID: "body"),
         Folder(name: "family",  category: "Relationships", axisID: "heart"),
         Folder(name: "poetry",  category: "Meaning",   axisID: "meaning"),
+        Folder(name: "meals",   category: "Nutrition", axisID: "gut"),
     ]
     if case let .suggest(axisID, confidence) = classifier.suggestAxis(forNewFolderNamed: "courses-advanced", existingFolders: existing, axes: axes) {
         h.eq(axisID, "mind", "'courses-advanced' suggested onto Mind (matches 'courses')")

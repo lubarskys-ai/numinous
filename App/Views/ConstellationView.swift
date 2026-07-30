@@ -90,7 +90,8 @@ struct ConstellationView: View {
         case "meaning": return CGPoint(x: 111, y: 40)   // right brain
         case "heart": return CGPoint(x: 100, y: 104)
         case "body": return CGPoint(x: 100, y: 210)
-        case "spirit": return CGPoint(x: 100, y: 150)   // core
+        case "spirit": return CGPoint(x: 100, y: 145)   // core
+        case "gut": return CGPoint(x: 100, y: 170)      // belly
         default: return CGPoint(x: 100, y: 150)
         }
     }
@@ -137,7 +138,9 @@ struct ConstellationView: View {
         body.addPath(rect(92, 56, 16, 16))             // neck
         region(body, "body")
         // spirit: the core
-        region(ellipse(100, 150, 22, 24).path, "spirit")
+        region(ellipse(100, 145, 22, 20).path, "spirit")
+        // gut: the belly
+        region(ellipse(100, 170, 24, 16).path, "gut")
         // heart: chest
         region(ellipse(100, 104, 36, 32).path, "heart")
         // bicameral brain: mind (left hemisphere) + meaning (right hemisphere)
