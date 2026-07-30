@@ -121,6 +121,10 @@ struct Avatar3DView: UIViewRepresentable {
         // Place each note as a point of light, spread evenly through its region
         // (Body drapes across the whole figure) and varied in depth so the web
         // fills the body rather than clustering at the centre.
+        // How many links touch each note → hubs are drawn a little larger.
+        var degree: [UUID: Int] = [:]
+        for e in links { degree[e.a, default: 0] += 1; degree[e.b, default: 0] += 1 }
+
         var pos: [UUID: SCNVector3] = [:]
         for (axisKey, group) in Dictionary(grouping: nodes, by: { $0.axis }) {
             let c = region(axisKey)
@@ -135,27 +139,29 @@ struct Avatar3DView: UIViewRepresentable {
                           c.1 + (t - 0.5) * 2 * spreadY,
                           c.2 - 0.03 + rr * sin(ga) * 0.7)
                 pos[gn.id] = p
-                let s = ball(0.014); s.segmentCount = 12          // small, soft synapse
+                let r = min(0.028, 0.007 + 0.007 * Double(degree[gn.id] ?? 0).squareRoot())  // grows with connections
+                let s = ball(r); s.segmentCount = 12
                 let m = SCNMaterial(); m.lightingModel = .constant
                 let col = color(gn.axis); m.diffuse.contents = col; m.emission.contents = col
-                m.emission.intensity = 0.7; m.transparency = 0.92
+                m.emission.intensity = 0.55; m.transparency = 0.9
                 s.materials = [m]
                 let node = SCNNode(geometry: s); node.position = p; node.renderingOrder = 12
                 figure.addChildNode(node)
             }
         }
 
-        // Links as faint neural threads, with a bright signal travelling along each.
+        // Links as faint neural threads. Only cross-axis links carry a small, dim,
+        // slow travelling signal — a whisper of activity, not a light show.
         for e in links {
             guard let a = pos[e.a], let b = pos[e.b] else { continue }
             let col = e.cross ? UIColor(red: 0.6, green: 0.85, blue: 1.0, alpha: 1) : UIColor(white: 0.8, alpha: 1)
             let dx = Double(b.x - a.x), dy = Double(b.y - a.y), dz = Double(b.z - a.z)
             let dist = (dx * dx + dy * dy + dz * dz).squareRoot()
-            let cyl = SCNCylinder(radius: e.cross ? 0.0022 : 0.0014, height: CGFloat(dist))
+            let cyl = SCNCylinder(radius: e.cross ? 0.0017 : 0.0011, height: CGFloat(dist))
             cyl.radialSegmentCount = 5
             let m = SCNMaterial(); m.lightingModel = .constant
             m.diffuse.contents = col; m.emission.contents = col
-            m.emission.intensity = e.cross ? 0.5 : 0.28; m.transparency = 0.5
+            m.emission.intensity = e.cross ? 0.38 : 0.2; m.transparency = 0.4
             cyl.materials = [m]
             let mid = v((Double(a.x) + Double(b.x)) / 2, (Double(a.y) + Double(b.y)) / 2, (Double(a.z) + Double(b.z)) / 2)
             let node = SCNNode(geometry: cyl); node.position = mid
@@ -163,17 +169,18 @@ struct Avatar3DView: UIViewRepresentable {
             node.renderingOrder = 11
             figure.addChildNode(node)
 
-            // Travelling signal (neural firing) — staggered so they ripple.
-            let signal = ball(0.016); signal.segmentCount = 10
-            let sm = SCNMaterial(); sm.lightingModel = .constant
-            sm.diffuse.contents = col; sm.emission.contents = col; sm.emission.intensity = 1.4
-            signal.materials = [sm]
-            let pulse = SCNNode(geometry: signal); pulse.position = a; pulse.renderingOrder = 13
-            let dur = Double.random(in: 1.8...3.4)
-            let travel = SCNAction.sequence([.move(to: b, duration: dur), .move(to: a, duration: 0)])
-            pulse.opacity = 0.9
-            pulse.runAction(.sequence([.wait(duration: Double.random(in: 0...3)), .repeatForever(travel)]))
-            figure.addChildNode(pulse)
+            if e.cross {
+                let signal = ball(0.009); signal.segmentCount = 10
+                let sm = SCNMaterial(); sm.lightingModel = .constant
+                sm.diffuse.contents = col; sm.emission.contents = col; sm.emission.intensity = 0.9
+                signal.materials = [sm]
+                let pulse = SCNNode(geometry: signal); pulse.position = a; pulse.renderingOrder = 13
+                pulse.opacity = 0.7
+                let dur = Double.random(in: 3.0...5.5)
+                let travel = SCNAction.sequence([.move(to: b, duration: dur), .move(to: a, duration: 0)])
+                pulse.runAction(.sequence([.wait(duration: Double.random(in: 0...5)), .repeatForever(travel)]))
+                figure.addChildNode(pulse)
+            }
         }
 
         // No auto-spin: hold still so you can drag to rotate and pinch to zoom in
