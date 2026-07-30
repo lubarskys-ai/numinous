@@ -16,16 +16,21 @@ public struct Folder: Identifiable, Hashable, Codable, Sendable {
     public var name: String
     public var category: String
     public var axisID: String?
+    /// Default intensity for notes created in this folder (nil = neutral 3).
+    /// Lets a "type" of note carry its own weight — a quick-capture folder can
+    /// default low, a deep-reflection folder high.
+    public var defaultIntensity: Int?
 
-    public init(id: String, name: String, category: String, axisID: String? = nil) {
+    public init(id: String, name: String, category: String, axisID: String? = nil, defaultIntensity: Int? = nil) {
         self.id = id
         self.name = name
         self.category = category
         self.axisID = axisID
+        self.defaultIntensity = defaultIntensity
     }
 
-    public init(name: String, category: String, axisID: String? = nil) {
-        self.init(id: Folder.normalize(name), name: name, category: category, axisID: axisID)
+    public init(name: String, category: String, axisID: String? = nil, defaultIntensity: Int? = nil) {
+        self.init(id: Folder.normalize(name), name: name, category: category, axisID: axisID, defaultIntensity: defaultIntensity)
     }
 
     /// Lowercased, trimmed key used to match a note's folder path to a folder.
