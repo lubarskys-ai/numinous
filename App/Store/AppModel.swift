@@ -238,13 +238,18 @@ final class AppModel: ObservableObject {
                     if item.isDormant { notes[i].isStub = true }
                 }
                 updated += 1
-            } else if let i = notes.firstIndex(where: { Self.norm($0.title) == Self.norm(title) }) {
-                // A hand-made note with this title already exists — adopt it rather than duplicate.
-                if notes[i].origin == nil { notes[i].origin = item.origin }
+            } else if let i = notes.firstIndex(where: { Self.norm($0.title) == Self.norm(title) && $0.origin == nil }) {
+                // Adopt a *hand-made* note with this title rather than duplicate it.
+                notes[i].origin = item.origin
                 notes[i].details = Self.mergeDetails(notes[i].details, item.details)
                 updated += 1
             } else {
-                notes.append(Note(title: title, date: item.date, body: item.body,
+                // Disambiguate if a *different* origin already holds this title.
+                var uniqueTitle = title, n = 2
+                while notes.contains(where: { Self.norm($0.title) == Self.norm(uniqueTitle) }) {
+                    uniqueTitle = "\(title) (\(n))"; n += 1
+                }
+                notes.append(Note(title: uniqueTitle, date: item.date, body: item.body,
                                   intensity: item.intensity, details: item.details,
                                   origin: item.origin, isStub: item.isDormant))
                 added += 1
@@ -278,25 +283,26 @@ final class AppModel: ObservableObject {
     /// the body carries the date, location, and [[people/…]] links for attendees.
     /// Returns the note id so the UI can open it. Idempotent by event id.
     func createNote(from event: CalendarEvent) -> UUID? {
-        let folder = event.calendarTitle.replacingOccurrences(of: "/", with: "-").trimmingCharacters(in: .whitespaces)
         let name = event.title.replacingOccurrences(of: "/", with: "-").trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty, !folder.isEmpty else { return nil }
+        guard !name.isEmpty else { return nil }
 
         let df = DateFormatter()
         df.dateStyle = .medium
         df.timeStyle = event.isAllDay ? .none : .short
         var lines = [df.string(from: event.start)]
         if let location = event.location, !location.isEmpty { lines.append("📍 \(location)") }
+        lines.append("🗓 \(event.calendarTitle)")
         let people = event.attendees
             .map { $0.replacingOccurrences(of: "/", with: "-") }
             .filter { !$0.isEmpty }
             .map { "[[people/\($0)]]" }
         if !people.isEmpty { lines.append("With " + people.joined(separator: ", ")) }
 
+        // All calendar events are a kind of note → filed under notes/calendar.
         let item = ImportedItem(
-            folder: folder, name: name, body: lines.joined(separator: "\n"), date: event.start,
+            folder: "notes/calendar", name: name, body: lines.joined(separator: "\n"), date: event.start,
             origin: NoteOrigin(source: "calendar", externalID: event.id),
-            folderCategory: folder, folderAxisID: nil, isDormant: false
+            folderCategory: "Calendar", folderAxisID: nil, isDormant: false
         )
         ingest([item])
         return notes.first { $0.origin?.source == "calendar" && $0.origin?.externalID == event.id }?.id

@@ -80,7 +80,7 @@ struct LinkingEditor: View {
         if hasMatches { Divider() }
         if raw.contains("/") {
             Button { controller.insert(raw) } label: {
-                Label("Create \(raw)", systemImage: "plus.circle").padding(10)
+                Label("Create note \(raw)", systemImage: "folder.badge.plus").padding(10)
             }
             .buttonStyle(.plain)
         } else {
