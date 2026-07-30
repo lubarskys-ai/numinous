@@ -1,22 +1,24 @@
 import SwiftUI
+import UIKit
 import NuminousCore
 
-/// The Avatar tab: just the figure, woven from your connection constellation —
-/// the avatar speaks for itself. Tap a node (a note) to open it. A gentle
-/// "Numinous noticed…" reflection may sit beneath it.
+/// The Avatar tab: the 3D figure itself — grey when young, taking on each axis's
+/// color as it matures. Drag to rotate, pinch to zoom. A gentle "Numinous
+/// noticed…" reflection may sit beneath it.
 struct AvatarView: View {
     @EnvironmentObject var model: AppModel
-    @State private var path: [UUID] = []
     @State private var reflection: ReflectionRecord?
-    @State private var show3D = false
 
     var body: some View {
         let balance = model.score.axisBalance(over: model.axes)
 
-        NavigationStack(path: $path) {
+        NavigationStack {
             VStack(spacing: 12) {
-                ConstellationView(onTapNote: { path.append($0) })
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Avatar3DView(
+                    color: { UIColor(model.axis(id: $0)?.color ?? .gray) },
+                    growth: { min(1, model.score.revealedTotals.points($0) / 150) }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 if let reflection {
                     reflectionCard(reflection, tint: dominantColor(balance))
@@ -26,14 +28,6 @@ struct AvatarView: View {
                 }
             }
             .navigationTitle("Numinous")
-            .navigationDestination(for: UUID.self) { id in NoteDetailView(noteID: id) }
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button { show3D = true } label: { Image(systemName: "rotate.3d") }
-                        .accessibilityLabel("3D preview")
-                }
-            }
-            .sheet(isPresented: $show3D) { Avatar3DScreen() }
             .onAppear { if reflection == nil { reflection = model.currentReflection() } }
         }
     }
