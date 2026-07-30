@@ -30,6 +30,7 @@ struct FoldersView: View {
     @EnvironmentObject var model: AppModel
     @State private var showSettings = false
     @State private var showCompose = false
+    @State private var showReadwise = false
     @State private var composePrefill: String?
     @State private var importMessage: String?
 
@@ -53,14 +54,19 @@ struct FoldersView: View {
                         Button { composePrefill = "notes/diary/" + NotesView.stamp(); showCompose = true } label: { Label("Diary entry", systemImage: "calendar.badge.plus") }
                         Divider()
                         Button { importContacts() } label: { Label("Import contacts", systemImage: "person.crop.circle.badge.plus") }
+                        Button { showReadwise = true } label: { Label("Import from Readwise", systemImage: "books.vertical") }
+                        #if DEBUG
+                        Button { let (a, u) = model.importReadwise(ReadwiseService.sampleBooks); importMessage = "Readwise (sample): \(a) new, \(u) updated." } label: { Label("Readwise sample (debug)", systemImage: "ladybug") }
+                        #endif
                     } label: {
                         Image(systemName: "plus")
                     }
                 }
             }
             .sheet(isPresented: $showCompose) { ComposeView(prefillTitle: composePrefill) }
+            .sheet(isPresented: $showReadwise) { ReadwiseConnectView() }
             .sheet(isPresented: $showSettings) { AxisSettingsView() }
-            .alert("Contacts", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
+            .alert("Import", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(importMessage ?? "") }
         }

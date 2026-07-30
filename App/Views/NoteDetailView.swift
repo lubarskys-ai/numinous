@@ -15,6 +15,7 @@ struct NoteDetailView: View {
         if let note = model.note(id: noteID) {
             List {
                 Section {
+                    if note.origin?.source == "readwise" { bookHeader(note) }
                     if let folder = model.folder(named: note.folderName) {
                         HStack {
                             Circle().fill(model.axis(id: folder.axisID)?.color ?? .gray).frame(width: 9, height: 9)
@@ -30,7 +31,18 @@ struct NoteDetailView: View {
                     if let loc = note.location, !loc.isEmpty {
                         LabeledContent("Location", value: loc)
                     }
-                    if note.isStub {
+                    if note.origin?.source == "readwise" {
+                        Toggle(isOn: Binding(get: { !note.isStub },
+                                             set: { model.setFinished(note.id, $0) })) {
+                            Label(note.isStub ? "Mark as finished" : "Finished reading",
+                                  systemImage: note.isStub ? "book.closed" : "checkmark.seal.fill")
+                        }
+                        .tint(.green)
+                        if note.isStub {
+                            Text("A book grows Mind only once you finish it.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } else if note.isStub {
                         Label("Dormant — write about them or add a [[link]] to start growing.",
                               systemImage: "moon.zzz")
                             .font(.caption).foregroundStyle(.secondary)
@@ -71,6 +83,8 @@ struct NoteDetailView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
+                // A book already has its cover; no photo picker needed.
+                if note.origin?.source != "readwise" {
                 Section("Photos") {
                     let photos = note.photos ?? []
                     if !photos.isEmpty {
@@ -100,6 +114,7 @@ struct NoteDetailView: View {
                     PhotosPicker(selection: $photoItem, matching: .images) {
                         Label("Add photo", systemImage: "photo.badge.plus")
                     }
+                }
                 }
 
                 Section("Links to") {
@@ -168,5 +183,41 @@ struct NoteDetailView: View {
             Circle().fill(model.axis(for: note)?.color ?? Color.gray.opacity(0.4)).frame(width: 8, height: 8)
             Text(note.title)
         }
+    }
+
+    /// Cover + author + highlight count for an imported book (Readwise metadata).
+    @ViewBuilder
+    private func bookHeader(_ note: Note) -> some View {
+        let author = note.details.first { $0.key == "Author" }?.value
+        let cover = note.details.first { $0.key == "Cover" }?.value
+        let highlightCount = note.body.split(separator: "\n").filter { $0.hasPrefix("> ") }.count
+        HStack(spacing: 14) {
+            Group {
+                if let cover, let url = URL(string: cover) {
+                    AsyncImage(url: url) { image in
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        Color.secondary.opacity(0.12)
+                    }
+                } else {
+                    Color.secondary.opacity(0.12)
+                        .overlay(Image(systemName: "book.closed").foregroundStyle(.secondary))
+                }
+            }
+            .frame(width: 58, height: 84)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.black.opacity(0.08)))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(note.displayName).font(.headline)
+                if let author { Text("by \(author)").font(.subheadline).foregroundStyle(.secondary) }
+                if highlightCount > 0 {
+                    Label("\(highlightCount) highlights", systemImage: "quote.opening")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 4)
     }
 }

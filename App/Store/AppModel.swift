@@ -57,6 +57,7 @@ final class AppModel: ObservableObject {
         self.folders = f
         self.notes = n
         self.axes = a
+        self.readwiseToken = UserDefaults.standard.string(forKey: Self.readwiseTokenKey)
         self.score = ScoreEngine().score(notes: n, folders: f, axes: a)
         if loaded == nil || didMigrate || version < Self.schemaVersion {
             storage.save(StoredData(notes: n, folders: f, axes: a, schemaVersion: Self.schemaVersion))
@@ -339,6 +340,106 @@ final class AppModel: ObservableObject {
         return ingest(items)
     }
 
+    /// Import Readwise books (Kindle + others) into type folders under Mind,
+    /// idempotent by `user_book_id`. Highlights — and any `[[link]]` inside them —
+    /// go into the body verbatim so they become real connections. Intensity is
+    /// graded per book (type + engagement + genre); the folder carries the type's
+    /// base as its default so new same-type notes inherit it.
+    @discardableResult
+    func importReadwise(_ books: [ReadwiseBook]) -> (added: Int, updated: Int) {
+        let items: [ImportedItem] = books.compactMap { book in
+            let title = (book.title ?? book.readableTitle)?
+                .replacingOccurrences(of: "/", with: "-")
+                .trimmingCharacters(in: .whitespaces)
+            guard let title, !title.isEmpty else { return nil }
+            let folder = ReadwiseService.folder(book.category)
+            var details: [NoteDetail] = []
+            if let author = book.author?.trimmingCharacters(in: .whitespaces), !author.isEmpty {
+                details.append(NoteDetail(key: "Author", value: author))
+            }
+            if let cover = book.coverImageUrl?.trimmingCharacters(in: .whitespaces), !cover.isEmpty {
+                details.append(NoteDetail(key: "Cover", value: cover))
+            }
+            return ImportedItem(
+                folder: folder, name: title, body: Self.readwiseBody(book),
+                details: details,
+                date: Self.readwiseDate(book),
+                intensity: ReadwiseService.intensity(for: book),
+                origin: NoteOrigin(source: "readwise", externalID: String(book.userBookId)),
+                folderCategory: "Ideas", folderAxisID: "mind",
+                // A book grows you only once you've *finished* it — import dormant
+                // (zero growth) and let the reader mark it finished. Volume of an
+                // unread library must not inflate Mind.
+                isDormant: true
+            )
+        }
+        let result = ingest(items)
+        // Let the type's base intensity be the folder default (retunable per-folder).
+        for category in Set(books.map { $0.category ?? "books" }) {
+            let folder = ReadwiseService.folder(category)
+            if self.folder(named: folder)?.defaultIntensity == nil {
+                setFolderIntensity(ReadwiseService.typeBase(category), forFolder: folder)
+            }
+        }
+        return result
+    }
+
+    /// Date a book by its most recent highlight, so it lands in your timeline when
+    /// you actually read it (making "around this time" suggestions meaningful).
+    /// Falls back to now when no highlight carries a timestamp.
+    private static let readwiseDateFormatter = ISO8601DateFormatter()
+    private static func readwiseDate(_ book: ReadwiseBook) -> Date {
+        let dates = (book.highlights ?? []).compactMap { h -> Date? in
+            guard let stamp = h.highlightedAt else { return nil }
+            return readwiseDateFormatter.date(from: stamp)
+        }
+        return dates.max() ?? Date()
+    }
+
+    /// Markdown body for a Readwise book: summary, then each highlight as a
+    /// blockquote with your note beneath it (links preserved as written). Author
+    /// and cover live in the note's metadata, not the body.
+    private static func readwiseBody(_ book: ReadwiseBook) -> String {
+        var lines: [String] = []
+        if let summary = book.summary?.trimmingCharacters(in: .whitespaces), !summary.isEmpty {
+            lines.append(summary)
+        }
+        let highlights = (book.highlights ?? []).sorted { ($0.location ?? 0) < ($1.location ?? 0) }
+        if !highlights.isEmpty {
+            lines.append("")
+            for h in highlights {
+                let text = (h.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let note = h.note?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                guard !text.isEmpty || !note.isEmpty else { continue }
+                if !text.isEmpty { lines.append("> \(text)") }
+                // Your own annotation on the highlight, tied to it (links preserved).
+                if !note.isEmpty { lines.append("📝 \(note)") }
+                lines.append("")
+            }
+        }
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - Readwise connection
+
+    /// The saved Readwise access token (nil until the user connects). Stored in
+    /// UserDefaults for now — fine for a personal build; move to Keychain before
+    /// shipping since it's a credential.
+    @Published private(set) var readwiseToken: String?
+    private static let readwiseTokenKey = "readwise_token"
+
+    var isReadwiseConnected: Bool { !(readwiseToken ?? "").isEmpty }
+
+    func setReadwiseToken(_ token: String?) {
+        let trimmed = token?.trimmingCharacters(in: .whitespacesAndNewlines)
+        readwiseToken = (trimmed?.isEmpty == false) ? trimmed : nil
+        if let readwiseToken {
+            UserDefaults.standard.set(readwiseToken, forKey: Self.readwiseTokenKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.readwiseTokenKey)
+        }
+    }
+
     /// Create (or re-open) a note from a calendar event. Filed under a folder
     /// named after the event's calendar (so multiple calendars become folders);
     /// the body carries the date, location, and [[people/…]] links for attendees.
@@ -463,10 +564,20 @@ final class AppModel: ObservableObject {
     func updateBody(_ id: UUID, body: String) {
         guard let i = notes.firstIndex(where: { $0.id == id }) else { return }
         notes[i].body = body
-        notes[i].isStub = false
+        // Editing a note engages it — except a Readwise book, which counts only
+        // once you mark it finished (adding links to highlights mustn't do it).
+        if notes[i].origin?.source != "readwise" { notes[i].isStub = false }
         for target in notes[i].linkTargets where !noteExists(titled: target) {
             notes.append(Note(title: target, date: notes[i].date, isStub: true))
         }
+        persist()
+    }
+
+    /// Mark a book finished (or un-finish it). A finished book leaves dormancy and
+    /// starts counting — base credit plus any cross-axis links in its highlights.
+    func setFinished(_ id: UUID, _ finished: Bool) {
+        guard let i = notes.firstIndex(where: { $0.id == id }) else { return }
+        notes[i].isStub = !finished
         persist()
     }
 
