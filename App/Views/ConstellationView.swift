@@ -86,10 +86,11 @@ struct ConstellationView: View {
     /// Anchor per axis in design space (where that axis's nodes cluster).
     private func anchor(_ axisID: String) -> CGPoint {
         switch axisID {
-        case "mind": return CGPoint(x: 100, y: 40)
+        case "mind": return CGPoint(x: 89, y: 40)       // left brain
+        case "meaning": return CGPoint(x: 111, y: 40)   // right brain
         case "heart": return CGPoint(x: 100, y: 104)
         case "body": return CGPoint(x: 100, y: 210)
-        case "spirit": return CGPoint(x: 100, y: 150)   // aura / whole-body
+        case "spirit": return CGPoint(x: 100, y: 150)   // core
         default: return CGPoint(x: 100, y: 150)
         }
     }
@@ -123,23 +124,25 @@ struct ConstellationView: View {
             let color = model.axis(id: axisID)?.color ?? .gray
             ctx.fill(path.applying(mapTransform(map)), with: .color(color.opacity(0.12 + 0.35 * fill(axisID))))
         }
-        // aura (spirit)
-        region(ellipse(100, 150, 92, 138).path, "spirit")
-        // body: torso + limbs + hips
+        // Neutral aura backdrop — the whole figure brightens with total growth.
+        let aura = min(0.20, 0.05 + model.score.revealedTotal / 4500)
+        ctx.fill(ellipse(100, 150, 92, 138).path.applying(mapTransform(map)), with: .color(.secondary.opacity(aura)))
+        // body: limbs + hips + neck
         var body = Path()
-        body.addPath(ellipse(100, 178, 30, 26).path)
-        body.addPath(rect(52, 86, 13, 96))
+        body.addPath(ellipse(100, 178, 30, 26).path)   // hips
+        body.addPath(rect(52, 86, 13, 96))             // arms
         body.addPath(rect(135, 86, 13, 96))
-        body.addPath(rect(83, 190, 14, 92))
+        body.addPath(rect(83, 190, 14, 92))            // legs
         body.addPath(rect(103, 190, 14, 92))
+        body.addPath(rect(92, 56, 16, 16))             // neck
         region(body, "body")
+        // spirit: the core
+        region(ellipse(100, 150, 22, 24).path, "spirit")
         // heart: chest
         region(ellipse(100, 104, 36, 32).path, "heart")
-        // mind: head + neck
-        var mind = Path()
-        mind.addPath(ellipse(100, 40, 18, 22).path)
-        mind.addPath(rect(92, 56, 16, 14))
-        region(mind, "mind")
+        // bicameral brain: mind (left hemisphere) + meaning (right hemisphere)
+        region(ellipse(90, 40, 13, 22).path, "mind")
+        region(ellipse(110, 40, 13, 22).path, "meaning")
     }
 
     private func drawEdges(_ ctx: GraphicsContext, placement: Placement, map: (CGPoint) -> CGPoint) {

@@ -20,13 +20,15 @@ public struct Axis: Identifiable, Hashable, Codable, Sendable {
 }
 
 public extension Axis {
-    /// A sensible 4-axis starting set. The brief leaves the exact set open;
-    /// these match its running example (Body / Mind / Heart / Spirit) and are
-    /// fully renamable by the user without touching scoring.
-    static let body   = Axis(id: "body",   name: "Body",   colorHex: "#C4674A")
-    static let mind   = Axis(id: "mind",   name: "Mind",   colorHex: "#4A73C4")
-    static let heart  = Axis(id: "heart",  name: "Heart",  colorHex: "#C44A73")
-    static let spirit = Axis(id: "spirit", name: "Spirit", colorHex: "#8A6DB0")
+    /// The starting set. The brain is bicameral: `mind` is the left hemisphere
+    /// (practical / problem-solving) and `meaning` the right (intuition / the big
+    /// picture). `spirit` stays the core, `heart` the chest, `body` the limbs.
+    /// All fully renamable by the user without touching scoring.
+    static let body    = Axis(id: "body",    name: "Body",    colorHex: "#C4674A")
+    static let mind    = Axis(id: "mind",    name: "Mind",    colorHex: "#4A73C4")
+    static let meaning = Axis(id: "meaning", name: "Meaning", colorHex: "#3E9E8E")
+    static let heart   = Axis(id: "heart",   name: "Heart",   colorHex: "#C44A73")
+    static let spirit  = Axis(id: "spirit",  name: "Spirit",  colorHex: "#8A6DB0")
 
-    static let defaultSet: [Axis] = [.body, .mind, .heart, .spirit]
+    static let defaultSet: [Axis] = [.body, .mind, .meaning, .heart, .spirit]
 }

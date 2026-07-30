@@ -54,12 +54,13 @@ final class AppModel: ObservableObject {
         let loaded = storage.load()
         var f = loaded?.folders.isEmpty == false ? loaded!.folders : SampleData.folders
         var n = loaded?.notes.isEmpty == false ? loaded!.notes : SampleData.notes
-        let a = (loaded?.axes.isEmpty == false) ? loaded!.axes : Axis.defaultSet
+        var a = (loaded?.axes.isEmpty == false) ? loaded!.axes : Axis.defaultSet
 
         let version = loaded?.schemaVersion ?? 0
         var didMigrate = false
         if version < 1, Self.migrateContactsToDormantMarkdown(&n) { didMigrate = true }
         if version < 2, Self.migrateDiaryUnderNotes(&n, &f) { didMigrate = true }
+        if version < 3, Self.migrateAddMeaningAxis(&a) { didMigrate = true }
 
         self.folders = f
         self.notes = n
@@ -72,7 +73,19 @@ final class AppModel: ObservableObject {
         }
     }
 
-    static let schemaVersion = 2
+    static let schemaVersion = 3
+
+    /// One-time (v3): add the right-brain `meaning` axis to installs that stored
+    /// the original four, placing it just after `mind` (its left-brain twin).
+    private static func migrateAddMeaningAxis(_ axes: inout [Axis]) -> Bool {
+        guard !axes.contains(where: { $0.id == "meaning" }) else { return false }
+        if let mindIndex = axes.firstIndex(where: { $0.id == "mind" }) {
+            axes.insert(.meaning, at: mindIndex + 1)
+        } else {
+            axes.append(.meaning)
+        }
+        return true
+    }
 
     /// One-time (v2): make `diary` a subfolder of `notes` (`diary/x` → `notes/diary/x`).
     private static func migrateDiaryUnderNotes(_ notes: inout [Note], _ folders: inout [Folder]) -> Bool {
