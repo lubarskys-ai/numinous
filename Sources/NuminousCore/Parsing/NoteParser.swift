@@ -2,21 +2,12 @@ import Foundation
 
 /// Parses a plain-markdown note with optional YAML frontmatter into a `Note`.
 ///
-/// This is a deliberately small YAML subset — flat `key: value` lines between
-/// `---` fences — which is all the frontmatter this app writes. It is not a
-/// general YAML parser and doesn't try to be.
+/// A deliberately small YAML subset — flat `key: value` lines between `---`
+/// fences — which is all the frontmatter this app writes. The note's folder is
+/// derived from its title path (`people/Sam`), not from frontmatter. Structured
+/// `details` are not represented in markdown; they live in the app's store.
 public enum NoteParser {
 
-    public struct ParseError: Error, CustomStringConvertible {
-        public let message: String
-        public var description: String { message }
-    }
-
-    /// Parse a note.
-    /// - Parameters:
-    ///   - text: full file contents (frontmatter + body).
-    ///   - fallbackTitle: used when no `title:` key is present — typically the
-    ///     filename without extension, matching Obsidian's file-is-title model.
     public static func parse(
         _ text: String,
         fallbackTitle: String,
@@ -25,22 +16,20 @@ public enum NoteParser {
         let (frontmatter, body) = splitFrontmatter(text)
 
         let title = frontmatter["title"] ?? fallbackTitle
-        let categoryName = frontmatter["category"]
-        let categoryID = categoryName.map(Category.slug)
         let date = frontmatter["date"].flatMap(parseDate) ?? Date()
-        let interaction = frontmatter["interaction"].flatMap { InteractionMode(rawValue: normalizeEnum($0)) }
-        let depth = frontmatter["depth"].flatMap { Int($0) }
+        let intensity = frontmatter["intensity"].flatMap { Int($0) }.map { min(5, max(1, $0)) } ?? 3
+        let location = frontmatter["location"]
         let source = frontmatter["source"].flatMap { NoteSource(rawValue: normalizeEnum($0)) } ?? .manual
         let sessionID = frontmatter["session"]
 
         return Note(
             id: id,
             title: title,
-            categoryID: categoryID,
             date: date,
             body: body,
-            interaction: interaction,
-            depth: depth,
+            intensity: intensity,
+            location: location,
+            details: [],
             source: source,
             sessionID: sessionID,
             isStub: false
@@ -49,10 +38,7 @@ public enum NoteParser {
 
     // MARK: - Frontmatter
 
-    /// Splits leading `---`-fenced frontmatter from the body.
-    /// Returns (`key: value` map, remaining body). No fence → empty map, whole text as body.
     static func splitFrontmatter(_ text: String) -> ([String: String], String) {
-        // Normalize line endings so \r\n files parse identically.
         let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
         let lines = normalized.components(separatedBy: "\n")
 
@@ -76,10 +62,7 @@ public enum NoteParser {
             map[key.lowercased()] = value
         }
 
-        guard let start = bodyStart else {
-            // Unterminated frontmatter — treat the whole thing as body, safest choice.
-            return ([:], text)
-        }
+        guard let start = bodyStart else { return ([:], text) }
         let body = lines[start...].joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return (map, body)
@@ -95,13 +78,8 @@ public enum NoteParser {
     }
 
     private static func normalizeEnum(_ value: String) -> String {
-        // Accept "in-person", "in_person", "inPerson" etc. → matches rawValue "inPerson".
-        let cleaned = value
-            .replacingOccurrences(of: "-", with: " ")
-            .replacingOccurrences(of: "_", with: " ")
-            .lowercased()
+        let cleaned = value.replacingOccurrences(of: "-", with: " ").replacingOccurrences(of: "_", with: " ").lowercased()
         switch cleaned {
-        case "in person": return "inPerson"
         case "healthkit", "health kit": return "healthKit"
         default: return value
         }

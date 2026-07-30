@@ -31,7 +31,6 @@ public struct ScoredLink: Hashable, Sendable {
     public let axisA: String?
     public let axisB: String?
     public let isCrossAxis: Bool
-    public let isInPerson: Bool
     /// Points credited to *each* involved axis. 0 when the link isn't counted.
     public let bonusPerAxis: Double
     /// False when either endpoint is untyped/unmapped (contributes zero growth).

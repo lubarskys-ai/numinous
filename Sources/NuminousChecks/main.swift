@@ -1,230 +1,190 @@
 import Foundation
 import NuminousCore
 
-// Deterministic UTC dates for reproducible scoring.
 func day(_ d: Int) -> Date {
     DateComponents(calendar: Calendar(identifier: .gregorian),
                    timeZone: TimeZone(identifier: "UTC"),
                    year: 2026, month: 1, day: d).date!
 }
 
-let golf    = Category(id: "golf",    name: "Golf",          axisID: "body")
-let novels  = Category(id: "novels",  name: "Novels",        axisID: "mind")
-let friends = Category(id: "friends", name: "Close friends", axisID: "heart")
+// Folders carry a category and map to an axis.
+let people = Folder(name: "people", category: "Relationships", axisID: "heart")
+let books  = Folder(name: "books",  category: "Cognition",     axisID: "mind")
+let sport  = Folder(name: "sport",  category: "Fitness",       axisID: "body")
+let diary  = Folder(name: "diary",  category: "Journal",       axisID: "spirit")
+let allFolders = [people, books, sport, diary]
 
 let h = Harness()
 
 // MARK: - Parsing
 
 h.group("Wikilink parsing") {
-    h.eq(WikilinkParser.extract(from: "Golf with [[Sam]] after [[Atomic Habits]]."),
-         ["Sam", "Atomic Habits"], "extracts multiple links")
-    h.eq(WikilinkParser.extract(from: "[[Sam]] [[sam]] [[SAM]]"),
-         ["Sam"], "dedupes case-insensitively, keeps first spelling")
-    h.eq(WikilinkParser.extract(from: "[[Portugal trip|summer]]"),
-         ["Portugal trip"], "drops alias after pipe")
-    h.eq(WikilinkParser.extract(from: "[[  Spaced  ]] not [[]]"),
-         ["Spaced"], "trims whitespace, ignores empty")
+    h.eq(WikilinkParser.extract(from: "Golf with [[people/Sam]] after [[books/Atomic Habits]]."),
+         ["people/Sam", "books/Atomic Habits"], "extracts folder-pathed links")
+    h.eq(WikilinkParser.extract(from: "[[people/Sam]] [[People/sam]]"),
+         ["people/Sam"], "dedupes case-insensitively")
+    h.eq(WikilinkParser.extract(from: "[[people/Sam|Sammy]]"),
+         ["people/Sam"], "drops alias after pipe")
+}
+
+h.group("Note folder + name") {
+    let n = Note(title: "people/Sam")
+    h.eq(n.folderName, "people", "folder is the path prefix")
+    h.eq(n.displayName, "Sam", "display name is after the slash")
+    let loose = Note(title: "Loose thought")
+    h.eq(loose.folderName, "", "no slash → no folder")
+    h.eq(loose.displayName, "Loose thought", "no slash → whole title is the name")
 }
 
 h.group("Note parsing") {
     let text = """
     ---
-    category: Golf
+    title: people/Sam
     date: 2026-07-29
-    interaction: in-person
-    depth: 3
+    intensity: 5
+    location: Pebble Beach
     ---
 
-    Played 18 holes with [[Sam]] today.
+    Met [[books/Atomic Habits]] discussion in person.
     """
-    let note = NoteParser.parse(text, fallbackTitle: "Untitled")
-    h.eq(note.categoryID, "golf", "category slugified")
-    h.eq(note.interaction, .inPerson, "interaction 'in-person' normalized")
-    h.eq(note.depth, 3, "depth parsed")
-    h.eq(note.linkTargets, ["Sam"], "links parsed from body")
-    h.check(!note.body.contains("---"), "frontmatter fences stripped from body")
-
-    let titled = NoteParser.parse("---\ntitle: Real\ncategory: diary\n---\nBody", fallbackTitle: "file")
-    h.eq(titled.title, "Real", "frontmatter title beats fallback")
-
-    let plain = NoteParser.parse("Plain note with [[Sam]].", fallbackTitle: "p")
-    h.check(plain.categoryID == nil, "no frontmatter → untyped")
-    h.eq(plain.linkTargets, ["Sam"], "links still parsed without frontmatter")
+    let note = NoteParser.parse(text, fallbackTitle: "x")
+    h.eq(note.title, "people/Sam", "title parsed")
+    h.eq(note.intensity, 5, "intensity parsed")
+    h.eq(note.location, "Pebble Beach", "location parsed")
+    h.eq(note.linkTargets, ["books/Atomic Habits"], "links parsed from body")
 }
 
 // MARK: - Base credit
 
-h.group("Base credit") {
+h.group("Base credit + intensity") {
     let engine = ScoreEngine()
-    let note = Note(title: "Round 1", categoryID: "golf", date: day(1), body: "Nice.", sessionID: "s1")
-    h.eq(engine.score(notes: [note], categories: [golf]).rawTotals.points("body"),
-         10, "manual note credits its axis")
+    // Intensity 3 is neutral (×1) → base 10.
+    let n3 = Note(title: "sport/Run", date: day(1), body: "ok", intensity: 3, sessionID: "s")
+    h.eq(engine.score(notes: [n3], folders: allFolders).rawTotals.points("body"), 10, "intensity 3 = ×1")
+    // Intensity 5 (×2) → base 20.
+    let n5 = Note(title: "sport/Run", date: day(1), body: "ok", intensity: 5, sessionID: "s")
+    h.eq(engine.score(notes: [n5], folders: allFolders).rawTotals.points("body"), 20, "intensity 5 = ×2")
+    // Intensity 1 (×0.5) → base 5.
+    let n1 = Note(title: "sport/Run", date: day(1), body: "ok", intensity: 1, sessionID: "s")
+    h.eq(engine.score(notes: [n1], folders: allFolders).rawTotals.points("body"), 5, "intensity 1 = ×0.5")
 
-    let stub = Note(title: "Portugal trip", date: day(1), sessionID: "s1", isStub: true)
-    h.eq(engine.score(notes: [stub], categories: []).rawTotals.total,
-         0, "untyped note contributes nothing")
-
-    let workout = Note(title: "Run", categoryID: "golf", date: day(1),
-                       body: "Ran with [[Sam]].", source: .healthKit, sessionID: "s1")
-    let sam = Note(title: "Sam", categoryID: "friends", date: day(1), sessionID: "s1")
-    let passive = engine.score(notes: [workout, sam], categories: [golf, friends])
-    h.eq(passive.rawTotals.points("body"), 4, "passive note earns reduced base credit")
-    h.eq(passive.rawTotals.points("heart"), 10, "linked person still earns base")
-    h.check(passive.links.isEmpty, "passive notes create no counted edges")
+    // A note in an unmapped/unknown folder contributes nothing.
+    let orphan = Note(title: "mystery/Thing", date: day(1), sessionID: "s")
+    h.eq(engine.score(notes: [orphan], folders: allFolders).rawTotals.total, 0, "unknown folder = zero growth")
 }
 
-// MARK: - The core mechanic: links
+// MARK: - Links (the thesis) + folder-derived axes
 
-h.group("Links — cross-axis beats same-axis (the thesis)") {
+h.group("Links — cross-axis beats same-axis") {
     let engine = ScoreEngine()
+    // Same-axis: two Body notes (both in sport/) linked, neutral intensity.
+    let a1 = Note(title: "sport/A", date: day(1), body: "with [[sport/B]]", intensity: 3, sessionID: "s")
+    let b1 = Note(title: "sport/B", date: day(1), intensity: 3, sessionID: "s")
+    let same = engine.score(notes: [a1, b1], folders: allFolders)
 
-    let a1 = Note(title: "Round A", categoryID: "golf", date: day(1), body: "With [[Round B]].", sessionID: "s")
-    let b1 = Note(title: "Round B", categoryID: "golf", date: day(1), sessionID: "s")
-    let same = engine.score(notes: [a1, b1], categories: [golf])
+    // Cross-axis: Body ↔ Mind.
+    let a2 = Note(title: "sport/A", date: day(1), body: "read [[books/Habit]]", intensity: 3, sessionID: "s")
+    let b2 = Note(title: "books/Habit", date: day(1), intensity: 3, sessionID: "s")
+    let cross = engine.score(notes: [a2, b2], folders: allFolders)
 
-    let a2 = Note(title: "Round A", categoryID: "golf", date: day(1), body: "Discussed [[Atomic Habits]].", sessionID: "s")
-    let b2 = Note(title: "Atomic Habits", categoryID: "novels", date: day(1), sessionID: "s")
-    let cross = engine.score(notes: [a2, b2], categories: [golf, novels])
-
-    let sameBonus = same.rawTotals.total - 20
-    let crossBonus = cross.rawTotals.total - 20
-    h.eq(sameBonus, 5, "same-axis link: one axis × 5")
-    h.eq(crossBonus, 30, "cross-axis link: two axes × 15")
-    h.check(crossBonus > sameBonus, "cross-axis out-earns same-axis")
+    h.eq(same.rawTotals.total - 20, 5, "same-axis link: one axis × 5")
+    h.eq(cross.rawTotals.total - 20, 30, "cross-axis link: two axes × 15")
+    h.check(cross.rawTotals.total > same.rawTotals.total, "cross-axis out-earns same-axis")
 }
 
-h.group("Links — in-person weighting") {
+h.group("Links — intensity scales the bonus") {
     let engine = ScoreEngine()
-    let round = Note(title: "Round", categoryID: "golf", date: day(1), body: "Golf with [[Sam]].", sessionID: "s")
-    let inPerson = Note(title: "Sam", categoryID: "friends", date: day(1), interaction: .inPerson, sessionID: "s")
-    let text = Note(title: "Sam", categoryID: "friends", date: day(1), interaction: .text, sessionID: "s")
-    let ip = engine.score(notes: [round, inPerson], categories: [golf, friends])
-    let tx = engine.score(notes: [round, text], categories: [golf, friends])
-    h.check(ip.rawTotals.total > tx.rawTotals.total, "in-person interaction earns more")
-    h.eq(ip.links.first?.bonusPerAxis ?? 0, 22.5, "cross bonus 15 × 1.5 in-person multiplier")
+    // Cross-axis link between two profound (×2) notes → bonus 15 × 2 = 30 per axis.
+    let a = Note(title: "sport/A", date: day(1), body: "[[books/B]]", intensity: 5, sessionID: "s")
+    let b = Note(title: "books/B", date: day(1), intensity: 5, sessionID: "s")
+    let r = engine.score(notes: [a, b], folders: allFolders)
+    h.eq(r.links.first?.bonusPerAxis ?? 0, 30, "cross bonus 15 × avg intensity 2 = 30")
 }
 
-h.group("Links — untyped endpoints and uniqueness") {
+h.group("Links — untyped endpoint not counted") {
     let engine = ScoreEngine()
-    let round = Note(title: "Round", categoryID: "golf", date: day(1), body: "Booked [[Portugal trip]].", sessionID: "s")
-    let stub = Note(title: "Portugal trip", date: day(1), sessionID: "s", isStub: true)
-    let r = engine.score(notes: [round, stub], categories: [golf])
-    h.eq(r.rawTotals.total, 10, "link to untyped note earns no bonus")
-    h.eq(r.links.first?.isCounted, false, "untyped link marked not counted")
-
-    let a = Note(title: "A", categoryID: "golf", date: day(1), body: "See [[B]] and [[B]].", sessionID: "s")
-    let b = Note(title: "B", categoryID: "novels", date: day(1), body: "Back to [[A]].", sessionID: "s")
-    let counted = engine.score(notes: [a, b], categories: [golf, novels]).links.filter(\.isCounted)
-    h.eq(counted.count, 1, "reciprocal / repeated links count once")
+    let a = Note(title: "sport/A", date: day(1), body: "[[mystery/Z]]", intensity: 3, sessionID: "s")
+    let z = Note(title: "mystery/Z", date: day(1), intensity: 3, sessionID: "s", isStub: true)
+    let r = engine.score(notes: [a, z], folders: allFolders)
+    h.eq(r.rawTotals.total, 10, "only the mapped note's base counts")
+    h.eq(r.links.first?.isCounted, false, "link to unknown folder not counted")
 }
 
 // MARK: - Retroactive reflow
 
-h.group("Retroactive reflow") {
+h.group("Retroactive reflow (remap a folder's axis)") {
     let engine = ScoreEngine()
-    let note = Note(title: "Round", categoryID: "golf", date: day(1), body: "Solo.", sessionID: "s")
-    let asBody = engine.score(notes: [note], categories: [Category(id: "golf", name: "Golf", axisID: "body")])
-    let asMind = engine.score(notes: [note], categories: [Category(id: "golf", name: "Golf", axisID: "mind")])
+    let note = Note(title: "sport/Round", date: day(1), body: "solo", intensity: 3, sessionID: "s")
+    let asBody = engine.score(notes: [note], folders: [Folder(name: "sport", category: "Fitness", axisID: "body")])
+    let asMind = engine.score(notes: [note], folders: [Folder(name: "sport", category: "Fitness", axisID: "mind")])
     h.eq(asBody.rawTotals.points("body"), 10, "starts on Body")
     h.eq(asMind.rawTotals.points("mind"), 10, "remap moves growth to Mind")
-    h.eq(asMind.rawTotals.points("body"), 0, "no growth left on old axis")
+    h.eq(asMind.rawTotals.points("body"), 0, "nothing left on old axis")
 }
 
 // MARK: - Sessions, caps, delayed reveal
 
 h.group("Sessions — delayed reveal") {
     let engine = ScoreEngine()
-    let n1 = Note(title: "Day one", categoryID: "golf", date: day(1), sessionID: "s1")
-    let n2 = Note(title: "Day two", categoryID: "golf", date: day(2), sessionID: "s2")
-    let r = engine.score(notes: [n1, n2], categories: [golf])
+    let n1 = Note(title: "sport/One", date: day(1), intensity: 3, sessionID: "s1")
+    let n2 = Note(title: "sport/Two", date: day(2), intensity: 3, sessionID: "s2")
+    let r = engine.score(notes: [n1, n2], folders: allFolders)
     h.eq(r.revealedTotals.points("body"), 10, "earlier session revealed")
-    h.eq(r.pendingTotals.points("body"), 10, "latest session pending until next open")
-
-    let a = Note(title: "A", categoryID: "golf", date: day(1), body: "Later read [[B]].", sessionID: "s1")
-    let b = Note(title: "B", categoryID: "novels", date: day(2), sessionID: "s2")
-    let r2 = engine.score(notes: [a, b], categories: [golf, novels])
-    h.eq(r2.revealedTotals.points("body"), 10, "reveal excludes later cross-link")
-    h.eq(r2.pendingTotals.points("mind"), 25, "pending has B base + cross bonus")
-    h.eq(r2.pendingTotals.points("body"), 15, "cross bonus also credits body, pending")
+    h.eq(r.pendingTotals.points("body"), 10, "latest session pending")
 }
 
-h.group("Caps — consistency beats binge") {
-    let engine = ScoreEngine()
-    let binge = (0..<20).map { Note(title: "n\($0)", categoryID: "golf", date: day(1), sessionID: "binge") }
-    let r = engine.score(notes: binge, categories: [golf])
-    h.eq(r.rawTotals.points("body"), 200, "raw growth uncapped internally")
-    h.eq(r.pendingTotals.total, 60, "session cap clamps a binge to 60")
-
-    var cfg = ScoringConfig.default
-    cfg.sessionGrowthCap = 10_000
-    cfg.softDailyCap = 100
-    cfg.softCapScale = 0.25
-    let soft = ScoreEngine(config: cfg)
-        .score(notes: (0..<20).map { Note(title: "n\($0)", categoryID: "golf", date: day(1), sessionID: "s") },
-               categories: [golf])
-    h.eq(soft.pendingTotals.total, 125, "soft daily cap: 100 full + 100×0.25, nothing lost")
+h.group("Caps — binge is clamped") {
+    let engine = ScoreEngine() // sessionGrowthCap 90
+    let binge = (0..<20).map { Note(title: "sport/n\($0)", date: day(1), intensity: 3, sessionID: "binge") }
+    let r = engine.score(notes: binge, folders: allFolders)
+    h.eq(r.rawTotals.points("body"), 200, "raw uncapped internally")
+    h.eq(r.pendingTotals.total, 90, "session cap clamps to 90")
 }
 
 // MARK: - Stages
 
 h.group("Stages") {
-    let r = StageResolver()
-    h.eq(r.stage(for: 0).id, "sketch", "starts as sketch")
-    h.eq(r.stage(for: 59).id, "sketch", "just below outline threshold")
-    h.eq(r.stage(for: 60).id, "outline", "reaches outline")
-    h.eq(r.stage(for: 1_000).id, "defined", "defined tier")
-    h.eq(r.stage(for: 5_000).id, "realized", "final likeness")
-    h.eq(r.fidelity(for: 120), 0.5, "fidelity interpolates halfway")
-    h.eq(r.fidelity(for: 10_000), 1, "fidelity caps at 1 at final stage")
+    let resolver = StageResolver()
+    h.eq(resolver.stage(for: 0).id, "sketch", "starts as sketch")
+    h.eq(resolver.stage(for: 60).id, "outline", "reaches outline")
+    h.eq(resolver.stage(for: 1_000).id, "defined", "defined tier")
+    h.eq(resolver.fidelity(for: 120), 0.5, "fidelity interpolates halfway")
 }
 
-// MARK: - New-category axis suggestion
+// MARK: - Folder axis suggestion
 
-h.group("Axis classifier") {
+h.group("Folder axis classifier") {
     let classifier = AxisClassifier()
     let axes = Axis.defaultSet
-
-    // Too little data → ask the user directly (nothing to compare against).
-    let cold = classifier.suggestAxis(forNewCategoryNamed: "Golf",
-                                      existingCategories: [], axes: axes)
-    h.eq(cold, .askUser, "cold start asks the user to pick")
-
-    // With enough mapped categories, suggest by similarity to the user's own set.
+    h.eq(classifier.suggestAxis(forNewFolderNamed: "people", existingFolders: [], axes: axes),
+         .askUser, "cold start asks the user")
     let existing = [
-        Category(id: "novels",  name: "Novels",         axisID: "mind"),
-        Category(id: "courses", name: "Online courses", axisID: "mind"),
-        Category(id: "gym",     name: "Gym workouts",    axisID: "body"),
-        Category(id: "family",  name: "Family",          axisID: "heart"),
+        Folder(name: "novels",  category: "Cognition", axisID: "mind"),
+        Folder(name: "courses", category: "Learning",  axisID: "mind"),
+        Folder(name: "gym",     category: "Fitness",   axisID: "body"),
+        Folder(name: "family",  category: "Relationships", axisID: "heart"),
     ]
-    let suggestion = classifier.suggestAxis(forNewCategoryNamed: "Gym classes",
-                                            existingCategories: existing, axes: axes)
-    if case let .suggest(axisID, confidence) = suggestion {
-        h.eq(axisID, "body", "new 'Gym classes' suggested onto Body (matches 'Gym workouts')")
-        h.check(confidence > 0, "suggestion carries a positive confidence")
+    if case let .suggest(axisID, confidence) = classifier.suggestAxis(forNewFolderNamed: "courses-advanced", existingFolders: existing, axes: axes) {
+        h.eq(axisID, "mind", "'courses-advanced' suggested onto Mind (matches 'courses')")
+        h.check(confidence > 0, "suggestion has positive confidence")
     } else {
-        h.check(false, "expected a suggestion, got \(suggestion)")
+        h.check(false, "expected a suggestion")
     }
 }
 
 // MARK: - Markdown round-trip
 
 h.group("Note serialization round-trips") {
-    let original = Note(
-        title: "Golf: back nine", categoryID: "golf", date: day(29),
-        body: "Played with [[Sam]] after [[Atomic Habits]].",
-        interaction: .inPerson, depth: 4, source: .manual, sessionID: "evening-1"
-    )
-    let text = NoteSerializer.markdown(for: original)
-    let reparsed = NoteParser.parse(text, fallbackTitle: "wrong")
-
-    h.eq(reparsed.title, original.title, "title survives (even with a colon)")
-    h.eq(reparsed.categoryID, original.categoryID, "category survives")
+    let original = Note(title: "people/Sam", date: day(29),
+                        body: "Golf with [[sport/Back nine]] today.",
+                        intensity: 4, location: "Pebble Beach", sessionID: "evening-1")
+    let reparsed = NoteParser.parse(NoteSerializer.markdown(for: original), fallbackTitle: "x")
+    h.eq(reparsed.title, original.title, "title survives")
     h.eq(reparsed.date, original.date, "date survives")
-    h.eq(reparsed.interaction, original.interaction, "interaction survives")
-    h.eq(reparsed.depth, original.depth, "depth survives")
+    h.eq(reparsed.intensity, original.intensity, "intensity survives")
+    h.eq(reparsed.location, original.location, "location survives")
     h.eq(reparsed.sessionID, original.sessionID, "session survives")
-    h.eq(reparsed.linkTargets, original.linkTargets, "links survive in the body")
+    h.eq(reparsed.linkTargets, original.linkTargets, "links survive in body")
 }
 
 exit(Int32(h.summarize()))

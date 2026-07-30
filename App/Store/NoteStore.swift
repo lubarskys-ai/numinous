@@ -63,8 +63,31 @@ final class NoteStore: ObservableObject {
 
     /// Whether a linked title already resolves to an existing note.
     func noteExists(titled title: String) -> Bool {
-        let key = title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        return notes.contains { $0.title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) == key }
+        note(titled: title) != nil
+    }
+
+    func note(id: UUID) -> Note? {
+        notes.first { $0.id == id }
+    }
+
+    func note(titled title: String) -> Note? {
+        let key = Self.normalize(title)
+        return notes.first { Self.normalize($0.title) == key }
+    }
+
+    /// Notes that link *to* the given title (Obsidian-style backlinks). Only
+    /// manual notes carry links, so passive notes never appear here.
+    func backlinks(toTitle title: String, excluding id: UUID) -> [Note] {
+        let key = Self.normalize(title)
+        return notes.filter { note in
+            note.id != id
+                && note.source == .manual
+                && note.linkTargets.contains { Self.normalize($0) == key }
+        }
+    }
+
+    private static func normalize(_ s: String) -> String {
+        s.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: - Mutations
