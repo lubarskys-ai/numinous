@@ -8,6 +8,8 @@ struct NoteDetailView: View {
 
     @State private var newKey = ""
     @State private var newValue = ""
+    @State private var editedBody = ""
+    @State private var loadedBodyFor: UUID?
 
     var body: some View {
         if let note = model.note(id: noteID) {
@@ -28,9 +30,17 @@ struct NoteDetailView: View {
                     if let loc = note.location, !loc.isEmpty {
                         LabeledContent("Location", value: loc)
                     }
-                    if !note.body.isEmpty {
-                        Text(note.body).font(.body)
+                    if note.isStub {
+                        Label("Dormant — write about them or add a [[link]] to start growing.",
+                              systemImage: "moon.zzz")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
+                }
+
+                Section("Note") {
+                    TextEditor(text: $editedBody).frame(minHeight: 120)
+                    Text("Write freely. Link anything with [[double brackets]] — e.g. [[books/Dune]].")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
 
                 Section("Details") {
@@ -90,6 +100,15 @@ struct NoteDetailView: View {
             }
             .navigationTitle(note.displayName)
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                if loadedBodyFor != note.id { editedBody = note.body; loadedBodyFor = note.id }
+            }
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { model.updateBody(note.id, body: editedBody) }
+                        .disabled(editedBody == note.body)
+                }
+            }
         } else {
             Text("This note no longer exists.").foregroundStyle(.secondary)
         }

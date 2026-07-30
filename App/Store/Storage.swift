@@ -5,6 +5,8 @@ struct StoredData: Codable {
     var notes: [Note]
     var folders: [Folder]
     var axes: [Axis]
+    /// Bumped when a one-time data migration runs (nil = pre-versioning / 0).
+    var schemaVersion: Int? = nil
 }
 
 /// Local-first persistence. For this model iteration everything is one JSON file

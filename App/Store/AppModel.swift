@@ -22,6 +22,11 @@ struct ImportedItem {
     var origin: NoteOrigin
     var folderCategory: String
     var folderAxisID: String?
+    /// Imported-but-not-yet-engaged (e.g. a bare contact). Dormant notes are
+    /// linkable/searchable but grant *zero* growth until you actually engage —
+    /// so importing your whole address book can't inflate an axis. Growth comes
+    /// from connection, not volume.
+    var isDormant: Bool = false
 }
 
 /// The app's single source of truth. Everything the UI shows flows from here;
@@ -41,13 +46,38 @@ final class AppModel: ObservableObject {
     init() {
         let loaded = storage.load()
         let f = loaded?.folders.isEmpty == false ? loaded!.folders : SampleData.folders
-        let n = loaded?.notes.isEmpty == false ? loaded!.notes : SampleData.notes
+        var n = loaded?.notes.isEmpty == false ? loaded!.notes : SampleData.notes
         let a = (loaded?.axes.isEmpty == false) ? loaded!.axes : Axis.defaultSet
+
+        let version = loaded?.schemaVersion ?? 0
+        var didMigrate = false
+        if version < 1 { didMigrate = Self.migrateContactsToDormantMarkdown(&n) }
+
         self.folders = f
         self.notes = n
         self.axes = a
         self.score = ScoreEngine().score(notes: n, folders: f, axes: a)
-        if loaded == nil { storage.save(StoredData(notes: n, folders: f, axes: a)) }
+        if loaded == nil || didMigrate || version < Self.schemaVersion {
+            storage.save(StoredData(notes: n, folders: f, axes: a, schemaVersion: Self.schemaVersion))
+        }
+    }
+
+    static let schemaVersion = 1
+
+    /// One-time (v1): older contact imports granted growth just by existing and
+    /// stored info as structured details. Convert those details to a markdown
+    /// body (so you can add [[links]] inside) and make them dormant.
+    private static func migrateContactsToDormantMarkdown(_ notes: inout [Note]) -> Bool {
+        var changed = false
+        for i in notes.indices where notes[i].origin?.source == "contacts" {
+            if notes[i].body.isEmpty && !notes[i].details.isEmpty {
+                notes[i].body = notes[i].details.map { "\($0.key): \($0.value)" }.joined(separator: "\n")
+                notes[i].details = []
+            }
+            if !notes[i].isStub { notes[i].isStub = true }
+            changed = true
+        }
+        return changed
     }
 
     // MARK: - Lookups
@@ -160,7 +190,11 @@ final class AppModel: ObservableObject {
             if let i = notes.firstIndex(where: { $0.origin == item.origin }) {
                 notes[i].title = title
                 notes[i].details = Self.mergeDetails(notes[i].details, item.details)
-                if notes[i].body.isEmpty { notes[i].body = item.body }
+                if notes[i].body.isEmpty {
+                    notes[i].body = item.body
+                    // Still un-engaged (no body of its own) → keep it dormant.
+                    if item.isDormant { notes[i].isStub = true }
+                }
                 updated += 1
             } else if let i = notes.firstIndex(where: { Self.norm($0.title) == Self.norm(title) }) {
                 // A hand-made note with this title already exists — adopt it rather than duplicate.
@@ -169,7 +203,8 @@ final class AppModel: ObservableObject {
                 updated += 1
             } else {
                 notes.append(Note(title: title, date: item.date, body: item.body,
-                                  intensity: item.intensity, details: item.details, origin: item.origin))
+                                  intensity: item.intensity, details: item.details,
+                                  origin: item.origin, isStub: item.isDormant))
                 added += 1
             }
         }
@@ -183,12 +218,15 @@ final class AppModel: ObservableObject {
         let items: [ImportedItem] = contacts.compactMap { contact in
             let name = contact.name.trimmingCharacters(in: .whitespaces)
             guard !name.isEmpty else { return nil }
-            var details: [NoteDetail] = []
-            if let phone = contact.phones.first { details.append(NoteDetail(key: "Phone", value: phone)) }
-            if let email = contact.emails.first { details.append(NoteDetail(key: "Email", value: email)) }
-            return ImportedItem(folder: "people", name: name, details: details,
+            // Info goes into the markdown body so you can open the note and add
+            // your own text and [[links]] to it.
+            var lines: [String] = []
+            if let phone = contact.phones.first { lines.append("Phone: \(phone)") }
+            if let email = contact.emails.first { lines.append("Email: \(email)") }
+            return ImportedItem(folder: "people", name: name, body: lines.joined(separator: "\n"),
                                 origin: NoteOrigin(source: "contacts", externalID: contact.id),
-                                folderCategory: "Relationships", folderAxisID: "heart")
+                                folderCategory: "Relationships", folderAxisID: "heart",
+                                isDormant: true)
         }
         return ingest(items)
     }
@@ -211,6 +249,16 @@ final class AppModel: ObservableObject {
         persist()
     }
 
+    /// Set a folder's axis, creating the folder mapping if it doesn't exist yet
+    /// (e.g. a folder that so far only exists as note paths).
+    func assignAxis(toFolder name: String, axisID: String) {
+        if let existing = folder(named: name) {
+            setFolderAxis(axisID, forFolder: existing.id)
+        } else {
+            upsertFolder(name: name, category: name.capitalized, axisID: axisID)
+        }
+    }
+
     func suggestAxis(forNewFolderNamed name: String) -> AxisClassifier.Suggestion {
         classifier.suggestAxis(forNewFolderNamed: name, existingFolders: folders, axes: axes)
     }
@@ -229,7 +277,19 @@ final class AppModel: ObservableObject {
 
     private func persist() {
         score = engine.score(notes: notes, folders: folders, axes: axes)
-        storage.save(StoredData(notes: notes, folders: folders, axes: axes))
+        storage.save(StoredData(notes: notes, folders: folders, axes: axes, schemaVersion: Self.schemaVersion))
+    }
+
+    /// Edit a note's markdown body. Engaging a dormant/imported note (writing
+    /// about it, adding [[links]]) activates it so it starts growing you.
+    func updateBody(_ id: UUID, body: String) {
+        guard let i = notes.firstIndex(where: { $0.id == id }) else { return }
+        notes[i].body = body
+        notes[i].isStub = false
+        for target in notes[i].linkTargets where !noteExists(titled: target) {
+            notes.append(Note(title: target, date: notes[i].date, isStub: true))
+        }
+        persist()
     }
 
     private static func norm(_ s: String) -> String {
