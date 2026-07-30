@@ -33,9 +33,10 @@ struct FoldersView: View {
     @State private var showReadwise = false
     @State private var composePrefill: String?
     @State private var importMessage: String?
+    @State private var path: [UUID] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 OutlineGroup(buildTree(), children: \.children) { node in
                     row(node)
@@ -51,7 +52,7 @@ struct FoldersView: View {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         Button { composePrefill = nil; showCompose = true } label: { Label("New note", systemImage: "square.and.pencil") }
-                        Button { composePrefill = "notes/diary/" + NotesView.stamp(); showCompose = true } label: { Label("Diary entry", systemImage: "calendar.badge.plus") }
+                        Button { path.append(model.createDiaryEntry()) } label: { Label("Diary entry", systemImage: "calendar.badge.plus") }
                         Divider()
                         Button { importContacts() } label: { Label("Import contacts", systemImage: "person.crop.circle.badge.plus") }
                         Button { showReadwise = true } label: { Label("Import from Readwise", systemImage: "books.vertical") }
@@ -165,14 +166,14 @@ struct FoldersView: View {
         }
         for (path, ns) in notesByPath where !path.isEmpty {
             guard let node = nodes[path] else { continue }
-            for note in ns { node.noteNodes.append(FolderNode(note: note)) }
+            for note in ns.sorted(by: chronological) { node.noteNodes.append(FolderNode(note: note)) }
         }
         if let unfiled = notesByPath[""], !unfiled.isEmpty {
             let notesNode: FolderNode
             if let existing = nodes["notes"] { notesNode = existing }
             else { let created = FolderNode(folder: "notes"); nodes["notes"] = created; roots.append(created); notesNode = created }
             let unfiledNode = FolderNode(folder: "")
-            for note in unfiled { unfiledNode.noteNodes.append(FolderNode(note: note)) }
+            for note in unfiled.sorted(by: chronological) { unfiledNode.noteNodes.append(FolderNode(note: note)) }
             notesNode.subfolders.append(unfiledNode)
         }
         return roots.sorted { alpha($0.path ?? "", $1.path ?? "") }
@@ -180,6 +181,13 @@ struct FoldersView: View {
 
     private func alpha(_ a: String, _ b: String) -> Bool {
         a.localizedCaseInsensitiveCompare(b) == .orderedAscending
+    }
+
+    /// Files within a folder go newest-first by date; notes sharing a date (e.g. a
+    /// batch of imported contacts) fall back to alphabetical, so those stay A–Z
+    /// while dated entries like diary notes read in time order.
+    private func chronological(_ a: Note, _ b: Note) -> Bool {
+        a.date != b.date ? a.date > b.date : alpha(a.displayName, b.displayName)
     }
 
     private func importContacts() {

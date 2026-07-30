@@ -624,6 +624,27 @@ final class AppModel: ObservableObject {
         persist()
     }
 
+    /// Create a fresh diary entry auto-titled with the current date & time, filed
+    /// under `notes/diary` (Journal → Spirit), and return its id so the UI can open
+    /// it straight into writing. Titles are made unique if two land in one minute.
+    func createDiaryEntry() -> UUID {
+        if folder(named: "notes/diary") == nil {
+            folders.append(Folder(name: "notes/diary", category: "Journal", axisID: "spirit", defaultIntensity: 4))
+        }
+        let base = "notes/diary/" + Self.dateTimeStamp()
+        var title = base, n = 2
+        while notes.contains(where: { Self.norm($0.title) == Self.norm(title) }) { title = "\(base) (\(n))"; n += 1 }
+        let note = Note(title: title, date: Date(), intensity: defaultIntensity(forFolderNamed: "notes/diary"))
+        notes.append(note)
+        persist()
+        return note.id
+    }
+
+    private static func dateTimeStamp() -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f.string(from: Date())
+    }
+
     /// The folder segment of a `[[folder/Name]]` link target ("" if unqualified).
     private static func targetFolder(_ normedTarget: String) -> String {
         let parts = normedTarget.split(separator: "/")
