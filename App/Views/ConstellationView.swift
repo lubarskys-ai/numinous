@@ -13,6 +13,15 @@ struct ConstellationView: View {
     private let dw: CGFloat = 200
     private let dh: CGFloat = 300
 
+    // Pinch-to-zoom + pan. Labels fade in as you zoom past ~1.4×.
+    @State private var scale: CGFloat = 1
+    @GestureState private var pinch: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @GestureState private var drag: CGSize = .zero
+
+    private var zoom: CGFloat { min(5, max(1, scale * pinch)) }
+    private func labelOpacity() -> Double { Double(min(1, max(0, (zoom - 1.4) / 0.6))) }
+
     var body: some View {
         GeometryReader { geo in
             let s = min(geo.size.width / dw, geo.size.height / dh)
@@ -34,13 +43,44 @@ struct ConstellationView: View {
                     }
                     .position(map(node.point))
                 }
+                if labelOpacity() > 0.01 {
+                    ForEach(placement.nodes) { node in
+                        Text(node.name)
+                            .font(.system(size: 7, weight: .medium))
+                            .padding(.horizontal, 3).padding(.vertical, 1)
+                            .background(.regularMaterial, in: Capsule())
+                            .fixedSize()
+                            .position(x: map(node.point).x, y: map(node.point).y + 12)
+                            .opacity(labelOpacity())
+                            .allowsHitTesting(false)
+                    }
+                }
             }
+            .scaleEffect(zoom, anchor: .center)
+            .offset(x: offset.width + drag.width, y: offset.height + drag.height)
+            .simultaneousGesture(
+                MagnificationGesture()
+                    .updating($pinch) { value, state, _ in state = value }
+                    .onEnded { value in
+                        scale = min(5, max(1, scale * value))
+                        if scale <= 1.01 { offset = .zero }
+                    }
+            )
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 12)
+                    .updating($drag) { value, state, _ in state = value.translation }
+                    .onEnded { value in
+                        offset.width += value.translation.width
+                        offset.height += value.translation.height
+                    }
+            )
+            .contentShape(Rectangle())
         }
     }
 
     // MARK: - Placement
 
-    private struct PlacedNode: Identifiable { let id: UUID; let point: CGPoint; let color: Color }
+    private struct PlacedNode: Identifiable { let id: UUID; let point: CGPoint; let color: Color; let name: String }
     private struct Placement { var nodes: [PlacedNode]; var points: [UUID: CGPoint] }
 
     /// Anchor per axis in design space (where that axis's nodes cluster).
@@ -67,7 +107,7 @@ struct ConstellationView: View {
                 let angle = CGFloat(Double(i) * golden + phase)
                 let p = CGPoint(x: a.x + radius * cos(angle), y: a.y + radius * sin(angle) * 0.9)
                 points[note.id] = p
-                nodes.append(PlacedNode(id: note.id, point: p, color: axis.color))
+                nodes.append(PlacedNode(id: note.id, point: p, color: axis.color, name: note.displayName))
             }
         }
         return Placement(nodes: nodes, points: points)
@@ -106,13 +146,15 @@ struct ConstellationView: View {
         for link in model.score.links where link.isCounted {
             guard let a = placement.points[link.a], let b = placement.points[link.b] else { continue }
             let pa = map(a), pb = map(b)
+            // A gently bowed path (organic, dendrite-like) with a soft glow.
             var path = Path()
             path.move(to: pa)
-            let mid = CGPoint(x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2)
-            path.addQuadCurve(to: pb, control: mid)
-            ctx.stroke(path,
-                       with: .color(link.isCrossAxis ? Color.accentColor.opacity(0.6) : Color.secondary.opacity(0.3)),
-                       lineWidth: link.isCrossAxis ? 1.4 : 1)
+            let dx = pb.x - pa.x, dy = pb.y - pa.y
+            let control = CGPoint(x: (pa.x + pb.x) / 2 - dy * 0.14, y: (pa.y + pb.y) / 2 + dx * 0.14)
+            path.addQuadCurve(to: pb, control: control)
+            let color = link.isCrossAxis ? Color.accentColor : Color.secondary
+            ctx.stroke(path, with: .color(color.opacity(0.14)), lineWidth: link.isCrossAxis ? 5 : 3.5)
+            ctx.stroke(path, with: .color(color.opacity(link.isCrossAxis ? 0.7 : 0.35)), lineWidth: link.isCrossAxis ? 1.5 : 1)
         }
     }
 
