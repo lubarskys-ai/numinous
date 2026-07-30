@@ -5,6 +5,7 @@ struct NoteListView: View {
     @EnvironmentObject var store: NoteStore
     @State private var editingNote: Note?
     @State private var composingNew = false
+    @State private var showingCategories = false
 
     var body: some View {
         NavigationStack {
@@ -30,6 +31,14 @@ struct NoteListView: View {
             }
             .navigationTitle("Numinous")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showingCategories = true
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                    }
+                    .accessibilityLabel("Categories")
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         composingNew = true
@@ -44,6 +53,9 @@ struct NoteListView: View {
             }
             .sheet(isPresented: $composingNew) {
                 NoteEditorView(note: nil)
+            }
+            .sheet(isPresented: $showingCategories) {
+                CategoriesView()
             }
         }
     }

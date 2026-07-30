@@ -6,7 +6,7 @@ struct NuminousApp: App {
 
     var body: some Scene {
         WindowGroup {
-            NoteListView()
+            RootView()
                 .environmentObject(store)
         }
     }
