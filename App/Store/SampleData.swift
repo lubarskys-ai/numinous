@@ -1,41 +1,41 @@
 import Foundation
 import NuminousCore
 
-/// A small seeded world so the app opens with something alive — a few notes that
-/// already connect across axes, so the growth mechanic is visible on first run.
+/// A small seeded world so the app opens with something alive — notes already
+/// connected across folders/axes, so growth is visible on first run.
 enum SampleData {
     private static func daysAgo(_ n: Int) -> Date {
         Calendar.current.date(byAdding: .day, value: -n, to: Date()) ?? Date()
     }
 
-    static let categories: [Category] = [
-        Category(id: "golf",    name: "Golf",          axisID: "body"),
-        Category(id: "novels",  name: "Novels",        axisID: "mind"),
-        Category(id: "friends", name: "Close friends", axisID: "heart"),
-        Category(id: "diary",   name: "Diary",         axisID: "spirit"),
+    static let folders: [Folder] = [
+        Folder(name: "people", category: "Relationships", axisID: "heart"),
+        Folder(name: "books",  category: "Cognition",     axisID: "mind"),
+        Folder(name: "sport",  category: "Fitness",       axisID: "body"),
+        Folder(name: "diary",  category: "Journal",       axisID: "spirit"),
     ]
 
     static let notes: [Note] = [
-        Note(title: "Sam", categoryID: "friends", date: daysAgo(6),
+        Note(title: "people/Sam", date: daysAgo(6),
              body: "Old friend from college. We can talk for hours.",
-             interaction: .inPerson),
+             intensity: 5,
+             details: [NoteDetail(key: "Phone", value: "555-0192"),
+                       NoteDetail(key: "Favorite team", value: "Warriors")]),
 
-        Note(title: "Atomic Habits", categoryID: "novels", date: daysAgo(6),
-             body: "Finished it — the idea of habit stacking really stuck with me."),
+        Note(title: "books/Atomic Habits", date: daysAgo(6),
+             body: "Finished it — habit stacking really stuck with me.",
+             intensity: 3),
 
-        Note(title: "Back nine with Sam", categoryID: "golf", date: daysAgo(5),
+        Note(title: "sport/Back nine with Sam", date: daysAgo(5),
              body: """
-             Played 18 holes with [[Sam]] today, still buzzing from finishing
-             [[Atomic Habits]] last week — our whole back nine turned into
-             talking about habit stacking.
+             Played 18 holes with [[people/Sam]] today, still buzzing from finishing
+             [[books/Atomic Habits]] last week — our back nine turned into talking
+             about habit stacking.
              """,
-             interaction: .inPerson, depth: 4),
+             intensity: 4, location: "Pebble Beach"),
 
-        Note(title: "Evening reflection", categoryID: "diary", date: daysAgo(3),
-             body: """
-             Quiet night. Thinking about how much better I feel when I actually
-             see [[Sam]] in person instead of just texting.
-             """,
-             depth: 5),
+        Note(title: "diary/Evening reflection", date: daysAgo(3),
+             body: "Quiet night. I feel better when I actually see [[people/Sam]] in person instead of just texting.",
+             intensity: 4),
     ]
 }

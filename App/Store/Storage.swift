@@ -1,71 +1,33 @@
 import Foundation
 import NuminousCore
 
-struct StoredData {
+struct StoredData: Codable {
     var notes: [Note]
-    var categories: [Category]
+    var folders: [Folder]
     var axes: [Axis]
 }
 
-/// Local-first persistence. Notes are saved as individual plain-markdown files
-/// (Obsidian-style, human-readable, portable); categories live in a small JSON
-/// sidecar. The note's UUID is the filename, so identity survives round-trips.
+/// Local-first persistence. For this model iteration everything is one JSON file
+/// (notes carry structured details, which a flat markdown frontmatter can't hold
+/// cleanly). Markdown import/export via NuminousCore's parser/serializer can be
+/// layered back on later.
 struct Storage {
     private let fm = FileManager.default
-
     private var root: URL {
-        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return docs.appendingPathComponent("Numinous", isDirectory: true)
+        fm.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Numinous", isDirectory: true)
     }
-    private var notesDir: URL { root.appendingPathComponent("notes", isDirectory: true) }
-    private var categoriesFile: URL { root.appendingPathComponent("categories.json") }
-    private var axesFile: URL { root.appendingPathComponent("axes.json") }
+    private var file: URL { root.appendingPathComponent("store.json") }
 
-    init() {
-        try? fm.createDirectory(at: notesDir, withIntermediateDirectories: true)
-    }
+    init() { try? fm.createDirectory(at: root, withIntermediateDirectories: true) }
 
-    func load() -> StoredData {
-        var notes: [Note] = []
-        if let files = try? fm.contentsOfDirectory(at: notesDir, includingPropertiesForKeys: nil) {
-            for file in files where file.pathExtension == "md" {
-                guard let text = try? String(contentsOf: file, encoding: .utf8) else { continue }
-                let name = file.deletingPathExtension().lastPathComponent
-                let id = UUID(uuidString: name) ?? UUID()
-                notes.append(NoteParser.parse(text, fallbackTitle: name, id: id))
-            }
-        }
-
-        var categories: [Category] = []
-        if let data = try? Data(contentsOf: categoriesFile),
-           let decoded = try? JSONDecoder().decode([Category].self, from: data) {
-            categories = decoded
-        }
-
-        var axes: [Axis] = []
-        if let data = try? Data(contentsOf: axesFile),
-           let decoded = try? JSONDecoder().decode([Axis].self, from: data) {
-            axes = decoded
-        }
-        return StoredData(notes: notes, categories: categories, axes: axes)
+    func load() -> StoredData? {
+        guard let data = try? Data(contentsOf: file),
+              let decoded = try? JSONDecoder().decode(StoredData.self, from: data) else { return nil }
+        return decoded
     }
 
-    func save(notes: [Note], categories: [Category], axes: [Axis]) {
-        // Rewrite the notes directory so deletions are reflected.
-        if let existing = try? fm.contentsOfDirectory(at: notesDir, includingPropertiesForKeys: nil) {
-            for file in existing where file.pathExtension == "md" {
-                try? fm.removeItem(at: file)
-            }
-        }
-        for note in notes {
-            let url = notesDir.appendingPathComponent("\(note.id.uuidString).md")
-            try? NoteSerializer.markdown(for: note).write(to: url, atomically: true, encoding: .utf8)
-        }
-        if let data = try? JSONEncoder().encode(categories) {
-            try? data.write(to: categoriesFile)
-        }
-        if let data = try? JSONEncoder().encode(axes) {
-            try? data.write(to: axesFile)
-        }
+    func save(_ data: StoredData) {
+        guard let encoded = try? JSONEncoder().encode(data) else { return }
+        try? encoded.write(to: file, options: .atomic)
     }
 }

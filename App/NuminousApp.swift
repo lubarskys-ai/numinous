@@ -2,12 +2,12 @@ import SwiftUI
 
 @main
 struct NuminousApp: App {
-    @StateObject private var store = NoteStore()
+    @StateObject private var model = AppModel()
 
     var body: some Scene {
         WindowGroup {
             RootView()
-                .environmentObject(store)
+                .environmentObject(model)
         }
     }
 }

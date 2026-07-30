@@ -2,6 +2,10 @@ import SwiftUI
 import UIKit
 import NuminousCore
 
+// `Axis` collides with SwiftUI.Axis; alias so bare `Axis` means our domain type.
+typealias Axis = NuminousCore.Axis
+typealias Folder = NuminousCore.Folder
+
 extension Color {
     /// A `#RRGGBB` string for this color, or nil if components can't be read.
     func toHex() -> String? {
@@ -11,7 +15,6 @@ extension Color {
                       Int(round(r * 255)), Int(round(g * 255)), Int(round(b * 255)))
     }
 
-    /// Builds a color from a `#RRGGBB` hex string (falls back to gray).
     init(hex: String) {
         let cleaned = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
         var value: UInt64 = 0
