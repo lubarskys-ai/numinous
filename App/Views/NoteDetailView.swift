@@ -38,8 +38,8 @@ struct NoteDetailView: View {
                 }
 
                 Section("Note") {
-                    TextEditor(text: $editedBody).frame(minHeight: 120)
-                    Text("Write freely. Link anything with [[double brackets]] — e.g. [[books/Dune]].")
+                    LinkingEditor(text: $editedBody)
+                    Text("Type [[ to link — pick an existing note, or create a new one.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 

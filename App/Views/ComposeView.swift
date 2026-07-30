@@ -68,8 +68,8 @@ struct ComposeView: View {
                 }
 
                 Section("Note") {
-                    TextEditor(text: $text).frame(minHeight: 130)
-                    Text("Link with [[double brackets]] — e.g. [[people/Sam]].")
+                    LinkingEditor(text: $text)
+                    Text("Type [[ to link an existing note, or create a new one.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
