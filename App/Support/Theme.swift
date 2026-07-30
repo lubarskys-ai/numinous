@@ -1,7 +1,16 @@
 import SwiftUI
+import UIKit
 import NuminousCore
 
 extension Color {
+    /// A `#RRGGBB` string for this color, or nil if components can't be read.
+    func toHex() -> String? {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        guard UIColor(self).getRed(&r, green: &g, blue: &b, alpha: &a) else { return nil }
+        return String(format: "#%02X%02X%02X",
+                      Int(round(r * 255)), Int(round(g * 255)), Int(round(b * 255)))
+    }
+
     /// Builds a color from a `#RRGGBB` hex string (falls back to gray).
     init(hex: String) {
         let cleaned = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))

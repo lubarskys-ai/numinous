@@ -23,13 +23,15 @@ final class NoteStore: ObservableObject {
         let loaded = storage.load()
         let seededCategories = loaded.categories.isEmpty ? SampleData.categories : loaded.categories
         let seededNotes = loaded.notes.isEmpty ? SampleData.notes : loaded.notes
+        let seededAxes = loaded.axes.isEmpty ? Axis.defaultSet : loaded.axes
 
+        self.axes = seededAxes
         self.categories = seededCategories
         self.notes = seededNotes
-        self.score = ScoreEngine().score(notes: seededNotes, categories: seededCategories, axes: Axis.defaultSet)
+        self.score = ScoreEngine().score(notes: seededNotes, categories: seededCategories, axes: seededAxes)
 
         if loaded.notes.isEmpty && loaded.categories.isEmpty {
-            storage.save(notes: seededNotes, categories: seededCategories)
+            storage.save(notes: seededNotes, categories: seededCategories, axes: seededAxes)
         }
     }
 
@@ -103,6 +105,23 @@ final class NoteStore: ObservableObject {
         persistAndRecompute()
     }
 
+    func renameAxis(_ axisID: String, name: String) {
+        guard let index = axes.firstIndex(where: { $0.id == axisID }) else { return }
+        axes[index].name = name
+        persistAndRecompute()
+    }
+
+    func setAxisColor(_ axisID: String, hex: String) {
+        guard let index = axes.firstIndex(where: { $0.id == axisID }) else { return }
+        axes[index].colorHex = hex
+        persistAndRecompute()
+    }
+
+    func resetAxes() {
+        axes = Axis.defaultSet
+        persistAndRecompute()
+    }
+
     /// A pre-filled, overridable axis suggestion for a brand-new category.
     func suggestAxis(forNewCategoryNamed name: String) -> AxisClassifier.Suggestion {
         classifier.suggestAxis(forNewCategoryNamed: name, existingCategories: categories, axes: axes)
@@ -118,6 +137,6 @@ final class NoteStore: ObservableObject {
 
     private func persistAndRecompute() {
         score = engine.score(notes: notes, categories: categories, axes: axes)
-        storage.save(notes: notes, categories: categories)
+        storage.save(notes: notes, categories: categories, axes: axes)
     }
 }

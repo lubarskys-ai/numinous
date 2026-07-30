@@ -4,6 +4,7 @@ import NuminousCore
 struct StoredData {
     var notes: [Note]
     var categories: [Category]
+    var axes: [Axis]
 }
 
 /// Local-first persistence. Notes are saved as individual plain-markdown files
@@ -18,6 +19,7 @@ struct Storage {
     }
     private var notesDir: URL { root.appendingPathComponent("notes", isDirectory: true) }
     private var categoriesFile: URL { root.appendingPathComponent("categories.json") }
+    private var axesFile: URL { root.appendingPathComponent("axes.json") }
 
     init() {
         try? fm.createDirectory(at: notesDir, withIntermediateDirectories: true)
@@ -39,10 +41,16 @@ struct Storage {
            let decoded = try? JSONDecoder().decode([Category].self, from: data) {
             categories = decoded
         }
-        return StoredData(notes: notes, categories: categories)
+
+        var axes: [Axis] = []
+        if let data = try? Data(contentsOf: axesFile),
+           let decoded = try? JSONDecoder().decode([Axis].self, from: data) {
+            axes = decoded
+        }
+        return StoredData(notes: notes, categories: categories, axes: axes)
     }
 
-    func save(notes: [Note], categories: [Category]) {
+    func save(notes: [Note], categories: [Category], axes: [Axis]) {
         // Rewrite the notes directory so deletions are reflected.
         if let existing = try? fm.contentsOfDirectory(at: notesDir, includingPropertiesForKeys: nil) {
             for file in existing where file.pathExtension == "md" {
@@ -55,6 +63,9 @@ struct Storage {
         }
         if let data = try? JSONEncoder().encode(categories) {
             try? data.write(to: categoriesFile)
+        }
+        if let data = try? JSONEncoder().encode(axes) {
+            try? data.write(to: axesFile)
         }
     }
 }

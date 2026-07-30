@@ -6,6 +6,7 @@ import NuminousCore
 /// the cross-axis count highlighted, since that's the whole point.
 struct GrowthView: View {
     @EnvironmentObject var store: NoteStore
+    @State private var showingSettings = false
 
     var body: some View {
         let score = store.score
@@ -72,6 +73,19 @@ struct GrowthView: View {
                 .padding()
             }
             .navigationTitle("Growth")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showingSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .accessibilityLabel("Customize")
+                }
+            }
+            .sheet(isPresented: $showingSettings) {
+                SettingsView()
+            }
         }
     }
 }
