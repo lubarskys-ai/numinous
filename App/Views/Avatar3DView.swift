@@ -129,8 +129,8 @@ struct Avatar3DView: UIViewRepresentable {
         for (axisKey, group) in Dictionary(grouping: nodes, by: { $0.axis }) {
             let c = region(axisKey)
             let n = Double(group.count)
-            let spreadXZ = axisKey == "body" ? 0.26 : 0.15
-            let spreadY  = axisKey == "body" ? 0.55 : 0.13
+            let spreadXZ = axisKey == "body" ? 0.26 : 0.08   // organs cluster tight
+            let spreadY  = axisKey == "body" ? 0.55 : 0.09
             for (i, gn) in group.enumerated() {
                 let t = (Double(i) + 0.5) / max(1, n)
                 let ga = Double(i) * 2.399963
@@ -150,35 +150,55 @@ struct Avatar3DView: UIViewRepresentable {
             }
         }
 
-        // Links as faint neural threads. Only cross-axis links carry a small, dim,
-        // slow travelling signal — a whisper of activity, not a light show.
+        // Curved neural threads: each link bows toward the core so it stays inside
+        // the body instead of cutting straight across. Only cross-axis links carry
+        // a small, slow travelling signal.
+        func curve(_ a: SCNVector3, _ b: SCNVector3, _ steps: Int) -> [SCNVector3] {
+            let mx = (Double(a.x) + Double(b.x)) / 2, my = (Double(a.y) + Double(b.y)) / 2, mz = (Double(a.z) + Double(b.z)) / 2
+            let cx = mx * 0.35, cy = my, cz = mz * 0.35 + 0.03   // control pulled toward the spine
+            var pts: [SCNVector3] = []
+            for i in 0...steps {
+                let t = Double(i) / Double(steps), u = 1 - t
+                pts.append(v(u * u * Double(a.x) + 2 * u * t * cx + t * t * Double(b.x),
+                             u * u * Double(a.y) + 2 * u * t * cy + t * t * Double(b.y),
+                             u * u * Double(a.z) + 2 * u * t * cz + t * t * Double(b.z)))
+            }
+            return pts
+        }
+        func thread(_ p0: SCNVector3, _ p1: SCNVector3, _ radius: CGFloat, _ mat: SCNMaterial) {
+            let dx = Double(p1.x - p0.x), dy = Double(p1.y - p0.y), dz = Double(p1.z - p0.z)
+            let d = (dx * dx + dy * dy + dz * dz).squareRoot()
+            guard d > 1e-6 else { return }
+            let cyl = SCNCylinder(radius: radius, height: CGFloat(d)); cyl.radialSegmentCount = 5
+            cyl.materials = [mat]
+            let node = SCNNode(geometry: cyl)
+            node.position = v((Double(p0.x) + Double(p1.x)) / 2, (Double(p0.y) + Double(p1.y)) / 2, (Double(p0.z) + Double(p1.z)) / 2)
+            node.look(at: p1, up: v(0, 1, 0), localFront: v(0, 1, 0))
+            node.renderingOrder = 11
+            figure.addChildNode(node)
+        }
         for e in links {
             guard let a = pos[e.a], let b = pos[e.b] else { continue }
             let col = e.cross ? UIColor(red: 0.6, green: 0.85, blue: 1.0, alpha: 1) : UIColor(white: 0.8, alpha: 1)
-            let dx = Double(b.x - a.x), dy = Double(b.y - a.y), dz = Double(b.z - a.z)
-            let dist = (dx * dx + dy * dy + dz * dz).squareRoot()
-            let cyl = SCNCylinder(radius: e.cross ? 0.0017 : 0.0011, height: CGFloat(dist))
-            cyl.radialSegmentCount = 5
-            let m = SCNMaterial(); m.lightingModel = .constant
-            m.diffuse.contents = col; m.emission.contents = col
-            m.emission.intensity = e.cross ? 0.38 : 0.2; m.transparency = 0.4
-            cyl.materials = [m]
-            let mid = v((Double(a.x) + Double(b.x)) / 2, (Double(a.y) + Double(b.y)) / 2, (Double(a.z) + Double(b.z)) / 2)
-            let node = SCNNode(geometry: cyl); node.position = mid
-            node.look(at: b, up: v(0, 1, 0), localFront: v(0, 1, 0))
-            node.renderingOrder = 11
-            figure.addChildNode(node)
+            let mat = SCNMaterial(); mat.lightingModel = .constant
+            mat.diffuse.contents = col; mat.emission.contents = col
+            mat.emission.intensity = e.cross ? 0.38 : 0.2; mat.transparency = 0.4
+            let pts = curve(a, b, 12)
+            let r: CGFloat = e.cross ? 0.0017 : 0.0011
+            for i in 0..<(pts.count - 1) { thread(pts[i], pts[i + 1], r, mat) }
 
             if e.cross {
                 let signal = ball(0.009); signal.segmentCount = 10
                 let sm = SCNMaterial(); sm.lightingModel = .constant
                 sm.diffuse.contents = col; sm.emission.contents = col; sm.emission.intensity = 0.9
                 signal.materials = [sm]
-                let pulse = SCNNode(geometry: signal); pulse.position = a; pulse.renderingOrder = 13
+                let pulse = SCNNode(geometry: signal); pulse.position = pts[0]; pulse.renderingOrder = 13
                 pulse.opacity = 0.7
                 let dur = Double.random(in: 3.0...5.5)
-                let travel = SCNAction.sequence([.move(to: b, duration: dur), .move(to: a, duration: 0)])
-                pulse.runAction(.sequence([.wait(duration: Double.random(in: 0...5)), .repeatForever(travel)]))
+                let seg = dur / Double(pts.count - 1)
+                var moves: [SCNAction] = pts.dropFirst().map { .move(to: $0, duration: seg) }
+                moves.append(.move(to: pts[0], duration: 0))
+                pulse.runAction(.sequence([.wait(duration: Double.random(in: 0...5)), .repeatForever(.sequence(moves))]))
                 figure.addChildNode(pulse)
             }
         }

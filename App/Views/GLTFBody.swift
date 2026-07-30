@@ -14,13 +14,13 @@ enum GLTFBody {
     // Canonical region centres (used both for vertex tint and connectome anchors).
     static func region(_ axis: String) -> (Double, Double, Double) {
         switch axis {
-        case "mind":    return (-0.12, 0.72, 0.05)   // left hemisphere
-        case "meaning": return ( 0.12, 0.72, 0.05)   // right hemisphere
-        case "heart":   return (0,  0.44, 0.08)
-        case "spirit":  return (0,  0.24, 0.08)
-        case "gut":     return (0,  0.06, 0.08)
-        case "body":    return (0, -0.35, 0.04)
-        default:        return (0,  0.20, 0.06)
+        case "mind":    return (-0.11, 0.72, 0.0)    // brain, left hemisphere
+        case "meaning": return ( 0.11, 0.72, 0.0)    // brain, right hemisphere
+        case "heart":   return (-0.05, 0.42, 0.05)   // heart, chest (a touch left)
+        case "spirit":  return (0,  0.26, 0.03)      // solar plexus / core
+        case "gut":     return (0,  0.02, 0.05)      // belly / gut
+        case "body":    return (0, -0.30, 0.0)       // musculature, spread across limbs
+        default:        return (0,  0.20, 0.04)
         }
     }
 
