@@ -49,6 +49,8 @@ struct Avatar3DView: UIViewRepresentable {
 
         let cam = SCNNode()
         cam.camera = SCNCamera(); cam.camera?.fieldOfView = 42
+        cam.camera?.zNear = 0.01           // allow zooming in close without clipping
+        cam.camera?.zFar = 100
         cam.position = v(0, 0.05, 4.2)
         scene.rootNode.addChildNode(cam)
         let ambient = SCNNode(); ambient.light = SCNLight(); ambient.light?.type = .ambient; ambient.light?.intensity = 500
@@ -130,7 +132,8 @@ struct Avatar3DView: UIViewRepresentable {
             figure.addChildNode(node)
         }
 
-        figure.runAction(.repeatForever(.rotateBy(x: 0, y: CGFloat.pi * 2, z: 0, duration: 30)))
+        // No auto-spin: hold still so you can drag to rotate and pinch to zoom in
+        // on the connectome without it turning away from you.
         scene.rootNode.addChildNode(figure)
         return scene
     }
