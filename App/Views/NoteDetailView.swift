@@ -35,6 +35,33 @@ struct NoteDetailView: View {
                               systemImage: "moon.zzz")
                             .font(.caption).foregroundStyle(.secondary)
                     }
+                    if note.origin?.source == "healthkit" {
+                        Label("Verified activity", systemImage: "checkmark.seal.fill")
+                            .font(.caption).foregroundStyle(.green)
+                    }
+                }
+
+                let suggestions = model.suggestedConnections(for: note)
+                if !suggestions.isEmpty {
+                    Section {
+                        ForEach(suggestions) { candidate in
+                            HStack(spacing: 10) {
+                                Circle().fill(model.axis(for: candidate)?.color ?? .gray).frame(width: 8, height: 8)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(candidate.displayName)
+                                    Text(candidate.folderName.isEmpty ? "around the same time" : "\(candidate.folderName) · around the same time")
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button("Link") { link(to: candidate.title) }
+                                    .buttonStyle(.borderless)
+                            }
+                        }
+                    } header: {
+                        Text("Suggested connections")
+                    } footer: {
+                        Text("Things that happened around the same time. Linking one connects it into your web.")
+                    }
                 }
 
                 Section("Note") {
@@ -127,6 +154,12 @@ struct NoteDetailView: View {
         } else {
             Text("This note no longer exists.").foregroundStyle(.secondary)
         }
+    }
+
+    private func link(to title: String) {
+        let sep = editedBody.isEmpty || editedBody.hasSuffix("\n") || editedBody.hasSuffix(" ") ? "" : " "
+        editedBody += sep + "[[\(title)]]"
+        model.updateBody(noteID, body: editedBody)
     }
 
     private func linkLabel(_ note: Note) -> some View {

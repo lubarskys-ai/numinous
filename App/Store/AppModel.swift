@@ -148,6 +148,29 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Generative connection suggestions: other notes that happened *near this
+    /// one in time*, not already linked, with cross-axis candidates first (a
+    /// workout suggests the person or reflection from that window — turning
+    /// co-occurrence into a cross-axis connection you confirm with a tap).
+    func suggestedConnections(for note: Note, within hours: Double = 18) -> [Note] {
+        guard !note.isStub else { return [] }
+        let noteAxis = axis(for: note)?.id
+        let linked = Set(note.linkTargets.map { Self.norm($0) })
+        let window = hours * 3600
+        let candidates = notes.filter { other in
+            guard other.id != note.id, !other.isStub, axis(for: other) != nil else { return false }
+            if linked.contains(Self.norm(other.title)) { return false }
+            if other.linkTargets.contains(where: { Self.norm($0) == Self.norm(note.title) }) { return false }
+            return abs(other.date.timeIntervalSince(note.date)) <= window
+        }
+        return candidates.sorted { a, b in
+            let aCross = (axis(for: a)?.id != noteAxis) ? 0 : 1
+            let bCross = (axis(for: b)?.id != noteAxis) ? 0 : 1
+            if aCross != bCross { return aCross < bCross }
+            return abs(a.date.timeIntervalSince(note.date)) < abs(b.date.timeIntervalSince(note.date))
+        }.prefix(5).map { $0 }
+    }
+
     /// Notes that link *to* the given note (Obsidian-style backlinks).
     func backlinks(to note: Note) -> [Note] {
         let key = Self.norm(note.title)
