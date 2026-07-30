@@ -3,12 +3,13 @@ import HealthKit
 
 /// A health activity flattened from HealthKit into a Sendable value.
 struct HealthItem: Identifiable, Sendable {
-    enum Kind: Sendable { case workout, mindful }
+    enum Kind: Sendable { case workout, mindful, nutrition }
     let id: String            // sample UUID → import externalID
     let kind: Kind
     let title: String
     let start: Date
     let duration: TimeInterval
+    var detail: String? = nil // e.g. a day's macros for nutrition
 }
 
 /// Reads workouts and mindful sessions (with permission). On-device; a workout
@@ -26,6 +27,9 @@ enum HealthKitService {
         let mindfulType = HKObjectType.categoryType(forIdentifier: .mindfulSession)
         var read: Set<HKObjectType> = [workoutType]
         if let mindfulType { read.insert(mindfulType) }
+        // Nutrition (from MyFitnessPal, Cronometer, etc. via Apple Health) → Gut.
+        let nutritionTypes: [HKQuantityTypeIdentifier] = [.dietaryEnergyConsumed, .dietaryProtein, .dietaryFiber]
+        for id in nutritionTypes { if let t = HKObjectType.quantityType(forIdentifier: id) { read.insert(t) } }
         try await store.requestAuthorization(toShare: [], read: read)
 
         let start = Calendar.current.date(byAdding: .day, value: -daysBack, to: Date()) ?? Date()
@@ -44,14 +48,43 @@ enum HealthKitService {
                                         duration: sample.endDate.timeIntervalSince(sample.startDate)))
             }
         }
+        // Nutrition summed per day → one item each ("2100 kcal · 90g protein · 28g fiber").
+        let energy  = await dailySums(store, .dietaryEnergyConsumed, unit: .kilocalorie(), start: start)
+        let protein = await dailySums(store, .dietaryProtein, unit: .gram(), start: start)
+        let fiber   = await dailySums(store, .dietaryFiber, unit: .gram(), start: start)
+        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
+        for day in Set(energy.keys).union(protein.keys).union(fiber.keys) {
+            var parts: [String] = []
+            if let e = energy[day] { parts.append("\(Int(e.rounded())) kcal") }
+            if let p = protein[day] { parts.append("\(Int(p.rounded()))g protein") }
+            if let f = fiber[day] { parts.append("\(Int(f.rounded()))g fiber") }
+            guard !parts.isEmpty else { continue }
+            items.append(HealthItem(id: "nutrition-\(df.string(from: day))", kind: .nutrition,
+                                    title: "Nutrition", start: day, duration: 0,
+                                    detail: parts.joined(separator: " · ")))
+        }
         return items.sorted { $0.start > $1.start }
     }
 
-    private static func samples(_ store: HKHealthStore, type: HKSampleType, start: Date) async throws -> [HKSample] {
+    /// Sum a dietary quantity per calendar day.
+    private static func dailySums(_ store: HKHealthStore, _ id: HKQuantityTypeIdentifier, unit: HKUnit, start: Date) async -> [Date: Double] {
+        guard let type = HKObjectType.quantityType(forIdentifier: id),
+              let samples = try? await samples(store, type: type, start: start, limit: HKObjectQueryNoLimit)
+        else { return [:] }
+        let cal = Calendar.current
+        var sums: [Date: Double] = [:]
+        for s in samples {
+            guard let q = s as? HKQuantitySample else { continue }
+            sums[cal.startOfDay(for: q.startDate), default: 0] += q.quantity.doubleValue(for: unit)
+        }
+        return sums
+    }
+
+    private static func samples(_ store: HKHealthStore, type: HKSampleType, start: Date, limit: Int = 100) async throws -> [HKSample] {
         let predicate = HKQuery.predicateForSamples(withStart: start, end: Date(), options: [])
         let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
         return try await withCheckedThrowingContinuation { cont in
-            let query = HKSampleQuery(sampleType: type, predicate: predicate, limit: 100, sortDescriptors: [sort]) { _, results, error in
+            let query = HKSampleQuery(sampleType: type, predicate: predicate, limit: limit, sortDescriptors: [sort]) { _, results, error in
                 if let error { cont.resume(throwing: error) } else { cont.resume(returning: results ?? []) }
             }
             store.execute(query)
@@ -66,7 +99,10 @@ enum HealthKitService {
         let store = HKHealthStore()
         let workoutType = HKObjectType.workoutType()
         guard let mindfulType = HKObjectType.categoryType(forIdentifier: .mindfulSession) else { return }
-        try? await store.requestAuthorization(toShare: [workoutType, mindfulType], read: [])
+        var share: Set<HKSampleType> = [workoutType, mindfulType]
+        let nutritionIDs: [HKQuantityTypeIdentifier] = [.dietaryEnergyConsumed, .dietaryProtein, .dietaryFiber]
+        for id in nutritionIDs { if let t = HKObjectType.quantityType(forIdentifier: id) { share.insert(t) } }
+        try? await store.requestAuthorization(toShare: share, read: [])
 
         let cal = Calendar.current
         let workouts: [(Int, HKWorkoutActivityType, Int)] = [
@@ -94,6 +130,22 @@ enum HealthKitService {
             mindful.append(HKCategorySample(type: mindfulType, value: HKCategoryValue.notApplicable.rawValue, start: start, end: end))
         }
         try? await store.save(mindful)
+
+        // A couple of days of nutrition (as if synced from MyFitnessPal).
+        var nutrition: [HKSample] = []
+        let daily: [(Int, Double, Double, Double)] = [(0, 2140, 96, 27), (1, 1980, 88, 31)]
+        func q(_ id: HKQuantityTypeIdentifier, _ unit: HKUnit, _ value: Double, _ day: Date) -> HKQuantitySample? {
+            guard let t = HKObjectType.quantityType(forIdentifier: id) else { return nil }
+            let end = cal.date(bySettingHour: 20, minute: 0, second: 0, of: day) ?? day
+            return HKQuantitySample(type: t, quantity: HKQuantity(unit: unit, doubleValue: value), start: end.addingTimeInterval(-3600), end: end)
+        }
+        for (daysAgo, kcal, protein, fiber) in daily {
+            let day = cal.date(byAdding: .day, value: -daysAgo, to: Date()) ?? Date()
+            if let s = q(.dietaryEnergyConsumed, .kilocalorie(), kcal, day) { nutrition.append(s) }
+            if let s = q(.dietaryProtein, .gram(), protein, day) { nutrition.append(s) }
+            if let s = q(.dietaryFiber, .gram(), fiber, day) { nutrition.append(s) }
+        }
+        try? await store.save(nutrition)
     }
     #endif
 

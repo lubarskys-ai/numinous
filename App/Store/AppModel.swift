@@ -505,16 +505,23 @@ final class AppModel: ObservableObject {
     }
 
     /// Create (or re-open) a note from a health activity. Workouts grow Body,
-    /// mindful sessions grow Spirit. Idempotent by sample id.
+    /// mindful sessions grow Spirit, nutrition grows Gut. Idempotent by sample id.
     func createNote(from item: HealthItem) -> UUID? {
-        let (folder, category, axis): (String, String, String) = item.kind == .workout
-            ? ("health/workouts", "Fitness", "body")
-            : ("health/mindful", "Mindfulness", "spirit")
+        let (folder, category, axis): (String, String, String)
+        switch item.kind {
+        case .workout:   (folder, category, axis) = ("health/workouts", "Fitness", "body")
+        case .mindful:   (folder, category, axis) = ("health/mindful", "Mindfulness", "spirit")
+        case .nutrition: (folder, category, axis) = ("health/nutrition", "Nutrition", "gut")
+        }
 
         let df = DateFormatter(); df.dateStyle = .medium; df.timeStyle = .short
         let name = "\(item.title) · \(Self.shortDate(item.start))"
-        let minutes = max(1, Int(item.duration / 60))
-        let body = "\(df.string(from: item.start))\n⏱ \(minutes) min"
+        let body: String
+        if item.kind == .nutrition {
+            body = "\(Self.shortDate(item.start))\n🍽 \(item.detail ?? "")"
+        } else {
+            body = "\(df.string(from: item.start))\n⏱ \(max(1, Int(item.duration / 60))) min"
+        }
 
         let imported = ImportedItem(
             folder: folder, name: name, body: body, date: item.start,

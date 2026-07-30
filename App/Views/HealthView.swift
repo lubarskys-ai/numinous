@@ -62,14 +62,20 @@ struct HealthView: View {
 
     private func row(_ item: HealthItem) -> some View {
         let hasNote = healthNoteID(item) != nil
-        let axisColor = (item.kind == .workout ? model.axis(id: "body") : model.axis(id: "spirit"))?.color ?? .secondary
+        let axisID = ["workout": "body", "mindful": "spirit", "nutrition": "gut"]
+        let key = item.kind == .workout ? "workout" : (item.kind == .mindful ? "mindful" : "nutrition")
+        let axisColor = model.axis(id: axisID[key] ?? "body")?.color ?? .secondary
+        let icon = ["workout": "figure.run", "mindful": "brain.head.profile", "nutrition": "fork.knife"]
+        let subtitle = item.kind == .nutrition
+            ? (item.detail ?? "")
+            : "\(Self.timeLabel(item.start)) · \(max(1, Int(item.duration / 60))) min"
         return HStack(spacing: 12) {
-            Image(systemName: item.kind == .workout ? "figure.run" : "brain.head.profile")
+            Image(systemName: icon[key] ?? "heart")
                 .foregroundStyle(axisColor)
                 .frame(width: 24)
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title).font(.body.weight(.medium))
-                Text("\(Self.timeLabel(item.start)) · \(max(1, Int(item.duration / 60))) min")
+                Text(subtitle)
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
