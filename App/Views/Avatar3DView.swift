@@ -53,7 +53,7 @@ struct Avatar3DView: UIViewRepresentable {
             view.pointOfView = view.scene?.rootNode.childNode(withName: "camera", recursively: false)
             context.coordinator.builtMaturity = maturity
         }
-        view.pointOfView?.position.z = Self.baseDistance / Float(max(0.35, zoom))
+        view.pointOfView?.position.z = Self.baseDistance / Float(max(0.1, zoom))
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -111,7 +111,7 @@ struct Avatar3DView: UIViewRepresentable {
         cam.name = "camera"
         cam.camera = SCNCamera(); cam.camera?.fieldOfView = 42
         cam.camera?.zNear = 0.01           // allow zooming in close without clipping
-        cam.camera?.zFar = 100
+        cam.camera?.zFar = 250
         cam.position = v(0, 0.05, 4.2)
         scene.rootNode.addChildNode(cam)
         let ambient = SCNNode(); ambient.light = SCNLight(); ambient.light?.type = .ambient; ambient.light?.intensity = 720
