@@ -182,7 +182,7 @@ struct FoldersView: View {
                 Text(node.displayName)
                     .font(.system(.body, design: .rounded).weight(.semibold))
                 if let folder {
-                    Text(subtitle(folder, axis)).font(.caption).foregroundStyle(.secondary)
+                    Text(subtitle(folder)).font(.caption).foregroundStyle(.secondary)
                 } else if !path.isEmpty, model.notes.contains(where: { $0.folderName == path }) {
                     Text("needs a category").font(.caption).foregroundStyle(.orange)
                 }
@@ -195,24 +195,25 @@ struct FoldersView: View {
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(Color.secondary.opacity(0.12), in: Capsule())
             }
-            if !path.isEmpty { folderMenu(path, current: axis?.name, intensity: folder?.defaultIntensity) }
+            if !path.isEmpty { folderMenu(path, growthAxes: folder?.growthAxes ?? [], intensity: folder?.defaultIntensity) }
         }
         .padding(.vertical, 4)
     }
 
-    private func subtitle(_ folder: Folder, _ axis: Axis?) -> String {
+    private func subtitle(_ folder: Folder) -> String {
         var parts = [folder.category]
-        if let axis { parts.append(axis.name) }
+        let axisNames = folder.growthAxes.compactMap { model.axis(id: $0)?.name }
+        if !axisNames.isEmpty { parts.append(axisNames.joined(separator: " + ")) }
         if let intensity = folder.defaultIntensity { parts.append("⚡\(intensity)") }
         return parts.joined(separator: " · ")
     }
 
-    private func folderMenu(_ path: String, current: String?, intensity: Int?) -> some View {
+    private func folderMenu(_ path: String, growthAxes: [String], intensity: Int?) -> some View {
         Menu {
             Menu("Grows") {
                 ForEach(model.axes) { axis in
-                    Button { model.assignAxis(toFolder: path, axisID: axis.id) } label: {
-                        if current == axis.name { Label(axis.name, systemImage: "checkmark") } else { Text(axis.name) }
+                    Button { model.toggleFolderAxis(axis.id, forFolder: path) } label: {
+                        if growthAxes.contains(axis.id) { Label(axis.name, systemImage: "checkmark") } else { Text(axis.name) }
                     }
                 }
             }

@@ -282,4 +282,21 @@ h.group("Auto-linking (deterministic)") {
     h.eq(s4.map(\.target), ["books/Atomic Habits"], "prefers the longer match over a substring")
 }
 
+h.group("Multi-axis folders (split growth)") {
+    let engine = ScoreEngine()
+    // A "golf" folder set to grow Body + Mind + Spirit splits each note 3 ways.
+    let golf = Folder(name: "golf", category: "Recreation", axisIDs: ["body", "mind", "spirit"])
+    let note = Note(title: "golf/Round", date: day(1), intensity: 3, sessionID: "s")
+    let r = engine.score(notes: [note], folders: [golf], axes: Axis.defaultSet)
+    h.eq(r.rawTotals.points("body"), 10.0 / 3, "base credit split across 3 axes (body)")
+    h.eq(r.rawTotals.points("mind"), 10.0 / 3, "base credit split across 3 axes (mind)")
+    h.eq(r.rawTotals.points("spirit"), 10.0 / 3, "base credit split across 3 axes (spirit)")
+    h.eq(r.rawTotals.total, 10, "total is unchanged — just divided among axes")
+
+    // A single-axis folder still behaves exactly as before.
+    let single = Folder(name: "sport", category: "Fitness", axisID: "body")
+    let s = engine.score(notes: [Note(title: "sport/Run", date: day(1), intensity: 3, sessionID: "s")], folders: [single])
+    h.eq(s.rawTotals.points("body"), 10, "single-axis folder unchanged (full credit)")
+}
+
 exit(Int32(h.summarize()))

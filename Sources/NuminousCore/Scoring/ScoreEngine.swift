@@ -35,14 +35,20 @@ public struct ScoreEngine {
         let foldersByID = Dictionary(folders.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let axisIDs = Set(axes.map(\.id))
 
-        // A note's axis comes from its folder's mapping.
-        func axisID(for note: Note) -> String? {
+        // A note's axes come from its folder's mapping (one or several). A note's
+        // credit is divided equally among them.
+        func axesFor(_ note: Note) -> [String] {
             let folderID = Folder.normalize(note.folderName)
-            guard !folderID.isEmpty,
-                  let folder = foldersByID[folderID],
-                  let axisID = folder.axisID,
-                  axisIDs.contains(axisID) else { return nil }
-            return axisID
+            guard !folderID.isEmpty, let folder = foldersByID[folderID] else { return [] }
+            return folder.growthAxes.filter { axisIDs.contains($0) }
+        }
+        /// Split `amount` equally across a note's axes as an AxisTotals delta.
+        func spread(_ amount: Double, over axes: [String]) -> AxisTotals {
+            guard !axes.isEmpty else { return [:] }
+            let per = amount / Double(axes.count)
+            var d: AxisTotals = [:]
+            for a in axes { d[a, default: 0] += per }
+            return d
         }
 
         func factor(_ note: Note) -> Double { config.factor(forIntensity: note.intensity) }
@@ -68,14 +74,16 @@ public struct ScoreEngine {
             else { sessionDate[key] = date }
         }
 
-        // MARK: 1. Base credit — one credit per note to its own axis, scaled by intensity.
+        // MARK: 1. Base credit — one credit per note, split across its axes, scaled by intensity.
         for note in notes {
-            guard !note.isStub, let axis = axisID(for: note) else { continue }
+            guard !note.isStub else { continue }
+            let axes = axesFor(note)
+            guard !axes.isEmpty else { continue }
             let credit = note.source == .healthKit
                 ? config.passiveBaseCredit
                 : config.basePerNote * factor(note)
             guard credit != 0 else { continue }
-            addToSession(sessionKey(for: note), date: note.date, [axis: credit])
+            addToSession(sessionKey(for: note), date: note.date, spread(credit, over: axes))
         }
 
         // MARK: 2. Links — the core mechanic. Unique undirected edges from
@@ -94,29 +102,30 @@ public struct ScoreEngine {
 
                 let a = notesByID[UUID(uuidString: ids[0])!]!
                 let b = notesByID[UUID(uuidString: ids[1])!]!
-                let axisA = axisID(for: a)
-                let axisB = axisID(for: b)
-                let counted = axisA != nil && axisB != nil
+                let axesA = axesFor(a)
+                let axesB = axesFor(b)
+                let counted = !axesA.isEmpty && !axesB.isEmpty
 
                 var bonus = 0.0
                 var cross = false
-                if let axisA, let axisB, counted {
-                    cross = axisA != axisB
+                if counted {
+                    // A connection bridges different parts of life if the axis sets differ.
+                    cross = Set(axesA) != Set(axesB)
                     let base = cross ? config.crossAxisLinkBonus : config.sameAxisLinkBonus
                     // Intensity of a connection = average of its endpoints.
                     bonus = base * ((factor(a) + factor(b)) / 2)
 
                     let laterDate = max(a.date, b.date)
                     let laterNote = a.date >= b.date ? a : b
-                    let sKey = sessionKey(for: laterNote)
+                    // Credit each distinct axis the connection touches (once).
                     var delta: AxisTotals = [:]
-                    for axis in Set([axisA, axisB]) { delta[axis, default: 0] += bonus }
-                    addToSession(sKey, date: laterDate, delta)
+                    for axis in Set(axesA + axesB) { delta[axis, default: 0] += bonus }
+                    addToSession(sessionKey(for: laterNote), date: laterDate, delta)
                 }
 
                 links.append(ScoredLink(
                     a: a.id, b: b.id, titleA: a.title, titleB: b.title,
-                    axisA: axisA, axisB: axisB,
+                    axisA: axesA.first, axisB: axesB.first,
                     isCrossAxis: cross, bonusPerAxis: bonus, isCounted: counted
                 ))
             }
@@ -127,17 +136,21 @@ public struct ScoreEngine {
         if config.breadthBonus != 0 {
             var neighborAxes: [UUID: Set<String>] = [:]
             for link in links where link.isCounted {
-                if let axisA = link.axisA { neighborAxes[link.b, default: []].insert(axisA) }
-                if let axisB = link.axisB { neighborAxes[link.a, default: []].insert(axisB) }
+                if let na = notesByID[link.a] { for ax in axesFor(na) { neighborAxes[link.b, default: []].insert(ax) } }
+                if let nb = notesByID[link.b] { for ax in axesFor(nb) { neighborAxes[link.a, default: []].insert(ax) } }
             }
             for note in notes {
-                guard !note.isStub, note.source == .manual, let axis = axisID(for: note) else { continue }
+                guard !note.isStub, note.source == .manual else { continue }
+                let own = axesFor(note)
+                guard let primary = own.first else { continue }
+                // Breadth rewards bridging *via connections*, so a note's own
+                // multi-axis membership counts as one — only its primary axis here.
                 var touched = neighborAxes[note.id] ?? []
-                touched.insert(axis)
+                touched.insert(primary)
                 let d = touched.count
                 guard d >= 2 else { continue }
                 let bonus = config.breadthBonus * Double(d * (d - 1) / 2)
-                addToSession(sessionKey(for: note), date: note.date, [axis: bonus])
+                addToSession(sessionKey(for: note), date: note.date, spread(bonus, over: own))
             }
         }
 

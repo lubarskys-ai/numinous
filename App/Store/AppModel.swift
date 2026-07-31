@@ -569,6 +569,23 @@ final class AppModel: ObservableObject {
     func setFolderAxis(_ axisID: String, forFolder folderID: String) {
         guard let i = folders.firstIndex(where: { $0.id == folderID }) else { return }
         folders[i].axisID = axisID
+        folders[i].axisIDs = nil     // single-axis
+        persist()
+    }
+
+    /// Add or remove an axis from a folder's growth set (a folder can grow several
+    /// axes; each note's growth is split evenly among them). Keeps `axisID` synced
+    /// to the primary for color/display.
+    func toggleFolderAxis(_ axisID: String, forFolder name: String) {
+        let id = Folder.normalize(name)
+        guard let i = folders.firstIndex(where: { $0.id == id }) else {
+            upsertFolder(name: name, category: name.capitalized, axisID: axisID)
+            return
+        }
+        var set = folders[i].growthAxes
+        if let idx = set.firstIndex(of: axisID) { set.remove(at: idx) } else { set.append(axisID) }
+        folders[i].axisIDs = set.isEmpty ? nil : set
+        folders[i].axisID = set.first
         persist()
     }
 
