@@ -34,7 +34,7 @@ struct AvatarView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .gesture(
                     MagnificationGesture()
-                        .onChanged { zoom = min(5, max(0.5, committedZoom * $0)) }
+                        .onChanged { zoom = min(30, max(0.5, committedZoom * $0)) }
                         .onEnded { _ in committedZoom = zoom }
                 )
                 .overlay(alignment: .bottomTrailing) { zoomControls.padding(14) }
@@ -102,7 +102,7 @@ struct AvatarView: View {
     }
 
     private func setZoom(_ z: Double) {
-        let clamped = min(5, max(0.5, z))
+        let clamped = min(30, max(0.5, z))
         zoom = clamped
         committedZoom = clamped
     }

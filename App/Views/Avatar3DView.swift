@@ -133,9 +133,15 @@ struct Avatar3DView: UIViewRepresentable {
         // coiled gut — not plain spheres. Their nodes live inside them.
         func organNode(_ axisKey: String, _ orr: Double, _ mat: SCNMaterial) -> SCNNode {
             let parent = SCNNode()
-            func lobe(_ r: Double, _ x: Double, _ y: Double, _ z: Double) {
+            func lobe(_ r: Double, _ x: Double, _ y: Double, _ z: Double, _ sx: Double = 1, _ sy: Double = 1, _ sz: Double = 1) {
                 let s = ball(r); s.segmentCount = 20; s.materials = [mat]
-                let n = SCNNode(geometry: s); n.position = v(x, y, z)
+                let n = SCNNode(geometry: s); n.position = v(x, y, z); n.scale = v(sx, sy, sz)
+                parent.addChildNode(n)
+            }
+            // A rounded ridge lying along X — used for brain gyri / intestine tube.
+            func ridge(_ length: Double, _ rad: Double, _ x: Double, _ y: Double, _ z: Double, _ ez: Double = 0) {
+                let c = SCNCapsule(capRadius: rad, height: length); c.radialSegmentCount = 8; c.materials = [mat]
+                let n = SCNNode(geometry: c); n.position = v(x, y, z); n.eulerAngles = v(0, 0, .pi / 2 + ez)
                 parent.addChildNode(n)
             }
             switch axisKey {
@@ -145,17 +151,16 @@ struct Avatar3DView: UIViewRepresentable {
                 lobe(orr * 0.58, 0, orr * 0.02, 0)
                 lobe(orr * 0.42, 0, -orr * 0.34, 0)
                 lobe(orr * 0.26, 0, -orr * 0.62, 0)
-            case "mind", "meaning":   // folded, bumpy hemisphere
-                let bumps: [(Double, Double, Double, Double)] = [
-                    (1.0, 0, 0, 0), (0.62, -0.55, 0.25, 0.15), (0.6, 0.5, 0.2, 0.1),
-                    (0.55, 0, -0.45, 0.25), (0.5, 0.18, 0.5, -0.15), (0.5, -0.32, -0.18, -0.3),
-                    (0.46, 0.36, -0.35, 0.2),
-                ]
-                for (br, bx, by, bz) in bumps { lobe(orr * 0.6 * br, bx * orr * 0.75, by * orr * 0.75, bz * orr * 0.6) }
-            case "gut":   // coiled loops of intestine
-                for i in 0..<5 {
-                    let a = Double(i) * 1.65
-                    lobe(orr * 0.42, cos(a) * orr * 0.42, Double(i) * orr * 0.22 - orr * 0.44, sin(a) * orr * 0.32)
+            case "mind", "meaning":   // a hemisphere (flattened ovoid) with gyri folds
+                let toMid = axisKey == "mind" ? 1.0 : -1.0
+                lobe(orr * 0.9, toMid * orr * 0.05, 0, 0, 0.8, 0.82, 1.0)   // main mass, flat at the fissure
+                for k in 0..<3 {                                            // gyri ridges over the top
+                    ridge(orr * 1.05, orr * 0.15, 0, orr * 0.42, Double(k - 1) * orr * 0.42)
+                }
+            case "gut":   // a serpentine coil of intestine, winding side-to-side downward
+                for i in 0..<8 {
+                    let t = Double(i) / 7
+                    lobe(orr * 0.34, sin(t * .pi * 3) * orr * 0.5, (0.5 - t) * orr * 1.25, cos(t * .pi * 2) * orr * 0.22)
                 }
             default:      // spirit: a smooth luminous core
                 lobe(orr, 0, 0, 0)
@@ -177,29 +182,26 @@ struct Avatar3DView: UIViewRepresentable {
             figure.addChildNode(organ)
         }
 
-        // Anchor points inside the limbs/torso so Body nodes stay within the body.
-        let bodyAnchors: [(Double, Double, Double)] = [
-            (0, -0.02, 0), (-0.20, 0.30, 0), (0.20, 0.30, 0),
-            (-0.23, 0.06, 0), (0.23, 0.06, 0),
-            (-0.10, -0.42, 0), (0.10, -0.42, 0),
-            (-0.11, -0.70, 0), (0.11, -0.70, 0),
+        // Every axis places its nodes inside a small interior ellipsoid, so the
+        // whole connectome stays within the body (Body fills the torso/pelvis core).
+        let contain: [String: (Double, Double, Double)] = [
+            "mind": (0.06, 0.07, 0.05), "meaning": (0.06, 0.07, 0.05),
+            "heart": (0.08, 0.075, 0.055), "spirit": (0.065, 0.075, 0.05),
+            "gut": (0.08, 0.06, 0.055), "body": (0.10, 0.20, 0.06),
         ]
 
         var pos: [UUID: SCNVector3] = [:]
         for (axisKey, group) in Dictionary(grouping: nodes, by: { $0.axis }) {
             let c = region(axisKey)
-            let orr = organRadius[axisKey] ?? 0.1
+            let (rx, ry, rz) = contain[axisKey] ?? (0.07, 0.07, 0.05)
+            let n = Double(group.count)
             for (i, gn) in group.enumerated() {
+                let t = (Double(i) + 0.5) / max(1, n)
                 let ga = Double(i) * 2.399963
-                let p: SCNVector3
-                if axisKey == "body" {
-                    let a = bodyAnchors[i % bodyAnchors.count]
-                    p = v(a.0 + cos(ga) * 0.05, a.1 + Double(i / bodyAnchors.count) * -0.06, a.2 + sin(ga) * 0.05)
-                } else {
-                    let t = (Double(i) + 0.5) / Double(max(1, group.count))
-                    let rr = orr * 0.6 * t.squareRoot()
-                    p = v(c.0 + rr * cos(ga), c.1 + (t - 0.5) * orr, c.2 + rr * sin(ga) * 0.7)
-                }
+                let rad = t.squareRoot()
+                let p = v(c.0 + rx * rad * cos(ga),
+                          c.1 + (t - 0.5) * 2 * ry,
+                          c.2 + rz * rad * sin(ga))
                 pos[gn.id] = p
                 let r = min(0.026, 0.007 + 0.006 * Double(degree[gn.id] ?? 0).squareRoot())  // grows with connections
                 let s = ball(r); s.segmentCount = 12
