@@ -47,7 +47,7 @@ struct Avatar3DView: UIViewRepresentable {
     final class Coordinator: NSObject {
         weak var view: SCNView?
         @objc func pan(_ g: UIPanGestureRecognizer) {
-            guard let figure = view?.scene?.rootNode.childNode(withName: "figure", recursively: false) else { return }
+            guard let figure = view?.scene?.rootNode.childNode(withName: "figure", recursively: true) else { return }
             let t = g.translation(in: view)
             figure.eulerAngles.y += Float(t.x) * 0.01
             figure.eulerAngles.x = max(-1.2, min(1.2, figure.eulerAngles.x + Float(t.y) * 0.01))
@@ -335,9 +335,22 @@ struct Avatar3DView: UIViewRepresentable {
             }
         }
 
-        // No auto-spin: hold still so you can drag to rotate and pinch to zoom in
-        // on the connectome without it turning away from you.
-        scene.rootNode.addChildNode(figure)
+        // Gently float in space — a weightless bob, sway, and slow tumble live on a
+        // parent node, so the user's drag-rotation (on `figure`) still composes on
+        // top and never gets overwritten.
+        let floatNode = SCNNode()
+        floatNode.addChildNode(figure)
+        func drift(_ dx: Double, _ dy: Double, _ dz: Double, _ dur: Double) -> SCNAction {
+            let a = SCNAction.moveBy(x: dx, y: dy, z: dz, duration: dur)
+            a.timingMode = .easeInEaseOut
+            return .repeatForever(.sequence([a, a.reversed()]))
+        }
+        floatNode.runAction(drift(0, 0.06, 0, 2.9))
+        floatNode.runAction(drift(0.045, 0, 0.02, 3.8))
+        let turn = SCNAction.rotateBy(x: 0.05, y: 0.10, z: 0, duration: 5.2)
+        turn.timingMode = .easeInEaseOut
+        floatNode.runAction(.repeatForever(.sequence([turn, turn.reversed()])))
+        scene.rootNode.addChildNode(floatNode)
         return scene
     }
 }
