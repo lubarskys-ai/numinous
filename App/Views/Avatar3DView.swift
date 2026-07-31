@@ -88,6 +88,19 @@ struct Avatar3DView: UIViewRepresentable {
 
     private func region(_ axis: String) -> (Double, Double, Double) { GLTFBody.region(axis) }
 
+    /// A soft radial glow image used as a galaxy/nebula sprite.
+    private static func radialGlow(_ color: UIColor) -> UIImage {
+        let size = 128
+        return UIGraphicsImageRenderer(size: CGSize(width: size, height: size)).image { ctx in
+            let colors = [color.withAlphaComponent(0.95).cgColor,
+                          color.withAlphaComponent(0.25).cgColor,
+                          color.withAlphaComponent(0).cgColor] as CFArray
+            guard let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 0.4, 1]) else { return }
+            let c = CGPoint(x: size / 2, y: size / 2)
+            ctx.cgContext.drawRadialGradient(grad, startCenter: c, startRadius: 0, endCenter: c, endRadius: CGFloat(size / 2), options: [])
+        }
+    }
+
     private func buildScene() -> SCNScene {
         let scene = SCNScene()
         func v(_ x: Double, _ y: Double, _ z: Double) -> SCNVector3 { SCNVector3(Float(x), Float(y), Float(z)) }
@@ -227,6 +240,58 @@ struct Avatar3DView: UIViewRepresentable {
             n.renderingOrder = -1
             figure.addChildNode(n)
         }
+
+        // Real named constellations + galaxies in the far sky (billboarded so the
+        // patterns stay readable), for a cosmos that feels earned, not random.
+        func addConstellation(_ stars: [(Double, Double)], _ lines: [(Int, Int)], at: SCNVector3, scale: Double, tint: UIColor) {
+            let group = SCNNode()
+            // Just brighter stars in the constellation's shape — no drawn lines;
+            // the eye fills in the pattern, like the real sky. (`lines` unused.)
+            _ = lines
+            for (sx, sy) in stars {
+                let s = SCNSphere(radius: 0.17); s.segmentCount = 10
+                let m = SCNMaterial(); m.lightingModel = .constant
+                m.diffuse.contents = tint; m.emission.contents = tint; m.emission.intensity = 1.0
+                m.writesToDepthBuffer = false; s.materials = [m]
+                let n = SCNNode(geometry: s)
+                n.position = v((sx - 0.5) * scale, (sy - 0.5) * scale, 0)
+                group.addChildNode(n)
+            }
+            group.position = at
+            group.constraints = [SCNBillboardConstraint()]
+            group.renderingOrder = -1
+            figure.addChildNode(group)
+        }
+        func addGalaxy(at: SCNVector3, scale: Double, tint: UIColor, elong: Double, alpha: CGFloat) {
+            let plane = SCNPlane(width: CGFloat(scale * elong), height: CGFloat(scale))
+            let m = SCNMaterial(); m.lightingModel = .constant
+            m.diffuse.contents = Self.radialGlow(tint)
+            m.blendMode = .add; m.transparency = alpha; m.writesToDepthBuffer = false; m.isDoubleSided = true
+            plane.materials = [m]
+            let n = SCNNode(geometry: plane); n.position = at
+            n.constraints = [SCNBillboardConstraint()]; n.renderingOrder = -2
+            figure.addChildNode(n)
+        }
+        let starWhite = UIColor(red: 0.9, green: 0.93, blue: 1.0, alpha: 1)
+        // Orion
+        addConstellation([(0.28, 0.72), (0.60, 0.76), (0.40, 0.50), (0.47, 0.52), (0.55, 0.55), (0.34, 0.20), (0.62, 0.20)],
+                         [(0, 1), (0, 2), (1, 4), (2, 3), (3, 4), (2, 5), (4, 6)],
+                         at: v(-11, 5, -16), scale: 6, tint: starWhite)
+        // Big Dipper
+        addConstellation([(0.12, 0.72), (0.14, 0.52), (0.34, 0.48), (0.36, 0.66), (0.56, 0.70), (0.74, 0.74), (0.92, 0.66)],
+                         [(0, 1), (1, 2), (2, 3), (3, 0), (3, 4), (4, 5), (5, 6)],
+                         at: v(12, 10, -16), scale: 7, tint: starWhite)
+        // Cassiopeia (W)
+        addConstellation([(0.1, 0.4), (0.3, 0.72), (0.5, 0.46), (0.7, 0.76), (0.9, 0.5)],
+                         [(0, 1), (1, 2), (2, 3), (3, 4)],
+                         at: v(10, -11, -17), scale: 6, tint: starWhite)
+        // Southern Cross
+        addConstellation([(0.5, 0.92), (0.5, 0.08), (0.18, 0.5), (0.82, 0.55)],
+                         [(0, 1), (2, 3)],
+                         at: v(-12, -8, -15), scale: 4.5, tint: starWhite)
+        // A couple of distant galaxies (edge-on blue spiral, round pink nebula)
+        addGalaxy(at: v(15, -5, -25), scale: 7, tint: UIColor(red: 0.78, green: 0.85, blue: 1.0, alpha: 1), elong: 1.8, alpha: 0.6)
+        addGalaxy(at: v(-11, 11, -24), scale: 5, tint: UIColor(red: 1.0, green: 0.72, blue: 0.86, alpha: 1), elong: 1.0, alpha: 0.55)
 
         // Ambience: occasional comets streak across the far field, plus a lone
         // satellite drifting by with a blinking beacon.
