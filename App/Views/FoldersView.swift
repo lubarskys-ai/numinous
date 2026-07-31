@@ -31,6 +31,7 @@ struct FoldersView: View {
     @State private var showSettings = false
     @State private var showCompose = false
     @State private var showCapture = false
+    @State private var axisPickerFolder: FolderRef?
     @State private var showReadwise = false
     @State private var composePrefill: String?
     @State private var importMessage: String?
@@ -89,6 +90,7 @@ struct FoldersView: View {
                     }
                 }
             }
+            .sheet(item: $axisPickerFolder) { ref in FolderAxisPicker(path: ref.id) }
             .sheet(isPresented: $showCapture) { CaptureView(onSaved: { path.append($0) }) }
             .sheet(isPresented: $showCompose) { ComposeView(prefillTitle: composePrefill) }
             .sheet(isPresented: $showReadwise) { ReadwiseConnectView() }
@@ -210,12 +212,8 @@ struct FoldersView: View {
 
     private func folderMenu(_ path: String, growthAxes: [String], intensity: Int?) -> some View {
         Menu {
-            Menu("Grows") {
-                ForEach(model.axes) { axis in
-                    Button { model.toggleFolderAxis(axis.id, forFolder: path) } label: {
-                        if growthAxes.contains(axis.id) { Label(axis.name, systemImage: "checkmark") } else { Text(axis.name) }
-                    }
-                }
+            Button { axisPickerFolder = FolderRef(id: path) } label: {
+                Label(growthAxes.isEmpty ? "Grows…" : "Grows: \(growthAxes.count) axes", systemImage: "circle.hexagongrid")
             }
             Menu("Default intensity") {
                 Button { model.setFolderIntensity(nil, forFolder: path) } label: {
@@ -300,6 +298,45 @@ struct FoldersView: View {
                 importMessage = "Couldn't import contacts: \(error.localizedDescription)"
             }
         }
+    }
+}
+
+/// Wrapper so a folder path can drive a `.sheet(item:)`.
+struct FolderRef: Identifiable { let id: String }
+
+/// Multi-select axis picker for a folder — tap several axes, they stay checked,
+/// then Done. (A `Menu` can't do this: it dismisses on every tap.)
+struct FolderAxisPicker: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let path: String
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(model.axes) { axis in
+                        let on = (model.folder(named: path)?.growthAxes ?? []).contains(axis.id)
+                        Button { model.toggleFolderAxis(axis.id, forFolder: path) } label: {
+                            HStack(spacing: 12) {
+                                Circle().fill(axis.color).frame(width: 12, height: 12)
+                                Text(axis.name).foregroundStyle(.primary)
+                                Spacer()
+                                if on { Image(systemName: "checkmark").foregroundStyle(.blue).fontWeight(.semibold) }
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Grows")
+                } footer: {
+                    Text("Pick one or more parts of life this folder grows. Each note's growth is split evenly among them.")
+                }
+            }
+            .navigationTitle(path)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
 
