@@ -41,8 +41,8 @@ struct RootView: View {
         .fullScreenCover(isPresented: $showAvatar) { AvatarExpandedView() }
         // The companion strolls when you change pages…
         .onChange(of: selection) { _ in trigger(.walk) }
-        // …and does jumping jacks when a new connection forms.
-        .onChange(of: model.spark?.id) { id in if id != nil { trigger(.celebrate) } }
+        // …and does a joyful, heart-popping cheer when a new connection forms.
+        .onChange(of: model.spark?.id) { id in if id != nil { trigger(.cheer) } }
     }
 
     private func trigger(_ action: CompanionAction) {

@@ -3,7 +3,7 @@ import UIKit
 
 /// What the companion is doing right now. Transient actions (walk/celebrate) play
 /// for a fixed duration from `actionStart`, then it falls back to idle on its own.
-enum CompanionAction: Equatable { case idle, walk, celebrate }
+enum CompanionAction: Equatable { case idle, walk, celebrate, cheer }
 
 /// The little companion that follows you page to page — drawn entirely in a Canvas
 /// so its limbs can be rigged (rotated around their joints) and its *evolution* is
@@ -19,6 +19,7 @@ struct CompanionView: View {
 
     private let walkDuration = 1.5
     private let celebrateDuration = 2.0
+    private let cheerDuration = 1.8
 
     var body: some View {
         TimelineView(.animation) { ctx in
@@ -34,6 +35,7 @@ struct CompanionView: View {
             var act = action
             if act == .walk, elapsed > walkDuration { act = .idle }
             if act == .celebrate, elapsed > celebrateDuration { act = .idle }
+            if act == .cheer, elapsed > cheerDuration { act = .idle }
 
             let breath = sin(t * 1.7)
             var hop = CGFloat(breath) * 2.0
@@ -43,6 +45,7 @@ struct CompanionView: View {
             var legAngle = 7.0
             var armSwing = 0.0
             var legSwing = 0.0
+            var cheer: Double? = nil    // elapsed time while cheering (drives hearts + happy eyes)
 
             switch act {
             case .idle:
@@ -59,6 +62,14 @@ struct CompanionView: View {
                 legAngle = 7 + up * 20          // legs spread
                 hop = CGFloat(-up * 13)         // and hop
                 squash = 1 + CGFloat(up * 0.05)
+            case .cheer:
+                // two decaying joyful bounces, arms lifting, hearts floating up
+                let amp = max(0, 1 - elapsed / cheerDuration)
+                let bounce = abs(sin(elapsed * .pi / 0.42))
+                hop = CGFloat(-bounce * 15 * amp)
+                squash = 1 + CGFloat((1 - bounce) * 0.09 * amp)
+                armAngle = 16 + bounce * 55 * amp
+                cheer = elapsed
             }
 
             let blink = t.truncatingRemainder(dividingBy: 3.6) < 0.13 ? 0.12 : 1.0
@@ -75,7 +86,7 @@ struct CompanionView: View {
                     draw(gc, size: size, p: p, color: bodyColor,
                          armAngle: armAngle, legAngle: legAngle,
                          armSwing: armSwing, legSwing: legSwing,
-                         squash: squash, blink: blink)
+                         squash: squash, blink: blink, cheer: cheer)
                 }
             }
             .frame(width: 100, height: 116)
@@ -84,7 +95,7 @@ struct CompanionView: View {
 
     private func draw(_ gc: GraphicsContext, size: CGSize, p: Double, color: Color,
                       armAngle: Double, legAngle: Double, armSwing: Double, legSwing: Double,
-                      squash: CGFloat, blink: Double) {
+                      squash: CGFloat, blink: Double, cheer: Double?) {
         let cx = size.width / 2
         let cy = size.height * 0.52
         let bodyW = 26 + 30 * p
@@ -120,14 +131,62 @@ struct CompanionView: View {
         let hl = CGRect(x: cx + bodyW * 0.06, y: cy - bodyH * 0.30, width: bodyW * 0.22, height: bodyW * 0.22)
         gc.fill(Path(ellipseIn: hl), with: .color(.white.opacity(0.35)))
 
-        // eyes
+        // eyes — happy upward arcs while cheering, otherwise blinking dots
         let eyeW = max(3.5, bodyW * 0.11)
-        let eyeH = max(5, bodyW * 0.16) * blink
-        let eyeY = cy - bodyH * 0.12 - eyeH / 2
-        for dx in [-bodyW * 0.20, bodyW * 0.20] {
-            let r = CGRect(x: cx + dx - eyeW / 2, y: eyeY, width: eyeW, height: eyeH)
-            gc.fill(Capsule().path(in: r), with: .color(.black.opacity(0.78)))
+        let eyeMidY = cy - bodyH * 0.12
+        if cheer != nil {
+            for dx in [-bodyW * 0.20, bodyW * 0.20] {
+                let ex = cx + dx
+                var e = Path()
+                e.move(to: CGPoint(x: ex - eyeW, y: eyeMidY + eyeW * 0.2))
+                e.addQuadCurve(to: CGPoint(x: ex + eyeW, y: eyeMidY + eyeW * 0.2),
+                               control: CGPoint(x: ex, y: eyeMidY - eyeW * 1.2))
+                gc.stroke(e, with: .color(.black.opacity(0.78)), style: StrokeStyle(lineWidth: 2.4, lineCap: .round))
+            }
+        } else {
+            let eyeH = max(5, bodyW * 0.16) * blink
+            for dx in [-bodyW * 0.20, bodyW * 0.20] {
+                let r = CGRect(x: cx + dx - eyeW / 2, y: eyeMidY - eyeH / 2, width: eyeW, height: eyeH)
+                gc.fill(Capsule().path(in: r), with: .color(.black.opacity(0.78)))
+            }
         }
+
+        // floating hearts rising as it cheers
+        if let ce = cheer {
+            let pink = Color(red: 0.96, green: 0.36, blue: 0.52)
+            for (i, fx) in [-0.5, 0.18, 0.55].enumerated() {
+                let lt = ce - Double(i) * 0.22
+                guard lt > 0 else { continue }
+                let life = min(1, lt / 1.25)
+                let op = min(1, life / 0.12) * (1 - life)
+                guard op > 0.02 else { continue }
+                let hx = cx + fx * bodyW
+                let hy = (cy - bodyH * 0.55) - CGFloat(life) * 44
+                let hs = 6.5 * (0.8 + 0.3 * sin(life * .pi))
+                gc.fill(heartPath(CGPoint(x: hx, y: hy), hs), with: .color(pink.opacity(op)))
+            }
+        }
+    }
+
+    /// A small heart, tip at the bottom, built from cubic curves (no arc-direction
+    /// ambiguity), for the "positive link" reaction.
+    private func heartPath(_ c: CGPoint, _ s: CGFloat) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: c.x, y: c.y + s))
+        p.addCurve(to: CGPoint(x: c.x - s, y: c.y - s * 0.4),
+                   control1: CGPoint(x: c.x - s * 0.6, y: c.y + s * 0.3),
+                   control2: CGPoint(x: c.x - s, y: c.y - s * 0.1))
+        p.addCurve(to: CGPoint(x: c.x, y: c.y - s * 0.25),
+                   control1: CGPoint(x: c.x - s, y: c.y - s * 0.78),
+                   control2: CGPoint(x: c.x - s * 0.35, y: c.y - s * 0.78))
+        p.addCurve(to: CGPoint(x: c.x + s, y: c.y - s * 0.4),
+                   control1: CGPoint(x: c.x + s * 0.35, y: c.y - s * 0.78),
+                   control2: CGPoint(x: c.x + s, y: c.y - s * 0.78))
+        p.addCurve(to: CGPoint(x: c.x, y: c.y + s),
+                   control1: CGPoint(x: c.x + s, y: c.y - s * 0.1),
+                   control2: CGPoint(x: c.x + s * 0.6, y: c.y + s * 0.3))
+        p.closeSubpath()
+        return p
     }
 
     private func smooth(_ x: Double, _ a: Double, _ b: Double) -> Double { max(0, min(1, (x - a) / (b - a))) }
