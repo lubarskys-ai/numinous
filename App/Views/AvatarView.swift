@@ -10,6 +10,7 @@ struct AvatarView: View {
     @State private var reflection: ReflectionRecord?
     @State private var zoom: Double = 1
     @State private var committedZoom: Double = 1
+    @State private var growthPreview: Double?
 
     var body: some View {
         let balance = model.score.axisBalance(over: model.axes)
@@ -30,7 +31,7 @@ struct AvatarView: View {
                         growth: { min(1, model.score.revealedTotals.points($0) / 150) },
                         nodes: graphNodes,
                         links: graphLinks,
-                        maturity: model.maturity,
+                        maturity: growthPreview ?? model.maturity,
                         zoom: zoom
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -39,6 +40,7 @@ struct AvatarView: View {
                             .onChanged { zoom = min(30, max(0.5, committedZoom * $0)) }
                             .onEnded { _ in committedZoom = zoom }
                     )
+                    .overlay(alignment: .bottomLeading) { growButton.padding(14) }
                     .overlay(alignment: .bottomTrailing) { zoomControls.padding(14) }
 
                     if let reflection {
@@ -54,6 +56,30 @@ struct AvatarView: View {
             .onAppear { if reflection == nil { reflection = model.currentReflection() } }
         }
         .preferredColorScheme(.dark)
+    }
+
+    /// "Watch it grow" — replays the birth sequence from stars to formed body.
+    private var growButton: some View {
+        Button {
+            guard growthPreview == nil else { return }
+            Task { @MainActor in
+                let steps = 34
+                for step in 0...steps {
+                    growthPreview = Double(step) / Double(steps)
+                    try? await Task.sleep(nanoseconds: 260_000_000)
+                }
+                try? await Task.sleep(nanoseconds: 1_600_000_000)
+                growthPreview = nil
+            }
+        } label: {
+            Label(growthPreview == nil ? "Watch it grow" : "Growing…", systemImage: "sparkles")
+                .font(.caption.weight(.medium))
+                .padding(.horizontal, 12).padding(.vertical, 9)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(.secondary.opacity(0.25)))
+        }
+        .buttonStyle(.plain)
+        .disabled(growthPreview != nil)
     }
 
     /// A deep-space backdrop so the connectome and stardust actually glow.

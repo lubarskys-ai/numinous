@@ -35,10 +35,18 @@ struct Avatar3DView: UIViewRepresentable {
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pan(_:)))
         view.addGestureRecognizer(pan)
         context.coordinator.view = view
+        context.coordinator.builtMaturity = maturity
         return view
     }
 
     func updateUIView(_ view: SCNView, context: Context) {
+        // Rebuild when maturity changes (e.g. the "watch it grow" animation stepping
+        // it) so the birth sequence plays; otherwise just track zoom.
+        if abs(context.coordinator.builtMaturity - maturity) > 0.004 {
+            view.scene = buildScene()
+            view.pointOfView = view.scene?.rootNode.childNode(withName: "camera", recursively: false)
+            context.coordinator.builtMaturity = maturity
+        }
         view.pointOfView?.position.z = Self.baseDistance / Float(max(0.35, zoom))
     }
 
@@ -46,6 +54,7 @@ struct Avatar3DView: UIViewRepresentable {
 
     final class Coordinator: NSObject {
         weak var view: SCNView?
+        var builtMaturity: Double = -1
         @objc func pan(_ g: UIPanGestureRecognizer) {
             guard let figure = view?.scene?.rootNode.childNode(withName: "figure", recursively: true) else { return }
             let t = g.translation(in: view)
