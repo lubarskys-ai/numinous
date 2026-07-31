@@ -142,7 +142,7 @@ struct Avatar3DView: UIViewRepresentable {
         // The real sculpted body, re-skinned grey→color; primitives if it can't load.
         var bodySamples: [SCNVector3] = []
         if let loaded = GLTFBody.load(color: color, growth: growth, maturity: bodyAppear) {
-            bodyFloat.addChildNode(loaded.node)
+            if bodyAppear > 0.02 { bodyFloat.addChildNode(loaded.node) }   // no ghost body before the body stage
             bodySamples = loaded.samples
         } else {
             part(ball(0.17), "mind",    v(-0.07, 0.80, 0), scale: v(0.85, 1.15, 1.0))
@@ -285,11 +285,13 @@ struct Avatar3DView: UIViewRepresentable {
                 let t = (Double(i) + 0.5) / max(1, n)
                 let ga = Double(i) * 2.399963
                 let rad = t.squareRoot()
-                // Nodes appear early (the 2nd stage), already at their body
-                // positions — the constellation that the body later fills in.
-                let p = v(c.0 + rx * rad * cos(ga),
-                          c.1 + (t - 0.5) * 2 * ry,
-                          c.2 + rz * rad * sin(ga))
+                // Nodes start scattered across space and only drift together into
+                // the body form as the avatar matures — a few loose points first.
+                let anatomical = v(c.0 + rx * rad * cos(ga),
+                                   c.1 + (t - 0.5) * 2 * ry,
+                                   c.2 + rz * rad * sin(ga))
+                let converge = smoothstep(0.08, 0.55, matur)
+                let p = lerpV(diffusePoint(abs(gn.id.hashValue % 90000) + 3), anatomical, converge)
                 pos[gn.id] = p
                 guard nodesAppear > 0.02 else { continue }
                 let r = min(0.026, 0.007 + 0.006 * Double(degree[gn.id] ?? 0).squareRoot())  // grows with connections

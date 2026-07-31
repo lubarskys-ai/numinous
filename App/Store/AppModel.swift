@@ -51,8 +51,13 @@ final class AppModel: ObservableObject {
     /// driven by the uncapped thesis total (dominated by cross-axis links + breadth
     /// bonuses), so the body only forms after *many* connections. Reaching the body
     /// stage (~0.42) takes on the order of 1500 points ≈ dozens of cross-axis links.
-    static let maturityFullAt: Double = 3500
-    var maturity: Double { min(1, score.rawTotals.total / Self.maturityFullAt) }
+    /// Fully formed only after this many connections — deliberately a lot, so the
+    /// avatar spends a long time as scattered nodes slowly drifting together.
+    static let maturityFullAtLinks = 120.0
+    var maturity: Double {
+        let connections = score.links.filter { $0.isCounted }.count
+        return min(1, Double(connections) / Self.maturityFullAtLinks)
+    }
 
     private let engine = ScoreEngine()
     private let storage = Storage()

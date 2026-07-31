@@ -149,7 +149,7 @@ enum GLTFBody {
         m.diffuse.contents = UIColor.white          // modulated by vertex colors
         m.roughness.contents = 0.45
         m.emission.contents = UIColor(white: 0.06, alpha: 1)   // lift shadows on the pale bg
-        m.transparency = CGFloat(0.05 + 0.58 * mat)  // opacity grows as it forms
+        m.transparency = CGFloat(0.63 * mat)  // fully invisible when young, solid when formed
         m.isDoubleSided = true
         m.writesToDepthBuffer = false
         // Fresnel rim glow — brightest when young so the ghost still reads as a
