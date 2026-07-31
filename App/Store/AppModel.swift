@@ -80,11 +80,15 @@ final class AppModel: ObservableObject {
         self.notes = n
         self.axes = a
         self.reflectionLog = loaded?.reflections ?? []
+        self.followUps = loaded?.followUps ?? []
         self.readwiseToken = UserDefaults.standard.string(forKey: Self.readwiseTokenKey)
         self.score = ScoreEngine().score(notes: n, folders: f, axes: a)
         if loaded == nil || didMigrate || version < Self.schemaVersion {
-            storage.save(StoredData(notes: n, folders: f, axes: a, schemaVersion: Self.schemaVersion))
+            storage.save(StoredData(notes: n, folders: f, axes: a, schemaVersion: Self.schemaVersion,
+                                    reflections: reflectionLog, followUps: followUps))
         }
+        // Reward any follow-ups you've since completed in iOS Reminders.
+        Task { await checkFollowUps() }
     }
 
     static let schemaVersion = 4
@@ -611,7 +615,45 @@ final class AppModel: ObservableObject {
     private func persist() {
         score = engine.score(notes: notes, folders: folders, axes: axes)
         storage.save(StoredData(notes: notes, folders: folders, axes: axes,
-                                schemaVersion: Self.schemaVersion, reflections: reflectionLog))
+                                schemaVersion: Self.schemaVersion, reflections: reflectionLog,
+                                followUps: followUps))
+    }
+
+    // MARK: - Follow-ups (the CRM loop: set a reminder → do it → grow)
+
+    /// Reminders set from notes; completing one in iOS rewards the follow-through.
+    @Published private(set) var followUps: [FollowUp] = []
+
+    /// Record a follow-up reminder so we can reward it once completed.
+    func recordFollowUp(reminderID: String, noteTitle: String, title: String, due: Date) {
+        followUps.append(FollowUp(reminderID: reminderID, noteTitle: noteTitle, title: title, due: due))
+        persist()
+    }
+
+    /// Ask iOS which pending follow-ups have been completed, and reward each.
+    func checkFollowUps() async {
+        let pending = followUps.filter { !$0.rewarded }
+        guard !pending.isEmpty else { return }
+        let done = await ReminderService.completed(of: pending.map(\.reminderID))
+        for fu in pending where done.contains(fu.reminderID) { rewardFollowUp(fu) }
+    }
+
+    /// You did the thing you meant to → a verified "reconnected" note that grows
+    /// Heart and links the person, and the avatar celebrates.
+    private func rewardFollowUp(_ fu: FollowUp) {
+        guard let idx = followUps.firstIndex(where: { $0.reminderID == fu.reminderID }) else { return }
+        followUps[idx].rewarded = true
+        let personName = fu.noteTitle.split(separator: "/").last.map(String.init) ?? fu.noteTitle
+        ingest([ImportedItem(
+            folder: "notes/reconnections",
+            name: "Reconnected with \(personName) · \(Self.shortDate(Date()))",
+            body: "[[\(fu.noteTitle)]]\nFollowed up ✓ — you set a reminder and did it.",
+            date: Date(),
+            origin: NoteOrigin(source: "followup", externalID: fu.reminderID),
+            folderCategory: "Connections", folderAxisID: "heart", isDormant: false
+        )])
+        spark = ConnectionSpark(id: UUID(), axisID: "heart")   // companion cheers
+        persist()
     }
 
     // MARK: - Reflections (the app noticing things about your web)

@@ -10,6 +10,8 @@ struct NoteDetailView: View {
     @State private var editedBody = ""
     @State private var loadedBodyFor: UUID?
     @State private var photoItem: PhotosPickerItem?
+    @State private var showFollowUp = false
+    @State private var followUpMessage: String?
 
     var body: some View {
         if let note = model.note(id: noteID) {
@@ -63,6 +65,16 @@ struct NoteDetailView: View {
                     if note.origin?.source == "healthkit" {
                         Label("Verified activity", systemImage: "checkmark.seal.fill")
                             .font(.caption).foregroundStyle(.green)
+                    }
+                    if note.origin?.source == "followup" {
+                        Label("Followed through", systemImage: "checkmark.seal.fill")
+                            .font(.caption).foregroundStyle(.green)
+                    }
+                }
+
+                Section {
+                    Button { showFollowUp = true } label: {
+                        Label("Remind me to follow up…", systemImage: "bell.badge")
                     }
                 }
 
@@ -180,9 +192,25 @@ struct NoteDetailView: View {
                         .disabled(editedBody == note.body)
                 }
             }
+            .sheet(isPresented: $showFollowUp) {
+                FollowUpSheet(noteTitle: note.title, defaultTitle: defaultFollowUpTitle(note)) { message in
+                    followUpMessage = message
+                }
+            }
+            .alert("Follow-up", isPresented: Binding(get: { followUpMessage != nil },
+                                                     set: { if !$0 { followUpMessage = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: { Text(followUpMessage ?? "") }
         } else {
             Text("This note no longer exists.").foregroundStyle(.secondary)
         }
+    }
+
+    /// A sensible default reminder title — person-aware ("Call Sam").
+    private func defaultFollowUpTitle(_ note: Note) -> String {
+        Folder.normalize(note.folderName) == "people"
+            ? "Call \(note.displayName)"
+            : "Follow up: \(note.displayName)"
     }
 
     private func link(to title: String) {

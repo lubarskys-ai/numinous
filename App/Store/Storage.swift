@@ -10,6 +10,19 @@ struct StoredData: Codable {
     /// Reflections already shown, so the app varies them and can reference the
     /// past ("last month your Heart was quiet"). Optional = backward-compatible.
     var reflections: [ReflectionRecord]? = nil
+    /// Follow-up reminders set from notes, tracked so completing one rewards you.
+    var followUps: [FollowUp]? = nil
+}
+
+/// A reminder set from a note ("call Sam in two weeks"). When the user completes
+/// it in iOS Reminders, the app rewards the follow-through (grows the connection).
+struct FollowUp: Codable, Identifiable {
+    var id: String { reminderID }
+    let reminderID: String
+    let noteTitle: String     // the note it was set from, e.g. "people/Sam" — to link back
+    let title: String         // the reminder's title, for display
+    let due: Date
+    var rewarded: Bool = false
 }
 
 /// A reflection the app has surfaced. `signature` ties back to the grounding
