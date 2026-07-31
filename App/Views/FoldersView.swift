@@ -34,12 +34,15 @@ struct FoldersView: View {
     @State private var composePrefill: String?
     @State private var importMessage: String?
     @State private var path: [UUID] = []
+    @State private var searchText = ""
     @AppStorage("foldersCabinetMode") private var cabinetMode = true
 
     var body: some View {
         NavigationStack(path: $path) {
             Group {
-                if cabinetMode {
+                if !searchText.isEmpty {
+                    searchResults(searchText)
+                } else if cabinetMode {
                     CabinetView(onOpenNote: { path.append($0) })
                 } else {
                     List {
@@ -51,6 +54,9 @@ struct FoldersView: View {
                     .listStyle(.insetGrouped)
                 }
             }
+            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic),
+                        prompt: "Search notes & links")
+            .autocorrectionDisabled()
             .navigationTitle("Folders")
             .navigationDestination(for: UUID.self) { id in NoteDetailView(noteID: id) }
             .toolbar {
@@ -87,6 +93,69 @@ struct FoldersView: View {
             .alert("Import", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(importMessage ?? "") }
+        }
+    }
+
+    // MARK: - Search
+
+    @ViewBuilder
+    private func searchResults(_ query: String) -> some View {
+        let results = matchingNotes(query)
+        if results.isEmpty {
+            VStack(spacing: 10) {
+                Image(systemName: "magnifyingglass").font(.largeTitle).foregroundStyle(.secondary)
+                Text("No matches for \u{201C}\(query)\u{201D}").foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            List {
+                ForEach(results) { note in
+                    Button { path.append(note.id) } label: { searchRow(note) }
+                        .buttonStyle(.plain)
+                }
+            }
+            .listStyle(.plain)
+        }
+    }
+
+    private func searchRow(_ note: Note) -> some View {
+        let color = model.axis(for: note)?.color ?? .secondary
+        return HStack(spacing: 12) {
+            Image(systemName: note.isStub ? "circle.dashed" : "doc.text.fill")
+                .foregroundStyle(note.isStub ? Color.secondary.opacity(0.6) : color.opacity(0.85))
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(note.displayName).font(.system(.body, design: .rounded).weight(.medium))
+                Text(note.folderName.isEmpty ? "unfiled" : note.folderName)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 3)
+        .contentShape(Rectangle())
+    }
+
+    /// Any note whose title, folder path, body, or `[[links]]` match — so you can
+    /// jump straight to a note (or find everything that links to it).
+    private func matchingNotes(_ query: String) -> [Note] {
+        let q = query.lowercased().trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return [] }
+        func rank(_ n: Note) -> Int {
+            if n.displayName.lowercased().hasPrefix(q) { return 0 }
+            if n.displayName.lowercased().contains(q) { return 1 }
+            if n.folderName.lowercased().contains(q) { return 2 }
+            if n.linkTargets.contains(where: { $0.lowercased().contains(q) }) { return 3 }
+            return 4
+        }
+        return model.notes.filter { n in
+            n.displayName.lowercased().contains(q)
+                || n.folderName.lowercased().contains(q)
+                || n.body.lowercased().contains(q)
+                || n.linkTargets.contains { $0.lowercased().contains(q) }
+        }
+        .sorted { a, b in
+            let ra = rank(a), rb = rank(b)
+            return ra != rb ? ra < rb : a.displayName.localizedCaseInsensitiveCompare(b.displayName) == .orderedAscending
         }
     }
 
