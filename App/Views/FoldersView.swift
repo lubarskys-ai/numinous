@@ -45,7 +45,8 @@ struct FoldersView: View {
                 if !searchText.isEmpty {
                     searchResults(searchText)
                 } else if cabinetMode {
-                    CabinetView(onOpenNote: { path.append($0) })
+                    CabinetView(onOpenNote: { path.append($0) },
+                                onEditAxes: { axisPickerFolder = FolderRef(id: $0) })
                 } else {
                     List {
                         OutlineGroup(buildTree(), children: \.children) { node in

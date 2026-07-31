@@ -7,6 +7,7 @@ import NuminousCore
 struct CabinetView: View {
     @EnvironmentObject var model: AppModel
     var onOpenNote: (UUID) -> Void
+    var onEditAxes: (String) -> Void
     @State private var openCategory: String?
 
     struct Cabinet: Identifiable {
@@ -46,7 +47,8 @@ struct CabinetView: View {
                                        openCategory = openCategory == cab.id ? nil : cab.id
                                    }
                                },
-                               onOpenNote: onOpenNote)
+                               onOpenNote: onOpenNote,
+                               onEditAxes: onEditAxes)
                 }
             }
             .padding(.horizontal)
@@ -58,45 +60,47 @@ struct CabinetView: View {
 
 /// One drawer: a pull-able face that, when open, reveals the riffle deck.
 private struct DrawerView: View {
+    @EnvironmentObject var model: AppModel
     let cabinet: CabinetView.Cabinet
     let isOpen: Bool
     let onToggle: () -> Void
     let onOpenNote: (UUID) -> Void
+    let onEditAxes: (String) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
-            Button(action: onToggle) {
-                HStack(spacing: 12) {
-                    AxisIconTile(symbol: cabinet.symbol, color: cabinet.color, size: 38)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(cabinet.name)
-                            .font(.system(.title3, design: .rounded).weight(.semibold))
-                            .foregroundStyle(.primary)
-                        Text("\(cabinet.notes.count) file\(cabinet.notes.count == 1 ? "" : "s")")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Image(systemName: isOpen ? "chevron.up" : "chevron.down")
-                        .font(.body.weight(.semibold)).foregroundStyle(cabinet.color.opacity(0.7))
+            HStack(spacing: 12) {
+                AxisIconTile(symbol: cabinet.symbol, color: cabinet.color, size: 38)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(cabinet.name)
+                        .font(.system(.title3, design: .rounded).weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text("\(cabinet.notes.count) file\(cabinet.notes.count == 1 ? "" : "s")")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 16).padding(.bottom, 20)
-                .background(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(LinearGradient(colors: [Color(uiColor: .secondarySystemBackground),
-                                                      cabinet.color.opacity(0.10)],
-                                             startPoint: .top, endPoint: .bottom))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(cabinet.color.opacity(0.18))
-                )
-                .overlay(alignment: .bottom) {
-                    Capsule().fill(cabinet.color.opacity(0.4)).frame(width: 44, height: 4).padding(.bottom, 7)
-                }
-                .shadow(color: .black.opacity(0.06), radius: 5, y: 3)
+                Spacer()
+                folderMenu
+                Image(systemName: isOpen ? "chevron.up" : "chevron.down")
+                    .font(.body.weight(.semibold)).foregroundStyle(cabinet.color.opacity(0.7))
             }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 16)
+            .padding(.top, 16).padding(.bottom, 20)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(LinearGradient(colors: [Color(uiColor: .secondarySystemBackground),
+                                                  cabinet.color.opacity(0.10)],
+                                         startPoint: .top, endPoint: .bottom))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(cabinet.color.opacity(0.18))
+            )
+            .overlay(alignment: .bottom) {
+                Capsule().fill(cabinet.color.opacity(0.4)).frame(width: 44, height: 4).padding(.bottom, 7)
+            }
+            .shadow(color: .black.opacity(0.06), radius: 5, y: 3)
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onToggle)
 
             if isOpen {
                 RiffleDeck(notes: cabinet.notes, color: cabinet.color, onOpenNote: onOpenNote)
@@ -104,6 +108,25 @@ private struct DrawerView: View {
                     .padding(.top, 10)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
+        }
+    }
+
+    private var folderMenu: some View {
+        Menu {
+            Button { onEditAxes(cabinet.id) } label: { Label("Grows…", systemImage: "circle.hexagongrid") }
+            Menu("Default intensity") {
+                let intensity = model.folder(named: cabinet.id)?.defaultIntensity
+                Button { model.setFolderIntensity(nil, forFolder: cabinet.id) } label: {
+                    if intensity == nil { Label("Neutral (3)", systemImage: "checkmark") } else { Text("Neutral (3)") }
+                }
+                ForEach(1...5, id: \.self) { level in
+                    Button { model.setFolderIntensity(level, forFolder: cabinet.id) } label: {
+                        if intensity == level { Label("⚡ \(level)", systemImage: "checkmark") } else { Text("⚡ \(level)") }
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle").font(.title3).foregroundStyle(cabinet.color.opacity(0.7))
         }
     }
 }
