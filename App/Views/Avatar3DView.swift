@@ -228,11 +228,11 @@ struct Avatar3DView: UIViewRepresentable {
             let r = 26 + hrand(i, 13) * 16
             let s = (1 - u * u).squareRoot()
             let b = 0.55 + hrand(i, 14) * 0.45
-            let star = ball(0.05); star.segmentCount = 4
+            let star = ball(0.042); star.segmentCount = 4
             let sm = SCNMaterial(); sm.lightingModel = .constant
             let c = UIColor(white: b, alpha: 1)
-            sm.diffuse.contents = c; sm.emission.contents = c; sm.emission.intensity = 0.9
-            sm.transparency = CGFloat(0.4 + hrand(i, 15) * 0.5)
+            sm.diffuse.contents = c; sm.emission.contents = c; sm.emission.intensity = 0.6
+            sm.transparency = CGFloat(0.3 + hrand(i, 15) * 0.45)
             sm.writesToDepthBuffer = false
             star.materials = [sm]
             let n = SCNNode(geometry: star)
@@ -249,9 +249,9 @@ struct Avatar3DView: UIViewRepresentable {
             // the eye fills in the pattern, like the real sky. (`lines` unused.)
             _ = lines
             for (sx, sy) in stars {
-                let s = SCNSphere(radius: 0.17); s.segmentCount = 10
+                let s = SCNSphere(radius: 0.1); s.segmentCount = 10
                 let m = SCNMaterial(); m.lightingModel = .constant
-                m.diffuse.contents = tint; m.emission.contents = tint; m.emission.intensity = 1.0
+                m.diffuse.contents = tint; m.emission.contents = tint; m.emission.intensity = 0.7
                 m.writesToDepthBuffer = false; s.materials = [m]
                 let n = SCNNode(geometry: s)
                 n.position = v((sx - 0.5) * scale, (sy - 0.5) * scale, 0)
@@ -441,15 +441,26 @@ struct Avatar3DView: UIViewRepresentable {
                 let p = lerpV(diffusePoint(abs(gn.id.hashValue % 90000) + 3), anatomical, converge)
                 pos[gn.id] = p
                 guard nodesAppear > 0.02 else { continue }
-                let r = min(0.026, 0.007 + 0.006 * Double(degree[gn.id] ?? 0).squareRoot())  // grows with connections
-                let s = ball(r); s.segmentCount = 12
+                let col = color(gn.axis)
+                // Your nodes read clearly bigger/brighter than the decorative sky
+                // stars — they're *you*, not scenery. Grows with connections.
+                let r = min(0.05, 0.02 + 0.011 * Double(degree[gn.id] ?? 0).squareRoot())
+                let s = ball(r); s.segmentCount = 14
                 let m = SCNMaterial(); m.lightingModel = .constant
-                let col = color(gn.axis); m.diffuse.contents = col; m.emission.contents = col
-                m.emission.intensity = 0.6; m.transparency = CGFloat(0.88 * nodesAppear)
+                m.diffuse.contents = col; m.emission.contents = col
+                m.emission.intensity = 1.0; m.transparency = CGFloat(0.92 * nodesAppear)
                 s.materials = [m]
                 let node = SCNNode(geometry: s); node.position = p; node.renderingOrder = 12
                 node.name = gn.id.uuidString    // tap target → opens this note
                 figure.addChildNode(node)
+                // Soft glow halo so a node reads as a living orb, not a pinprick.
+                let halo = ball(r * 2.7); halo.segmentCount = 12
+                let hm = SCNMaterial(); hm.lightingModel = .constant
+                hm.diffuse.contents = col; hm.emission.contents = col; hm.emission.intensity = 0.7
+                hm.transparency = CGFloat(0.2 * nodesAppear); hm.blendMode = .add; hm.writesToDepthBuffer = false
+                halo.materials = [hm]
+                let haloNode = SCNNode(geometry: halo); haloNode.position = p; haloNode.renderingOrder = 11
+                figure.addChildNode(haloNode)
             }
         }
 
