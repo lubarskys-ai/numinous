@@ -16,6 +16,8 @@ struct Avatar3DView: UIViewRepresentable {
     var growth: (String) -> CGFloat
     var nodes: [GraphNode]
     var links: [GraphEdge]
+    /// 0→1 overall growth (fidelity): drives how materialized the body is.
+    var maturity: Double
     /// 1 = default distance; larger = zoomed in. Driven by the +/- buttons and pinch.
     var zoom: Double
 
@@ -102,7 +104,7 @@ struct Avatar3DView: UIViewRepresentable {
             figure.addChildNode(n)
         }
         // The real sculpted body, re-skinned grey→color; primitives if it can't load.
-        if let modelBody = GLTFBody.load(color: color, growth: growth) {
+        if let modelBody = GLTFBody.load(color: color, growth: growth, maturity: maturity) {
             figure.addChildNode(modelBody)
         } else {
             part(ball(0.17), "mind",    v(-0.07, 0.80, 0), scale: v(0.85, 1.15, 1.0))

@@ -46,7 +46,7 @@ enum GLTFBody {
         let meshes: [Mesh]; let nodes: [Node]; let scenes: [Scene]?; let scene: Int?
     }
 
-    static func load(color: (String) -> UIColor, growth: (String) -> CGFloat) -> SCNNode? {
+    static func load(color: (String) -> UIColor, growth: (String) -> CGFloat, maturity: Double = 1) -> SCNNode? {
         guard let gltfURL = Bundle.main.url(forResource: "scene", withExtension: "gltf", subdirectory: "HumanBody")
                 ?? Bundle.main.url(forResource: "scene", withExtension: "gltf"),
               let json = try? Data(contentsOf: gltfURL),
@@ -140,14 +140,27 @@ enum GLTFBody {
         let element = SCNGeometryElement(indices: indices, primitiveType: .triangles)
         let geo = SCNGeometry(sources: sources, elements: [element])
 
+        // Materialize from mist: young = nearly invisible (just a luminous rim
+        // silhouette around the connectome); mature = a solid condensed body.
+        let mat = max(0, min(1, maturity))
         let m = SCNMaterial()
         m.lightingModel = .physicallyBased
         m.diffuse.contents = UIColor.white          // modulated by vertex colors
         m.roughness.contents = 0.45
         m.emission.contents = UIColor(white: 0.06, alpha: 1)   // lift shadows on the pale bg
-        m.transparency = 0.22                        // ghostly, so the connectome shows through
+        m.transparency = CGFloat(0.05 + 0.58 * mat)  // opacity grows as it forms
         m.isDoubleSided = true
         m.writesToDepthBuffer = false
+        // Fresnel rim glow — brightest when young so the ghost still reads as a
+        // figure; softens as the body solidifies.
+        let rim = String(format: "%.4f", 0.25 + 1.4 * (1 - mat))
+        m.shaderModifiers = [.fragment: """
+        #pragma transparent
+        float _f = 1.0 - abs(dot(normalize(_surface.normal), normalize(_surface.view)));
+        _f = pow(_f, 2.0) * \(rim);
+        _output.color.rgb += float3(0.72, 0.83, 1.0) * _f;
+        _output.color.a = max(_output.color.a, _f * 0.9);
+        """]
         geo.materials = [m]
 
         let node = SCNNode(geometry: geo)
