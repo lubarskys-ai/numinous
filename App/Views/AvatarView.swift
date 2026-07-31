@@ -22,33 +22,46 @@ struct AvatarView: View {
             .map { GraphEdge(a: $0.a, b: $0.b, cross: $0.isCrossAxis) }
 
         NavigationStack {
-            VStack(spacing: 12) {
-                Avatar3DView(
-                    color: { UIColor(model.axis(id: $0)?.color ?? .gray) },
-                    growth: { min(1, model.score.revealedTotals.points($0) / 150) },
-                    nodes: graphNodes,
-                    links: graphLinks,
-                    maturity: model.maturity,
-                    zoom: zoom
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .gesture(
-                    MagnificationGesture()
-                        .onChanged { zoom = min(30, max(0.5, committedZoom * $0)) }
-                        .onEnded { _ in committedZoom = zoom }
-                )
-                .overlay(alignment: .bottomTrailing) { zoomControls.padding(14) }
+            ZStack {
+                spaceBackground.ignoresSafeArea()
+                VStack(spacing: 12) {
+                    Avatar3DView(
+                        color: { UIColor(model.axis(id: $0)?.color ?? .gray) },
+                        growth: { min(1, model.score.revealedTotals.points($0) / 150) },
+                        nodes: graphNodes,
+                        links: graphLinks,
+                        maturity: model.maturity,
+                        zoom: zoom
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .gesture(
+                        MagnificationGesture()
+                            .onChanged { zoom = min(30, max(0.5, committedZoom * $0)) }
+                            .onEnded { _ in committedZoom = zoom }
+                    )
+                    .overlay(alignment: .bottomTrailing) { zoomControls.padding(14) }
 
-                if let reflection {
-                    reflectionCard(reflection, tint: dominantColor(balance))
-                        .padding(.horizontal)
-                        .padding(.bottom, 8)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    if let reflection {
+                        reflectionCard(reflection, tint: dominantColor(balance))
+                            .padding(.horizontal)
+                            .padding(.bottom, 8)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
                 }
             }
             .navigationTitle("Numinous")
+            .toolbarBackground(.hidden, for: .navigationBar)
             .onAppear { if reflection == nil { reflection = model.currentReflection() } }
         }
+        .preferredColorScheme(.dark)
+    }
+
+    /// A deep-space backdrop so the connectome and stardust actually glow.
+    private var spaceBackground: some View {
+        RadialGradient(
+            colors: [Color(red: 0.07, green: 0.08, blue: 0.15), Color(red: 0.02, green: 0.02, blue: 0.05)],
+            center: .center, startRadius: 40, endRadius: 620
+        )
     }
 
     /// "Numinous noticed…" — the app reflecting a true pattern back to you.

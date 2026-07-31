@@ -151,13 +151,12 @@ struct Avatar3DView: UIViewRepresentable {
                 let target = bodySamples[(i * 89) % bodySamples.count]
                 let p = lerpV(diffusePoint(i), target, matur)
                 let ax = GLTFBody.axis(forX: Double(target.x), y: Double(target.y))
-                // Mid-tone so it reads on the light background (a dark backdrop
-                // would let these truly glow — a good next step).
-                let col = GLTFBody.blend(UIColor(white: 0.5, alpha: 1), color(ax), CGFloat(0.45 + matur * 0.45))
-                let dot = ball(0.019); dot.segmentCount = 6
+                // Bright + emissive so it glows against the dark cosmos backdrop.
+                let col = GLTFBody.blend(UIColor(white: 0.9, alpha: 1), color(ax), CGFloat(0.4 + matur * 0.5))
+                let dot = ball(0.016); dot.segmentCount = 6
                 let dm = SCNMaterial(); dm.lightingModel = .constant
-                dm.diffuse.contents = col; dm.emission.contents = col; dm.emission.intensity = 0.12
-                dm.transparency = CGFloat(0.3 + 0.35 * (1 - matur))   // denser cloud young, softer when formed
+                dm.diffuse.contents = col; dm.emission.contents = col; dm.emission.intensity = 0.9
+                dm.transparency = CGFloat(0.35 + 0.4 * (1 - matur))   // denser cloud young, softer when formed
                 dm.writesToDepthBuffer = false
                 dot.materials = [dm]
                 let n = SCNNode(geometry: dot); n.position = p; n.renderingOrder = 5
