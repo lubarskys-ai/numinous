@@ -30,6 +30,7 @@ struct FoldersView: View {
     @EnvironmentObject var model: AppModel
     @State private var showSettings = false
     @State private var showCompose = false
+    @State private var showCapture = false
     @State private var showReadwise = false
     @State private var composePrefill: String?
     @State private var importMessage: String?
@@ -74,6 +75,7 @@ struct FoldersView: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
+                        Button { showCapture = true } label: { Label("Quick capture (voice)", systemImage: "mic") }
                         Button { composePrefill = nil; showCompose = true } label: { Label("New note", systemImage: "square.and.pencil") }
                         Button { path.append(model.createDiaryEntry()) } label: { Label("Diary entry", systemImage: "calendar.badge.plus") }
                         Divider()
@@ -87,6 +89,7 @@ struct FoldersView: View {
                     }
                 }
             }
+            .sheet(isPresented: $showCapture) { CaptureView(onSaved: { path.append($0) }) }
             .sheet(isPresented: $showCompose) { ComposeView(prefillTitle: composePrefill) }
             .sheet(isPresented: $showReadwise) { ReadwiseConnectView() }
             .sheet(isPresented: $showSettings) { AxisSettingsView() }

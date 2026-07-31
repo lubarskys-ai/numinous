@@ -733,6 +733,28 @@ final class AppModel: ObservableObject {
         return f.string(from: Date())
     }
 
+    // MARK: - Capture (dictate/type → auto-linked note)
+
+    /// Suggested wikilinks for free text — the names of notes you already have.
+    func autolinkSuggestions(in text: String) -> [AutoLinker.Suggestion] {
+        AutoLinker().suggest(in: text, candidates: notes.map { (name: $0.displayName, target: $0.title) })
+    }
+
+    /// Create a note from captured (spoken or typed) text, titled from its opening
+    /// words and filed under `notes`. Links inside the body grow you as usual.
+    @discardableResult
+    func createCapturedNote(body: String) -> UUID {
+        let firstLine = body.split(separator: "\n").first.map(String.init) ?? body
+        let words = firstLine.split(separator: " ").prefix(6).joined(separator: " ")
+        let cleaned = words.replacingOccurrences(of: "/", with: "-").trimmingCharacters(in: .whitespaces)
+        let base = "notes/" + (cleaned.isEmpty ? "Note " + Self.dateTimeStamp() : cleaned)
+        var title = base, n = 2
+        while notes.contains(where: { Self.norm($0.title) == Self.norm(title) }) { title = "\(base) (\(n))"; n += 1 }
+        let note = Note(title: title, date: Date(), body: body, intensity: 3)
+        save(note)   // also creates stubs for any [[links]]
+        return note.id
+    }
+
     /// The folder segment of a `[[folder/Name]]` link target ("" if unqualified).
     private static func targetFolder(_ normedTarget: String) -> String {
         let parts = normedTarget.split(separator: "/")

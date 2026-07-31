@@ -265,4 +265,21 @@ h.group("Reflection engine (grounded observations)") {
             "dormant notes don't drive reflections")
 }
 
+h.group("Auto-linking (deterministic)") {
+    let linker = AutoLinker()
+    let cands = [("Sam", "people/Sam"), ("Atomic Habits", "books/Atomic Habits"), ("Deep Work", "books/Deep Work")]
+    let s1 = linker.suggest(in: "had coffee with Sam and talked about Atomic Habits", candidates: cands)
+    h.eq(s1.map(\.target).sorted(), ["books/Atomic Habits", "people/Sam"], "finds mentioned notes")
+    h.check(!s1.map(\.target).contains("books/Deep Work"), "doesn't invent unmentioned links")
+
+    let s2 = linker.suggest(in: "met Samuel for lunch", candidates: [("Sam", "people/Sam")])
+    h.check(s2.isEmpty, "'Sam' doesn't match inside 'Samuel'")
+
+    let s3 = linker.suggest(in: "coffee with [[people/Sam]] today", candidates: cands)
+    h.check(!s3.map(\.target).contains("people/Sam"), "skips names already linked")
+
+    let s4 = linker.suggest(in: "reading Atomic Habits", candidates: [("Atomic", "x/Atomic"), ("Atomic Habits", "books/Atomic Habits")])
+    h.eq(s4.map(\.target), ["books/Atomic Habits"], "prefers the longer match over a substring")
+}
+
 exit(Int32(h.summarize()))
