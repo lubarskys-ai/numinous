@@ -121,12 +121,18 @@ struct Avatar3DView: UIViewRepresentable {
               Double(a.y) + (Double(b.y) - Double(a.y)) * t,
               Double(a.z) + (Double(b.z) - Double(a.z)) * t)
         }
-        // Things inside the body only appear as the cloud gathers.
-        let appear = max(0, (matur - 0.12) / 0.88)
+        // A birth sequence: just stars → nodes → connections → (as connections
+        // multiply) a body with organs. Each layer emerges in its own maturity band.
+        func smoothstep(_ a: Double, _ b: Double, _ x: Double) -> Double {
+            let t = max(0, min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t)
+        }
+        let nodesAppear = smoothstep(0.05, 0.22, matur)
+        let linksAppear = smoothstep(0.22, 0.46, matur)
+        let bodyAppear  = smoothstep(0.42, 0.90, matur)
 
         // The real sculpted body, re-skinned grey→color; primitives if it can't load.
         var bodySamples: [SCNVector3] = []
-        if let loaded = GLTFBody.load(color: color, growth: growth, maturity: maturity) {
+        if let loaded = GLTFBody.load(color: color, growth: growth, maturity: bodyAppear) {
             bodyFloat.addChildNode(loaded.node)
             bodySamples = loaded.samples
         } else {
@@ -150,17 +156,19 @@ struct Avatar3DView: UIViewRepresentable {
 
         // A diffuse cloud of dust that begins scattered across the whole view and
         // gathers onto the body's surface as the avatar matures — stardust → human.
-        if !bodySamples.isEmpty {
+        // The body materializes from a shimmer of motes that gathers onto its
+        // surface — only during the body stage, once connections have multiplied.
+        if !bodySamples.isEmpty, bodyAppear > 0.02 {
             for i in 0..<460 {
                 let target = bodySamples[(i * 89) % bodySamples.count]
-                let p = lerpV(diffusePoint(i), target, matur)
+                let p = lerpV(diffusePoint(i), target, bodyAppear)
                 let ax = GLTFBody.axis(forX: Double(target.x), y: Double(target.y))
                 // Bright + emissive so it glows against the dark cosmos backdrop.
                 let col = GLTFBody.blend(UIColor(white: 0.9, alpha: 1), color(ax), CGFloat(0.4 + matur * 0.5))
                 let dot = ball(0.016); dot.segmentCount = 6
                 let dm = SCNMaterial(); dm.lightingModel = .constant
                 dm.diffuse.contents = col; dm.emission.contents = col; dm.emission.intensity = 0.9
-                dm.transparency = CGFloat(0.35 + 0.4 * (1 - matur))   // denser cloud young, softer when formed
+                dm.transparency = CGFloat(0.6 * bodyAppear)
                 dm.writesToDepthBuffer = false
                 dot.materials = [dm]
                 let n = SCNNode(geometry: dot); n.position = p; n.renderingOrder = 5
@@ -244,7 +252,7 @@ struct Avatar3DView: UIViewRepresentable {
             let col = GLTFBody.blend(UIColor(white: 0.6, alpha: 1), color(axisKey), g * 0.9)
             let m = SCNMaterial(); m.lightingModel = .constant
             m.diffuse.contents = col; m.emission.contents = col; m.emission.intensity = 0.12
-            m.transparency = CGFloat(0.18 * appear); m.writesToDepthBuffer = false; m.isDoubleSided = true
+            m.transparency = CGFloat(0.18 * bodyAppear); m.writesToDepthBuffer = false; m.isDoubleSided = true
             let organ = organNode(axisKey, orr, m)
             organ.position = v(c.0, c.1, c.2)
             organ.renderingOrder = 8
@@ -268,18 +276,18 @@ struct Avatar3DView: UIViewRepresentable {
                 let t = (Double(i) + 0.5) / max(1, n)
                 let ga = Double(i) * 2.399963
                 let rad = t.squareRoot()
-                let anatomical = v(c.0 + rx * rad * cos(ga),
-                                   c.1 + (t - 0.5) * 2 * ry,
-                                   c.2 + rz * rad * sin(ga))
-                // Nodes coalesce from the cloud too, and only appear as it gathers.
-                let p = lerpV(diffusePoint(abs(gn.id.hashValue % 90000) + 3), anatomical, matur)
+                // Nodes appear early (the 2nd stage), already at their body
+                // positions — the constellation that the body later fills in.
+                let p = v(c.0 + rx * rad * cos(ga),
+                          c.1 + (t - 0.5) * 2 * ry,
+                          c.2 + rz * rad * sin(ga))
                 pos[gn.id] = p
-                guard appear > 0.02 else { continue }
+                guard nodesAppear > 0.02 else { continue }
                 let r = min(0.026, 0.007 + 0.006 * Double(degree[gn.id] ?? 0).squareRoot())  // grows with connections
                 let s = ball(r); s.segmentCount = 12
                 let m = SCNMaterial(); m.lightingModel = .constant
                 let col = color(gn.axis); m.diffuse.contents = col; m.emission.contents = col
-                m.emission.intensity = 0.6; m.transparency = CGFloat(0.88 * appear)
+                m.emission.intensity = 0.6; m.transparency = CGFloat(0.88 * nodesAppear)
                 s.materials = [m]
                 let node = SCNNode(geometry: s); node.position = p; node.renderingOrder = 12
                 figure.addChildNode(node)
@@ -313,12 +321,12 @@ struct Avatar3DView: UIViewRepresentable {
             node.renderingOrder = 11
             figure.addChildNode(node)
         }
-        for e in links where appear > 0.05 {
+        for e in links where linksAppear > 0.05 {
             guard let a = pos[e.a], let b = pos[e.b] else { continue }
             let col = e.cross ? UIColor(red: 0.6, green: 0.85, blue: 1.0, alpha: 1) : UIColor(white: 0.8, alpha: 1)
             let mat = SCNMaterial(); mat.lightingModel = .constant
             mat.diffuse.contents = col; mat.emission.contents = col
-            mat.emission.intensity = (e.cross ? 0.38 : 0.2) * appear; mat.transparency = CGFloat(0.4 * appear)
+            mat.emission.intensity = (e.cross ? 0.38 : 0.2) * linksAppear; mat.transparency = CGFloat(0.4 * linksAppear)
             let pts = curve(a, b, 12)
             let r: CGFloat = e.cross ? 0.0017 : 0.0011
             for i in 0..<(pts.count - 1) { thread(pts[i], pts[i + 1], r, mat) }
