@@ -46,6 +46,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var axes: [Axis] = Axis.defaultSet
     @Published private(set) var score: ScoreResult
 
+    /// Visual maturity, 0→1 — the single value both the avatar (materialize-from-
+    /// mist) and the companion (seed→formed) read, so they evolve in lockstep.
+    /// Deliberately *slow*: fidelity is eased hard (cubed) so early growth barely
+    /// materializes anything — a few connections must not reveal a whole torso.
+    var maturity: Double { pow(max(0, min(1, score.fidelity())), 3) }
+
     private let engine = ScoreEngine()
     private let storage = Storage()
     private let classifier = AxisClassifier()

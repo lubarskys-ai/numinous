@@ -27,7 +27,7 @@ struct RootView: View {
         }
         // The companion follows you across every tab; tap it for the full avatar.
         .overlay(alignment: .bottomTrailing) {
-            CompanionView(progress: model.score.fidelity(), tint: tint,
+            CompanionView(progress: model.maturity, tint: tint,
                           action: companionAction, actionStart: companionActionStart)
                 .frame(width: 100, height: 116)
                 .contentShape(Rectangle())

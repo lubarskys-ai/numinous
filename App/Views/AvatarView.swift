@@ -28,7 +28,7 @@ struct AvatarView: View {
                     growth: { min(1, model.score.revealedTotals.points($0) / 150) },
                     nodes: graphNodes,
                     links: graphLinks,
-                    maturity: model.score.fidelity(),
+                    maturity: model.maturity,
                     zoom: zoom
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

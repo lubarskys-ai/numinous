@@ -128,20 +128,51 @@ struct Avatar3DView: UIViewRepresentable {
         for e in links { degree[e.a, default: 0] += 1; degree[e.b, default: 0] += 1 }
 
         // Faint translucent organs drawn inside the body (grey→axis color with
-        // growth). Their nodes live inside them, which keeps them within the body.
-        let organRadius: [String: Double] = ["mind": 0.10, "meaning": 0.10, "heart": 0.115, "spirit": 0.10, "gut": 0.13]
+        // growth), built from clustered lobes so they read as organic tissue —
+        // a two-lobed heart tapering to a point, folded brain hemispheres, a
+        // coiled gut — not plain spheres. Their nodes live inside them.
+        func organNode(_ axisKey: String, _ orr: Double, _ mat: SCNMaterial) -> SCNNode {
+            let parent = SCNNode()
+            func lobe(_ r: Double, _ x: Double, _ y: Double, _ z: Double) {
+                let s = ball(r); s.segmentCount = 20; s.materials = [mat]
+                let n = SCNNode(geometry: s); n.position = v(x, y, z)
+                parent.addChildNode(n)
+            }
+            switch axisKey {
+            case "heart":   // two lobes at top, tapering to a point below
+                lobe(orr * 0.62, -orr * 0.34, orr * 0.30, 0)
+                lobe(orr * 0.62,  orr * 0.34, orr * 0.30, 0)
+                lobe(orr * 0.58, 0, orr * 0.02, 0)
+                lobe(orr * 0.42, 0, -orr * 0.34, 0)
+                lobe(orr * 0.26, 0, -orr * 0.62, 0)
+            case "mind", "meaning":   // folded, bumpy hemisphere
+                let bumps: [(Double, Double, Double, Double)] = [
+                    (1.0, 0, 0, 0), (0.62, -0.55, 0.25, 0.15), (0.6, 0.5, 0.2, 0.1),
+                    (0.55, 0, -0.45, 0.25), (0.5, 0.18, 0.5, -0.15), (0.5, -0.32, -0.18, -0.3),
+                    (0.46, 0.36, -0.35, 0.2),
+                ]
+                for (br, bx, by, bz) in bumps { lobe(orr * 0.6 * br, bx * orr * 0.75, by * orr * 0.75, bz * orr * 0.6) }
+            case "gut":   // coiled loops of intestine
+                for i in 0..<5 {
+                    let a = Double(i) * 1.65
+                    lobe(orr * 0.42, cos(a) * orr * 0.42, Double(i) * orr * 0.22 - orr * 0.44, sin(a) * orr * 0.32)
+                }
+            default:      // spirit: a smooth luminous core
+                lobe(orr, 0, 0, 0)
+            }
+            return parent
+        }
+
+        let organRadius: [String: Double] = ["mind": 0.10, "meaning": 0.10, "heart": 0.12, "spirit": 0.09, "gut": 0.12]
         for (axisKey, orr) in organRadius {
             let c = region(axisKey)
             let g = CGFloat(min(1, max(0, growth(axisKey))))
             let col = GLTFBody.blend(UIColor(white: 0.6, alpha: 1), color(axisKey), g * 0.9)
-            let s = ball(orr); s.segmentCount = 24
             let m = SCNMaterial(); m.lightingModel = .constant
             m.diffuse.contents = col; m.emission.contents = col; m.emission.intensity = 0.12
-            m.transparency = 0.16; m.writesToDepthBuffer = false; m.isDoubleSided = true
-            s.materials = [m]
-            let organ = SCNNode(geometry: s)
+            m.transparency = 0.18; m.writesToDepthBuffer = false; m.isDoubleSided = true
+            let organ = organNode(axisKey, orr, m)
             organ.position = v(c.0, c.1, c.2)
-            organ.scale = axisKey == "gut" ? v(1.05, 0.8, 0.9) : v(1, 1, 1)
             organ.renderingOrder = 8
             figure.addChildNode(organ)
         }
