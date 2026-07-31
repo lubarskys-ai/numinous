@@ -79,6 +79,10 @@ struct Avatar3DView: UIViewRepresentable {
 
         let figure = SCNNode()
         figure.name = "figure"
+        // The body mesh lives on its own node so it can float and tumble
+        // independently of the connectome nodes, axes, and stars.
+        let bodyFloat = SCNNode()
+        figure.addChildNode(bodyFloat)
         let greyBase = UIColor(white: 0.62, alpha: 1)
         func blend(_ a: UIColor, _ b: UIColor, _ t: CGFloat) -> UIColor {
             var ar: CGFloat = 0, ag: CGFloat = 0, ab: CGFloat = 0, aa: CGFloat = 0
@@ -101,7 +105,7 @@ struct Avatar3DView: UIViewRepresentable {
             geo.materials = [m]
             let n = SCNNode(geometry: geo)
             n.position = pos; n.scale = scale; n.eulerAngles = euler; n.renderingOrder = 0
-            figure.addChildNode(n)
+            bodyFloat.addChildNode(n)
         }
         // ── Maturation: begin as a diffuse cloud that coalesces into a body ──
         let matur = max(0, min(1, maturity))
@@ -123,7 +127,7 @@ struct Avatar3DView: UIViewRepresentable {
         // The real sculpted body, re-skinned grey→color; primitives if it can't load.
         var bodySamples: [SCNVector3] = []
         if let loaded = GLTFBody.load(color: color, growth: growth, maturity: maturity) {
-            figure.addChildNode(loaded.node)
+            bodyFloat.addChildNode(loaded.node)
             bodySamples = loaded.samples
         } else {
             part(ball(0.17), "mind",    v(-0.07, 0.80, 0), scale: v(0.85, 1.15, 1.0))
@@ -335,22 +339,20 @@ struct Avatar3DView: UIViewRepresentable {
             }
         }
 
-        // Gently float in space — a weightless bob, sway, and slow tumble live on a
-        // parent node, so the user's drag-rotation (on `figure`) still composes on
-        // top and never gets overwritten.
-        let floatNode = SCNNode()
-        floatNode.addChildNode(figure)
+        // Only the body gently floats and tumbles in space — a weightless bob,
+        // sway, and slow turn — independent of the (stationary) connectome nodes,
+        // axes, and starfield. User drag-rotation still turns the whole `figure`.
         func drift(_ dx: Double, _ dy: Double, _ dz: Double, _ dur: Double) -> SCNAction {
             let a = SCNAction.moveBy(x: dx, y: dy, z: dz, duration: dur)
             a.timingMode = .easeInEaseOut
             return .repeatForever(.sequence([a, a.reversed()]))
         }
-        floatNode.runAction(drift(0, 0.06, 0, 2.9))
-        floatNode.runAction(drift(0.045, 0, 0.02, 3.8))
-        let turn = SCNAction.rotateBy(x: 0.05, y: 0.10, z: 0, duration: 5.2)
+        bodyFloat.runAction(drift(0, 0.06, 0, 2.9))
+        bodyFloat.runAction(drift(0.045, 0, 0.02, 3.8))
+        let turn = SCNAction.rotateBy(x: 0.05, y: 0.14, z: 0, duration: 5.2)
         turn.timingMode = .easeInEaseOut
-        floatNode.runAction(.repeatForever(.sequence([turn, turn.reversed()])))
-        scene.rootNode.addChildNode(floatNode)
+        bodyFloat.runAction(.repeatForever(.sequence([turn, turn.reversed()])))
+        scene.rootNode.addChildNode(figure)
         return scene
     }
 }
