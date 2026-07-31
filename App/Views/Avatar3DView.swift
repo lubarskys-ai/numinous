@@ -228,6 +228,66 @@ struct Avatar3DView: UIViewRepresentable {
             figure.addChildNode(n)
         }
 
+        // Ambience: occasional comets streak across the far field, plus a lone
+        // satellite drifting by with a blinking beacon.
+        func addComet(delay: Double, period: Double, from: SCNVector3, to: SCNVector3, headR: Double, color: UIColor) {
+            let comet = SCNNode()
+            func glow(_ r: Double, _ intensity: CGFloat, _ alpha: CGFloat) -> SCNNode {
+                let s = SCNSphere(radius: r); s.segmentCount = 8
+                let m = SCNMaterial(); m.lightingModel = .constant
+                m.diffuse.contents = color; m.emission.contents = color; m.emission.intensity = intensity
+                m.transparency = alpha; m.writesToDepthBuffer = false
+                s.materials = [m]
+                return SCNNode(geometry: s)
+            }
+            comet.addChildNode(glow(headR, 1.0, 1))
+            let dx = Double(from.x - to.x), dy = Double(from.y - to.y), dz = Double(from.z - to.z)
+            let len = max(1e-4, (dx * dx + dy * dy + dz * dz).squareRoot())
+            for k in 1...7 {
+                let f = 1 - Double(k) / 8
+                let t = glow(headR * f, 0.85, CGFloat(0.8 * f))
+                t.position = v(dx / len * Double(k) * headR * 1.5, dy / len * Double(k) * headR * 1.5, dz / len * Double(k) * headR * 1.5)
+                comet.addChildNode(t)
+            }
+            comet.position = from; comet.opacity = 0; comet.renderingOrder = 0
+            comet.runAction(.repeatForever(.sequence([
+                .wait(duration: delay),
+                .fadeOpacity(to: 1, duration: 0.25),
+                .move(to: to, duration: 2.4),
+                .fadeOpacity(to: 0, duration: 0.25),
+                .move(to: from, duration: 0),
+                .wait(duration: period),
+            ])))
+            figure.addChildNode(comet)
+        }
+        addComet(delay: 4, period: 18, from: v(-17, 9, -10), to: v(18, -4, -13), headR: 0.22, color: UIColor(red: 0.82, green: 0.9, blue: 1.0, alpha: 1))
+        addComet(delay: 13, period: 25, from: v(17, 12, -14), to: v(-16, -7, -9), headR: 0.17, color: UIColor(red: 1.0, green: 0.93, blue: 0.82, alpha: 1))
+
+        do {   // satellite
+            let sat = SCNNode()
+            let bodyMat = SCNMaterial(); bodyMat.lightingModel = .physicallyBased
+            bodyMat.diffuse.contents = UIColor(white: 0.55, alpha: 1); bodyMat.metalness.contents = 0.7; bodyMat.roughness.contents = 0.4
+            let body = SCNBox(width: 0.14, height: 0.08, length: 0.3, chamferRadius: 0.02); body.materials = [bodyMat]
+            sat.addChildNode(SCNNode(geometry: body))
+            let panelMat = SCNMaterial(); panelMat.lightingModel = .constant
+            panelMat.diffuse.contents = UIColor(red: 0.22, green: 0.32, blue: 0.6, alpha: 1)
+            panelMat.emission.contents = UIColor(red: 0.22, green: 0.32, blue: 0.6, alpha: 1); panelMat.emission.intensity = 0.4
+            for side in [-1.0, 1.0] {
+                let panel = SCNBox(width: 0.32, height: 0.01, length: 0.16, chamferRadius: 0); panel.materials = [panelMat]
+                let pn = SCNNode(geometry: panel); pn.position = v(side * 0.28, 0, 0); sat.addChildNode(pn)
+            }
+            let beacon = SCNSphere(radius: 0.03); beacon.segmentCount = 6
+            let bm = SCNMaterial(); bm.lightingModel = .constant; bm.diffuse.contents = UIColor.red; bm.emission.contents = UIColor.red; bm.emission.intensity = 1
+            beacon.materials = [bm]
+            let bn = SCNNode(geometry: beacon); bn.position = v(0, 0.07, 0)
+            bn.runAction(.repeatForever(.sequence([.fadeOpacity(to: 0.15, duration: 0.1), .wait(duration: 1.0), .fadeOpacity(to: 1, duration: 0.1), .wait(duration: 1.0)])))
+            sat.addChildNode(bn)
+            sat.position = v(-14, -9, -12)
+            sat.runAction(.repeatForever(.sequence([.move(to: v(15, 10, -16), duration: 60), .move(to: v(-14, -9, -12), duration: 0)])))
+            sat.runAction(.repeatForever(.rotateBy(x: 0, y: .pi, z: 0.2, duration: 30)))
+            figure.addChildNode(sat)
+        }
+
         // Place each note as a point of light, spread evenly through its region
         // (Body drapes across the whole figure) and varied in depth so the web
         // fills the body rather than clustering at the centre.
