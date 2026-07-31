@@ -164,6 +164,27 @@ struct Avatar3DView: UIViewRepresentable {
             }
         }
 
+        // A boundless background starfield on a far shell that surrounds the camera,
+        // so the cosmos keeps going (never shows an edge) however far you zoom out.
+        for i in 0..<700 {
+            let u = hrand(i, 11) * 2 - 1
+            let phi = hrand(i, 12) * 2 * .pi
+            let r = 26 + hrand(i, 13) * 16
+            let s = (1 - u * u).squareRoot()
+            let b = 0.55 + hrand(i, 14) * 0.45
+            let star = ball(0.05); star.segmentCount = 4
+            let sm = SCNMaterial(); sm.lightingModel = .constant
+            let c = UIColor(white: b, alpha: 1)
+            sm.diffuse.contents = c; sm.emission.contents = c; sm.emission.intensity = 0.9
+            sm.transparency = CGFloat(0.4 + hrand(i, 15) * 0.5)
+            sm.writesToDepthBuffer = false
+            star.materials = [sm]
+            let n = SCNNode(geometry: star)
+            n.position = v(cos(phi) * s * r, u * r, sin(phi) * s * r)
+            n.renderingOrder = -1
+            figure.addChildNode(n)
+        }
+
         // Place each note as a point of light, spread evenly through its region
         // (Body drapes across the whole figure) and varied in depth so the web
         // fills the body rather than clustering at the centre.
