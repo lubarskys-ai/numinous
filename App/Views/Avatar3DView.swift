@@ -127,6 +127,10 @@ struct Avatar3DView: UIViewRepresentable {
         // independently of the connectome nodes, axes, and stars.
         let bodyFloat = SCNNode()
         figure.addChildNode(bodyFloat)
+        // Your connectome (dust, nodes, links, organs) floats and rotates as its
+        // own drifting entity too — independent of the fixed stars and galaxies.
+        let connectomeFloat = SCNNode()
+        figure.addChildNode(connectomeFloat)
         let greyBase = UIColor(white: 0.62, alpha: 1)
         func blend(_ a: UIColor, _ b: UIColor, _ t: CGFloat) -> UIColor {
             var ar: CGFloat = 0, ag: CGFloat = 0, ab: CGFloat = 0, aa: CGFloat = 0
@@ -216,7 +220,7 @@ struct Avatar3DView: UIViewRepresentable {
                 dm.writesToDepthBuffer = false
                 dot.materials = [dm]
                 let n = SCNNode(geometry: dot); n.position = p; n.renderingOrder = 5
-                figure.addChildNode(n)
+                connectomeFloat.addChildNode(n)
             }
         }
 
@@ -412,7 +416,7 @@ struct Avatar3DView: UIViewRepresentable {
             let organ = organNode(axisKey, orr, m)
             organ.position = v(c.0, c.1, c.2)
             organ.renderingOrder = 8
-            figure.addChildNode(organ)
+            connectomeFloat.addChildNode(organ)
         }
 
         // Every axis places its nodes inside a small interior ellipsoid, so the
@@ -452,7 +456,7 @@ struct Avatar3DView: UIViewRepresentable {
                 s.materials = [m]
                 let node = SCNNode(geometry: s); node.position = p; node.renderingOrder = 12
                 node.name = gn.id.uuidString    // tap target → opens this note
-                figure.addChildNode(node)
+                connectomeFloat.addChildNode(node)
                 // Soft glow halo so a node reads as a living orb, not a pinprick.
                 let halo = ball(r * 2.7); halo.segmentCount = 12
                 let hm = SCNMaterial(); hm.lightingModel = .constant
@@ -460,7 +464,7 @@ struct Avatar3DView: UIViewRepresentable {
                 hm.transparency = CGFloat(0.2 * nodesAppear); hm.blendMode = .add; hm.writesToDepthBuffer = false
                 halo.materials = [hm]
                 let haloNode = SCNNode(geometry: halo); haloNode.position = p; haloNode.renderingOrder = 11
-                figure.addChildNode(haloNode)
+                connectomeFloat.addChildNode(haloNode)
             }
         }
 
@@ -489,7 +493,7 @@ struct Avatar3DView: UIViewRepresentable {
             node.position = v((Double(p0.x) + Double(p1.x)) / 2, (Double(p0.y) + Double(p1.y)) / 2, (Double(p0.z) + Double(p1.z)) / 2)
             node.look(at: p1, up: v(0, 1, 0), localFront: v(0, 1, 0))
             node.renderingOrder = 11
-            figure.addChildNode(node)
+            connectomeFloat.addChildNode(node)
         }
         for e in links where linksAppear > 0.05 {
             guard let a = pos[e.a], let b = pos[e.b] else { continue }
@@ -513,23 +517,30 @@ struct Avatar3DView: UIViewRepresentable {
                 var moves: [SCNAction] = pts.dropFirst().map { .move(to: $0, duration: seg) }
                 moves.append(.move(to: pts[0], duration: 0))
                 pulse.runAction(.sequence([.wait(duration: Double.random(in: 0...5)), .repeatForever(.sequence(moves))]))
-                figure.addChildNode(pulse)
+                connectomeFloat.addChildNode(pulse)
             }
         }
 
-        // Only the body gently floats and tumbles in space — a weightless bob,
-        // sway, and slow turn — independent of the (stationary) connectome nodes,
-        // axes, and starfield. User drag-rotation still turns the whole `figure`.
+        // The body and the connectome each gently float and tumble in space — a
+        // weightless bob, sway, and slow turn — independent of each other and of
+        // the fixed stars/galaxies. User drag-rotation still turns the whole scene.
         func drift(_ dx: Double, _ dy: Double, _ dz: Double, _ dur: Double) -> SCNAction {
             let a = SCNAction.moveBy(x: dx, y: dy, z: dz, duration: dur)
             a.timingMode = .easeInEaseOut
             return .repeatForever(.sequence([a, a.reversed()]))
         }
+        func tumble(_ x: Double, _ y: Double, _ dur: Double) -> SCNAction {
+            let t = SCNAction.rotateBy(x: x, y: y, z: 0, duration: dur)
+            t.timingMode = .easeInEaseOut
+            return .repeatForever(.sequence([t, t.reversed()]))
+        }
         bodyFloat.runAction(drift(0, 0.06, 0, 2.9))
         bodyFloat.runAction(drift(0.045, 0, 0.02, 3.8))
-        let turn = SCNAction.rotateBy(x: 0.05, y: 0.14, z: 0, duration: 5.2)
-        turn.timingMode = .easeInEaseOut
-        bodyFloat.runAction(.repeatForever(.sequence([turn, turn.reversed()])))
+        bodyFloat.runAction(tumble(0.05, 0.14, 5.2))
+        // Connectome drifts on its own, slightly different phase/rate.
+        connectomeFloat.runAction(drift(0, 0.05, 0.02, 3.5))
+        connectomeFloat.runAction(drift(0.05, 0, 0, 4.4))
+        connectomeFloat.runAction(tumble(-0.04, 0.11, 6.3))
         scene.rootNode.addChildNode(figure)
         return scene
     }
