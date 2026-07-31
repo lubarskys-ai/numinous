@@ -17,16 +17,29 @@ struct NoteDetailView: View {
                 Section {
                     if note.origin?.source == "readwise" { bookHeader(note) }
                     if let folder = model.folder(named: note.folderName) {
-                        HStack {
-                            Circle().fill(model.axis(id: folder.axisID)?.color ?? .gray).frame(width: 9, height: 9)
-                            Text("\(folder.name) · \(folder.category)")
+                        let axis = model.axis(id: folder.axisID)
+                        HStack(spacing: 12) {
+                            AxisIconTile(symbol: folderSymbol(folder.name, folder.category),
+                                         color: axis?.color ?? .secondary, size: 34)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(folder.name).font(.system(.subheadline, design: .rounded).weight(.semibold))
+                                Text(folder.category).font(.caption).foregroundStyle(.secondary)
+                            }
                             Spacer()
-                            Text(model.axis(id: folder.axisID)?.name ?? "—").foregroundStyle(.secondary)
+                            if let axis {
+                                Text(axis.name)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(axis.color)
+                                    .padding(.horizontal, 10).padding(.vertical, 4)
+                                    .background(axis.color.opacity(0.15), in: Capsule())
+                            }
                         }
-                        .font(.subheadline)
+                        .padding(.vertical, 2)
                     }
                     if !note.isStub {
-                        LabeledContent("Intensity", value: "⚡ \(note.intensity)")
+                        LabeledContent("Intensity") {
+                            Text("⚡ \(note.intensity)").font(.callout.weight(.medium))
+                        }
                     }
                     if let loc = note.location, !loc.isEmpty {
                         LabeledContent("Location", value: loc)
