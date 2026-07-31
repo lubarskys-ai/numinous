@@ -82,13 +82,15 @@ struct NoteRow: View {
     let note: Note
 
     var body: some View {
-        HStack(spacing: 12) {
-            Circle()
-                .fill(model.axis(for: note)?.color ?? Color.gray.opacity(0.35))
-                .frame(width: 10, height: 10)
+        let color = model.axis(for: note)?.color ?? Color.secondary
+        return HStack(spacing: 12) {
+            Image(systemName: note.isStub ? "circle.dashed" : "doc.text.fill")
+                .font(.callout)
+                .foregroundStyle(note.isStub ? Color.secondary.opacity(0.6) : color.opacity(0.85))
+                .frame(width: 22)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(note.displayName).font(.body.weight(.medium))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(note.displayName).font(.system(.body, design: .rounded).weight(.medium))
                 if let snippet { Text(snippet).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                 if !note.isStub {
                     HStack(spacing: 6) {
@@ -101,7 +103,7 @@ struct NoteRow: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 4)
     }
 
     private var snippet: String? {

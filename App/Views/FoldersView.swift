@@ -41,7 +41,9 @@ struct FoldersView: View {
                 OutlineGroup(buildTree(), children: \.children) { node in
                     row(node)
                 }
+                .listRowSeparatorTint(Color.secondary.opacity(0.12))
             }
+            .listStyle(.insetGrouped)
             .navigationTitle("Folders")
             .navigationDestination(for: UUID.self) { id in NoteDetailView(noteID: id) }
             .toolbar {
@@ -86,10 +88,12 @@ struct FoldersView: View {
         let path = node.path ?? ""
         let folder = path.isEmpty ? nil : model.folder(named: path)
         let axis = model.axis(id: folder?.axisID)
-        return HStack(spacing: 10) {
-            Circle().fill(axis?.color ?? Color.gray.opacity(0.4)).frame(width: 10, height: 10)
+        let color = axis?.color ?? Color.secondary
+        return HStack(spacing: 12) {
+            AxisIconTile(symbol: folderSymbol(node.displayName, folder?.category), color: color)
             VStack(alignment: .leading, spacing: 2) {
-                Text(node.displayName).font(.body.weight(.medium))
+                Text(node.displayName)
+                    .font(.system(.body, design: .rounded).weight(.semibold))
                 if let folder {
                     Text(subtitle(folder, axis)).font(.caption).foregroundStyle(.secondary)
                 } else if !path.isEmpty, model.notes.contains(where: { $0.folderName == path }) {
@@ -98,10 +102,15 @@ struct FoldersView: View {
             }
             Spacer(minLength: 0)
             if node.noteNodes.count > 0 {
-                Text("\(node.noteNodes.count)").font(.caption).foregroundStyle(.secondary)
+                Text("\(node.noteNodes.count)")
+                    .font(.caption.weight(.medium).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Color.secondary.opacity(0.12), in: Capsule())
             }
             if !path.isEmpty { folderMenu(path, current: axis?.name, intensity: folder?.defaultIntensity) }
         }
+        .padding(.vertical, 4)
     }
 
     private func subtitle(_ folder: Folder, _ axis: Axis?) -> String {
@@ -203,6 +212,46 @@ struct FoldersView: View {
                 importMessage = "Couldn't import contacts: \(error.localizedDescription)"
             }
         }
+    }
+}
+
+/// A soft, tinted rounded-square icon that gives each folder/note a bit of warmth
+/// and identity instead of a bare colored dot.
+struct AxisIconTile: View {
+    let symbol: String
+    let color: Color
+    var size: CGFloat = 32
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
+            .fill(color.opacity(0.15))
+            .frame(width: size, height: size)
+            .overlay(
+                Image(systemName: symbol)
+                    .font(.system(size: size * 0.48, weight: .semibold))
+                    .foregroundStyle(color)
+            )
+    }
+}
+
+/// A friendly SF Symbol for a folder, guessed from its name/category — so the
+/// tree reads at a glance instead of looking like a database table.
+func folderSymbol(_ name: String, _ category: String?) -> String {
+    let hay = (name + " " + (category ?? "")).lowercased()
+    func has(_ keys: String...) -> Bool { keys.contains { hay.contains($0) } }
+    switch true {
+    case has("people", "contact", "friend", "relationship"): return "person.2.fill"
+    case has("book", "read", "cognition", "ideas"):          return "book.fill"
+    case has("workout", "sport", "fitness", "gym", "exercise"): return "figure.run"
+    case has("health"):                                       return "heart.fill"
+    case has("meal", "nutrition", "food", "gut"):             return "fork.knife"
+    case has("calendar", "event"):                            return "calendar"
+    case has("diary", "journal"):                             return "book.closed.fill"
+    case has("travel", "trip"):                               return "airplane"
+    case has("music", "song"):                                return "music.note"
+    case has("work", "project"):                              return "briefcase.fill"
+    case has("note"):                                         return "note.text"
+    default:                                                  return "folder.fill"
     }
 }
 
