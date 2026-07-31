@@ -34,22 +34,37 @@ struct FoldersView: View {
     @State private var composePrefill: String?
     @State private var importMessage: String?
     @State private var path: [UUID] = []
+    @AppStorage("foldersCabinetMode") private var cabinetMode = true
 
     var body: some View {
         NavigationStack(path: $path) {
-            List {
-                OutlineGroup(buildTree(), children: \.children) { node in
-                    row(node)
+            Group {
+                if cabinetMode {
+                    CabinetView(onOpenNote: { path.append($0) })
+                } else {
+                    List {
+                        OutlineGroup(buildTree(), children: \.children) { node in
+                            row(node)
+                        }
+                        .listRowSeparatorTint(Color.secondary.opacity(0.12))
+                    }
+                    .listStyle(.insetGrouped)
                 }
-                .listRowSeparatorTint(Color.secondary.opacity(0.12))
             }
-            .listStyle(.insetGrouped)
             .navigationTitle("Folders")
             .navigationDestination(for: UUID.self) { id in NoteDetailView(noteID: id) }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { showSettings = true } label: { Image(systemName: "gearshape") }
                         .accessibilityLabel("Customize axes")
+                }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        withAnimation(.easeInOut) { cabinetMode.toggle() }
+                    } label: {
+                        Image(systemName: cabinetMode ? "list.bullet" : "archivebox")
+                    }
+                    .accessibilityLabel(cabinetMode ? "Show list" : "Show cabinet")
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
