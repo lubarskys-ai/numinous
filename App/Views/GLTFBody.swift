@@ -26,7 +26,7 @@ enum GLTFBody {
     }
 
     /// Which axis a vertex belongs to, from its normalized position.
-    private static func axis(forX x: Double, y: Double) -> String {
+    static func axis(forX x: Double, y: Double) -> String {
         if abs(x) > 0.20 { return "body" }        // arms / outer limbs
         if y >= 0.60 { return x < 0 ? "mind" : "meaning" }
         if y >= 0.34 { return "heart" }
@@ -47,7 +47,7 @@ enum GLTFBody {
         let meshes: [Mesh]; let nodes: [Node]; let scenes: [Scene]?; let scene: Int?
     }
 
-    static func load(color: (String) -> UIColor, growth: (String) -> CGFloat, maturity: Double = 1) -> SCNNode? {
+    static func load(color: (String) -> UIColor, growth: (String) -> CGFloat, maturity: Double = 1) -> (node: SCNNode, samples: [SCNVector3])? {
         guard let gltfURL = Bundle.main.url(forResource: "scene", withExtension: "gltf", subdirectory: "HumanBody")
                 ?? Bundle.main.url(forResource: "scene", withExtension: "gltf"),
               let json = try? Data(contentsOf: gltfURL),
@@ -154,7 +154,9 @@ enum GLTFBody {
         m.writesToDepthBuffer = false
         // Fresnel rim glow — brightest when young so the ghost still reads as a
         // figure; softens as the body solidifies.
-        let rim = String(format: "%.4f", 0.25 + 1.4 * (1 - mat))
+        // Rim grows with maturity — no ghost silhouette when young (the diffuse
+        // cloud stands in for the not-yet-formed body).
+        let rim = String(format: "%.4f", 0.6 * mat)
         m.shaderModifiers = [.fragment: """
         #pragma transparent
         float _f = 1.0 - abs(dot(normalize(_surface.normal), normalize(_surface.view)));
@@ -166,7 +168,14 @@ enum GLTFBody {
 
         let node = SCNNode(geometry: geo)
         node.renderingOrder = 0
-        return node
+
+        // Sample points across the surface — the targets the diffuse cloud
+        // coalesces toward as the avatar matures.
+        var samples: [SCNVector3] = []
+        let step = max(1, vertices.count / 380)
+        var s = 0
+        while s < vertices.count { samples.append(vertices[s]); s += step }
+        return (node, samples)
     }
 
     // MARK: - Small matrix helpers (column-major 4×4)

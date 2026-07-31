@@ -103,9 +103,28 @@ struct Avatar3DView: UIViewRepresentable {
             n.position = pos; n.scale = scale; n.eulerAngles = euler; n.renderingOrder = 0
             figure.addChildNode(n)
         }
+        // ── Maturation: begin as a diffuse cloud that coalesces into a body ──
+        let matur = max(0, min(1, maturity))
+        func hrand(_ i: Int, _ salt: Int) -> Double {
+            let x = sin(Double(i) * 12.9898 + Double(salt) * 78.233 + 1.7) * 43758.5453
+            return x - floor(x)
+        }
+        func diffusePoint(_ i: Int) -> SCNVector3 {
+            v((hrand(i, 1) - 0.5) * 5.6, (hrand(i, 2) - 0.5) * 6.6, (hrand(i, 3) - 0.5) * 3.4)
+        }
+        func lerpV(_ a: SCNVector3, _ b: SCNVector3, _ t: Double) -> SCNVector3 {
+            v(Double(a.x) + (Double(b.x) - Double(a.x)) * t,
+              Double(a.y) + (Double(b.y) - Double(a.y)) * t,
+              Double(a.z) + (Double(b.z) - Double(a.z)) * t)
+        }
+        // Things inside the body only appear as the cloud gathers.
+        let appear = max(0, (matur - 0.12) / 0.88)
+
         // The real sculpted body, re-skinned grey→color; primitives if it can't load.
-        if let modelBody = GLTFBody.load(color: color, growth: growth, maturity: maturity) {
-            figure.addChildNode(modelBody)
+        var bodySamples: [SCNVector3] = []
+        if let loaded = GLTFBody.load(color: color, growth: growth, maturity: maturity) {
+            figure.addChildNode(loaded.node)
+            bodySamples = loaded.samples
         } else {
             part(ball(0.17), "mind",    v(-0.07, 0.80, 0), scale: v(0.85, 1.15, 1.0))
             part(ball(0.17), "meaning", v( 0.07, 0.80, 0), scale: v(0.85, 1.15, 1.0))
@@ -118,6 +137,32 @@ struct Avatar3DView: UIViewRepresentable {
             part(limb(0.07, 0.66), "body", v( 0.29, 0.20, 0), euler: v(0, 0, -0.16))
             part(limb(0.095, 0.80), "body", v(-0.11, -0.64, 0))
             part(limb(0.095, 0.80), "body", v( 0.11, -0.64, 0))
+            for i in 0..<220 {
+                let ax = ["mind", "meaning", "heart", "spirit", "gut", "body"][i % 6]
+                let c = region(ax)
+                bodySamples.append(v(c.0 + (hrand(i, 4) - 0.5) * 0.22, c.1 + (hrand(i, 5) - 0.5) * 0.5, c.2 + (hrand(i, 6) - 0.5) * 0.16))
+            }
+        }
+
+        // A diffuse cloud of dust that begins scattered across the whole view and
+        // gathers onto the body's surface as the avatar matures — stardust → human.
+        if !bodySamples.isEmpty {
+            for i in 0..<460 {
+                let target = bodySamples[(i * 89) % bodySamples.count]
+                let p = lerpV(diffusePoint(i), target, matur)
+                let ax = GLTFBody.axis(forX: Double(target.x), y: Double(target.y))
+                // Mid-tone so it reads on the light background (a dark backdrop
+                // would let these truly glow — a good next step).
+                let col = GLTFBody.blend(UIColor(white: 0.5, alpha: 1), color(ax), CGFloat(0.45 + matur * 0.45))
+                let dot = ball(0.019); dot.segmentCount = 6
+                let dm = SCNMaterial(); dm.lightingModel = .constant
+                dm.diffuse.contents = col; dm.emission.contents = col; dm.emission.intensity = 0.12
+                dm.transparency = CGFloat(0.3 + 0.35 * (1 - matur))   // denser cloud young, softer when formed
+                dm.writesToDepthBuffer = false
+                dot.materials = [dm]
+                let n = SCNNode(geometry: dot); n.position = p; n.renderingOrder = 5
+                figure.addChildNode(n)
+            }
         }
 
         // Place each note as a point of light, spread evenly through its region
@@ -175,7 +220,7 @@ struct Avatar3DView: UIViewRepresentable {
             let col = GLTFBody.blend(UIColor(white: 0.6, alpha: 1), color(axisKey), g * 0.9)
             let m = SCNMaterial(); m.lightingModel = .constant
             m.diffuse.contents = col; m.emission.contents = col; m.emission.intensity = 0.12
-            m.transparency = 0.18; m.writesToDepthBuffer = false; m.isDoubleSided = true
+            m.transparency = CGFloat(0.18 * appear); m.writesToDepthBuffer = false; m.isDoubleSided = true
             let organ = organNode(axisKey, orr, m)
             organ.position = v(c.0, c.1, c.2)
             organ.renderingOrder = 8
@@ -199,15 +244,18 @@ struct Avatar3DView: UIViewRepresentable {
                 let t = (Double(i) + 0.5) / max(1, n)
                 let ga = Double(i) * 2.399963
                 let rad = t.squareRoot()
-                let p = v(c.0 + rx * rad * cos(ga),
-                          c.1 + (t - 0.5) * 2 * ry,
-                          c.2 + rz * rad * sin(ga))
+                let anatomical = v(c.0 + rx * rad * cos(ga),
+                                   c.1 + (t - 0.5) * 2 * ry,
+                                   c.2 + rz * rad * sin(ga))
+                // Nodes coalesce from the cloud too, and only appear as it gathers.
+                let p = lerpV(diffusePoint(abs(gn.id.hashValue % 90000) + 3), anatomical, matur)
                 pos[gn.id] = p
+                guard appear > 0.02 else { continue }
                 let r = min(0.026, 0.007 + 0.006 * Double(degree[gn.id] ?? 0).squareRoot())  // grows with connections
                 let s = ball(r); s.segmentCount = 12
                 let m = SCNMaterial(); m.lightingModel = .constant
                 let col = color(gn.axis); m.diffuse.contents = col; m.emission.contents = col
-                m.emission.intensity = 0.6; m.transparency = 0.88
+                m.emission.intensity = 0.6; m.transparency = CGFloat(0.88 * appear)
                 s.materials = [m]
                 let node = SCNNode(geometry: s); node.position = p; node.renderingOrder = 12
                 figure.addChildNode(node)
@@ -241,12 +289,12 @@ struct Avatar3DView: UIViewRepresentable {
             node.renderingOrder = 11
             figure.addChildNode(node)
         }
-        for e in links {
+        for e in links where appear > 0.05 {
             guard let a = pos[e.a], let b = pos[e.b] else { continue }
             let col = e.cross ? UIColor(red: 0.6, green: 0.85, blue: 1.0, alpha: 1) : UIColor(white: 0.8, alpha: 1)
             let mat = SCNMaterial(); mat.lightingModel = .constant
             mat.diffuse.contents = col; mat.emission.contents = col
-            mat.emission.intensity = e.cross ? 0.38 : 0.2; mat.transparency = 0.4
+            mat.emission.intensity = (e.cross ? 0.38 : 0.2) * appear; mat.transparency = CGFloat(0.4 * appear)
             let pts = curve(a, b, 12)
             let r: CGFloat = e.cross ? 0.0017 : 0.0011
             for i in 0..<(pts.count - 1) { thread(pts[i], pts[i + 1], r, mat) }
