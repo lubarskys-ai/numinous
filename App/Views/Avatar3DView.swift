@@ -20,6 +20,8 @@ struct Avatar3DView: UIViewRepresentable {
     var maturity: Double
     /// 1 = default distance; larger = zoomed in. Driven by the +/- buttons and pinch.
     var zoom: Double
+    /// Called with a note's id when its node is tapped.
+    var onTapNode: ((UUID) -> Void)? = nil
 
     static let baseDistance: Float = 8.5
 
@@ -34,12 +36,16 @@ struct Avatar3DView: UIViewRepresentable {
         view.isPlaying = true          // keep the render loop live for the neural pulses
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pan(_:)))
         view.addGestureRecognizer(pan)
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tap(_:)))
+        view.addGestureRecognizer(tap)
         context.coordinator.view = view
         context.coordinator.builtMaturity = maturity
+        context.coordinator.onTapNode = onTapNode
         return view
     }
 
     func updateUIView(_ view: SCNView, context: Context) {
+        context.coordinator.onTapNode = onTapNode
         // Rebuild when maturity changes (e.g. the "watch it grow" animation stepping
         // it) so the birth sequence plays; otherwise just track zoom.
         if abs(context.coordinator.builtMaturity - maturity) > 0.004 {
@@ -55,12 +61,28 @@ struct Avatar3DView: UIViewRepresentable {
     final class Coordinator: NSObject {
         weak var view: SCNView?
         var builtMaturity: Double = -1
+        var onTapNode: ((UUID) -> Void)?
         @objc func pan(_ g: UIPanGestureRecognizer) {
             guard let figure = view?.scene?.rootNode.childNode(withName: "figure", recursively: true) else { return }
             let t = g.translation(in: view)
             figure.eulerAngles.y += Float(t.x) * 0.01
             figure.eulerAngles.x = max(-1.2, min(1.2, figure.eulerAngles.x + Float(t.y) * 0.01))
             g.setTranslation(.zero, in: view)
+        }
+        /// Open the note whose node is nearest the tap (projected to the screen),
+        /// which is far more forgiving than hit-testing tiny spheres.
+        @objc func tap(_ g: UITapGestureRecognizer) {
+            guard let view, let scene = view.scene else { return }
+            let p = g.location(in: view)
+            var best: (id: UUID, dist: CGFloat)?
+            scene.rootNode.enumerateChildNodes { node, _ in
+                guard let name = node.name, let id = UUID(uuidString: name) else { return }
+                let s = view.projectPoint(node.worldPosition)
+                guard s.z > 0, s.z < 1 else { return }
+                let d = hypot(CGFloat(s.x) - p.x, CGFloat(s.y) - p.y)
+                if d < 44, best == nil || d < best!.dist { best = (id, d) }
+            }
+            if let best { onTapNode?(best.id) }
         }
     }
 
@@ -301,6 +323,7 @@ struct Avatar3DView: UIViewRepresentable {
                 m.emission.intensity = 0.6; m.transparency = CGFloat(0.88 * nodesAppear)
                 s.materials = [m]
                 let node = SCNNode(geometry: s); node.position = p; node.renderingOrder = 12
+                node.name = gn.id.uuidString    // tap target → opens this note
                 figure.addChildNode(node)
             }
         }

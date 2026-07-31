@@ -5,12 +5,16 @@ import NuminousCore
 /// The Avatar tab: the 3D figure itself — grey when young, taking on each axis's
 /// color as it matures. Drag to rotate, pinch to zoom. A gentle "Numinous
 /// noticed…" reflection may sit beneath it.
+/// Wrapper so a tapped note id can drive a `.sheet(item:)`.
+private struct IdentifiedID: Identifiable { let id: UUID }
+
 struct AvatarView: View {
     @EnvironmentObject var model: AppModel
     @State private var reflection: ReflectionRecord?
     @State private var zoom: Double = 1
     @State private var committedZoom: Double = 1
     @State private var growthPreview: Double?
+    @State private var openNote: IdentifiedID?
 
     var body: some View {
         let balance = model.score.axisBalance(over: model.axes)
@@ -32,7 +36,8 @@ struct AvatarView: View {
                         nodes: graphNodes,
                         links: graphLinks,
                         maturity: growthPreview ?? model.maturity,
-                        zoom: zoom
+                        zoom: zoom,
+                        onTapNode: { openNote = IdentifiedID(id: $0) }
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .gesture(
@@ -54,6 +59,9 @@ struct AvatarView: View {
             .navigationTitle("Numinous")
             .toolbarBackground(.hidden, for: .navigationBar)
             .onAppear { if reflection == nil { reflection = model.currentReflection() } }
+            .sheet(item: $openNote) { wrapped in
+                NavigationStack { NoteDetailView(noteID: wrapped.id) }
+            }
         }
         .preferredColorScheme(.dark)
     }
