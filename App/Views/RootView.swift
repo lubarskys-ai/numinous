@@ -7,6 +7,8 @@ struct RootView: View {
     @State private var selection: String =
         ProcessInfo.processInfo.environment["NUMINOUS_TAB"] ?? "folders"
     @State private var showAvatar = false
+    @State private var companionAction: CompanionAction = .idle
+    @State private var companionActionStart = Date()
 
     var body: some View {
         let balance = model.score.axisBalance(over: model.axes)
@@ -25,7 +27,8 @@ struct RootView: View {
         }
         // The companion follows you across every tab; tap it for the full avatar.
         .overlay(alignment: .bottomTrailing) {
-            CompanionView(progress: model.score.fidelity(), tint: tint)
+            CompanionView(progress: model.score.fidelity(), tint: tint,
+                          action: companionAction, actionStart: companionActionStart)
                 .frame(width: 100, height: 116)
                 .contentShape(Rectangle())
                 .onTapGesture { showAvatar = true }
@@ -36,5 +39,14 @@ struct RootView: View {
         // A full-screen flourish whenever a new connection forms.
         .overlay { ConnectionSparkOverlay() }
         .fullScreenCover(isPresented: $showAvatar) { AvatarExpandedView() }
+        // The companion strolls when you change pages…
+        .onChange(of: selection) { _ in trigger(.walk) }
+        // …and does jumping jacks when a new connection forms.
+        .onChange(of: model.spark?.id) { id in if id != nil { trigger(.celebrate) } }
+    }
+
+    private func trigger(_ action: CompanionAction) {
+        companionAction = action
+        companionActionStart = Date()
     }
 }

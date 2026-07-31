@@ -1,88 +1,136 @@
 import SwiftUI
 import UIKit
 
-/// The little companion that follows you page to page — drawn entirely in code so
-/// its *evolution* is ours to shape. At low growth it's barely a glowing seed with
-/// eyes; as `progress` (fidelity 0→1) rises it grows a body, gains its dominant
-/// axis color, and sprouts arms then legs. Idle breathing + blinking keep it alive.
+/// What the companion is doing right now. Transient actions (walk/celebrate) play
+/// for a fixed duration from `actionStart`, then it falls back to idle on its own.
+enum CompanionAction: Equatable { case idle, walk, celebrate }
+
+/// The little companion that follows you page to page — drawn entirely in a Canvas
+/// so its limbs can be rigged (rotated around their joints) and its *evolution* is
+/// ours to shape. Low `progress` (fidelity 0→1) = a barely-formed seed with eyes;
+/// as it rises it grows a body, gains its dominant-axis color, then arms and legs.
+/// Idle breathing + blinking keep it alive; it walks on page changes and does
+/// jumping jacks when you make a connection.
 struct CompanionView: View {
-    /// Overall growth, 0→1 (drives how formed it is).
     var progress: Double
-    /// Dominant-axis color it matures toward.
     var tint: Color
+    var action: CompanionAction
+    var actionStart: Date
+
+    private let walkDuration = 1.5
+    private let celebrateDuration = 2.0
 
     var body: some View {
         TimelineView(.animation) { ctx in
-            let t = ctx.date.timeIntervalSinceReferenceDate
-            let p = max(0, min(1, progress))
-            let breath = sin(t * 1.7)
-            let bob = CGFloat(breath) * 2.2
-            let squash = 1 + CGFloat(breath) * 0.045
-            let blink = t.truncatingRemainder(dividingBy: 3.6) < 0.13 ? 0.12 : 1.0
-
-            let bodyW = 26 + 30 * p
-            let bodyH = 30 + 34 * p
-            let grey = Color(white: 0.66)
-            let bodyColor = mix(grey, tint, 0.15 + 0.85 * p)
-            let armOp = smooth(p, 0.32, 0.52)
-            let legOp = smooth(p, 0.5, 0.72)
-
-            ZStack {
-                // aura
-                Circle()
-                    .fill(tint.opacity(0.10 + 0.16 * p))
-                    .frame(width: bodyW * 2.4, height: bodyW * 2.4)
-                    .blur(radius: 12)
-                    .scaleEffect(1 + CGFloat(breath) * 0.05)
-
-                // legs
-                Group {
-                    limb(bodyColor, w: 7, h: 20).offset(x: -bodyW * 0.20, y: bodyH * 0.52)
-                    limb(bodyColor, w: 7, h: 20).offset(x:  bodyW * 0.20, y: bodyH * 0.52)
-                }
-                .opacity(legOp)
-
-                // arms
-                Group {
-                    limb(bodyColor, w: 6, h: 18).rotationEffect(.degrees(24)).offset(x: -bodyW * 0.52, y: bodyH * 0.06)
-                    limb(bodyColor, w: 6, h: 18).rotationEffect(.degrees(-24)).offset(x: bodyW * 0.52, y: bodyH * 0.06)
-                }
-                .opacity(armOp)
-
-                // body
-                Capsule()
-                    .fill(bodyColor)
-                    .frame(width: bodyW, height: bodyH * squash)
-                    .overlay(alignment: .topTrailing) {
-                        Circle().fill(.white.opacity(0.4)).frame(width: bodyW * 0.22, height: bodyW * 0.22)
-                            .offset(x: -bodyW * 0.14, y: bodyH * 0.16)
-                    }
-
-                // eyes
-                HStack(spacing: bodyW * 0.24) {
-                    eye(bodyW); eye(bodyW)
-                }
-                .offset(y: -bodyH * 0.10)
-                .scaleEffect(x: 1, y: blink, anchor: .center)
-            }
-            .frame(width: 100, height: 116)
-            .offset(y: bob)
+            companionBody(now: ctx.date)
         }
     }
 
-    private func limb(_ color: Color, w: CGFloat, h: CGFloat) -> some View {
-        Capsule().fill(color).frame(width: w, height: h)
+    private func companionBody(now: Date) -> some View {
+        let t = now.timeIntervalSinceReferenceDate
+            let elapsed = now.timeIntervalSince(actionStart)
+            let p = max(0, min(1, progress))
+
+            var act = action
+            if act == .walk, elapsed > walkDuration { act = .idle }
+            if act == .celebrate, elapsed > celebrateDuration { act = .idle }
+
+            let breath = sin(t * 1.7)
+            var hop = CGFloat(breath) * 2.0
+            var scoot: CGFloat = 0
+            var squash = 1 + CGFloat(breath) * 0.045
+            var armAngle = 16.0     // degrees from straight-down
+            var legAngle = 7.0
+            var armSwing = 0.0
+            var legSwing = 0.0
+
+            switch act {
+            case .idle:
+                break
+            case .walk:
+                let w = elapsed * 9
+                armSwing = sin(w) * 16
+                legSwing = -sin(w) * 16
+                hop = CGFloat(abs(sin(w))) * -2.5
+                scoot = CGFloat(sin(elapsed * 5.5)) * 4
+            case .celebrate:
+                let up = (1 - cos(elapsed * 2 * .pi / 0.5)) / 2   // 0→1→0 every 0.5s
+                armAngle = 16 + up * 148        // arms swing overhead
+                legAngle = 7 + up * 20          // legs spread
+                hop = CGFloat(-up * 13)         // and hop
+                squash = 1 + CGFloat(up * 0.05)
+            }
+
+            let blink = t.truncatingRemainder(dividingBy: 3.6) < 0.13 ? 0.12 : 1.0
+            let bodyColor = mix(Color(white: 0.66), tint, 0.15 + 0.85 * p)
+
+            return ZStack {
+                Circle()
+                    .fill(tint.opacity(0.10 + 0.16 * p))
+                    .frame(width: 120, height: 120)
+                    .blur(radius: 13)
+                    .scaleEffect(0.6 + 0.4 * p + CGFloat(breath) * 0.04)
+
+                Canvas { gc, size in
+                    draw(gc, size: size, p: p, color: bodyColor,
+                         armAngle: armAngle, legAngle: legAngle,
+                         armSwing: armSwing, legSwing: legSwing,
+                         squash: squash, blink: blink)
+                }
+            }
+            .frame(width: 100, height: 116)
+            .offset(x: scoot, y: hop)
     }
 
-    private func eye(_ bodyW: CGFloat) -> some View {
-        Capsule()
-            .fill(Color.black.opacity(0.78))
-            .frame(width: max(3.5, bodyW * 0.11), height: max(5, bodyW * 0.16))
+    private func draw(_ gc: GraphicsContext, size: CGSize, p: Double, color: Color,
+                      armAngle: Double, legAngle: Double, armSwing: Double, legSwing: Double,
+                      squash: CGFloat, blink: Double) {
+        let cx = size.width / 2
+        let cy = size.height * 0.52
+        let bodyW = 26 + 30 * p
+        let bodyH = (30 + 34 * p) * Double(squash)
+        let limbColor = GraphicsContext.Shading.color(color)
+
+        func limb(from: CGPoint, angle: Double, side: Double, length: Double, width: Double, opacity: Double) {
+            guard opacity > 0.01 else { return }
+            let a = angle * .pi / 180
+            let end = CGPoint(x: from.x + side * sin(a) * length, y: from.y + cos(a) * length)
+            var path = Path()
+            path.move(to: from)
+            path.addLine(to: end)
+            gc.stroke(path, with: limbColor, style: StrokeStyle(lineWidth: width, lineCap: .round))
+        }
+
+        // legs (appear ~p>0.5)
+        let legOp = smooth(p, 0.5, 0.72)
+        let hipY = cy + bodyH * 0.42
+        limb(from: CGPoint(x: cx - bodyW * 0.18, y: hipY), angle: legAngle - legSwing, side: -1, length: bodyH * 0.55, width: 7, opacity: legOp)
+        limb(from: CGPoint(x: cx + bodyW * 0.18, y: hipY), angle: legAngle + legSwing, side: 1, length: bodyH * 0.55, width: 7, opacity: legOp)
+
+        // arms (appear ~p>0.35)
+        let armOp = smooth(p, 0.32, 0.52)
+        let shoulderY = cy - bodyH * 0.22
+        limb(from: CGPoint(x: cx - bodyW * 0.40, y: shoulderY), angle: armAngle + armSwing, side: -1, length: bodyH * 0.5, width: 6, opacity: armOp)
+        limb(from: CGPoint(x: cx + bodyW * 0.40, y: shoulderY), angle: armAngle - armSwing, side: 1, length: bodyH * 0.5, width: 6, opacity: armOp)
+
+        // body
+        let bodyRect = CGRect(x: cx - bodyW / 2, y: cy - bodyH / 2, width: bodyW, height: bodyH)
+        gc.fill(Capsule().path(in: bodyRect), with: limbColor)
+        // subtle highlight
+        let hl = CGRect(x: cx + bodyW * 0.06, y: cy - bodyH * 0.30, width: bodyW * 0.22, height: bodyW * 0.22)
+        gc.fill(Path(ellipseIn: hl), with: .color(.white.opacity(0.35)))
+
+        // eyes
+        let eyeW = max(3.5, bodyW * 0.11)
+        let eyeH = max(5, bodyW * 0.16) * blink
+        let eyeY = cy - bodyH * 0.12 - eyeH / 2
+        for dx in [-bodyW * 0.20, bodyW * 0.20] {
+            let r = CGRect(x: cx + dx - eyeW / 2, y: eyeY, width: eyeW, height: eyeH)
+            gc.fill(Capsule().path(in: r), with: .color(.black.opacity(0.78)))
+        }
     }
 
-    private func smooth(_ x: Double, _ a: Double, _ b: Double) -> Double {
-        max(0, min(1, (x - a) / (b - a)))
-    }
+    private func smooth(_ x: Double, _ a: Double, _ b: Double) -> Double { max(0, min(1, (x - a) / (b - a))) }
 
     private func mix(_ a: Color, _ b: Color, _ f: Double) -> Color {
         let ua = UIColor(a), ub = UIColor(b)
