@@ -45,6 +45,9 @@ struct Storage {
     }
     private var file: URL { root.appendingPathComponent("store.json") }
 
+    /// The on-disk store file (exposed for backup/export).
+    var fileURL: URL { file }
+
     init() { try? fm.createDirectory(at: root, withIntermediateDirectories: true) }
 
     func load() -> StoredData? {

@@ -1,5 +1,6 @@
 import SwiftUI
 import NuminousCore
+import UniformTypeIdentifiers
 
 /// A node in the folder tree: either a folder (with children) or a note (leaf).
 final class FolderNode: Identifiable {
@@ -385,6 +386,10 @@ func folderSymbol(_ name: String, _ category: String?) -> String {
 struct AxisSettingsView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    @State private var backupURL: URL?
+    @State private var showRestorePicker = false
+    @State private var pendingRestore: URL?
+    @State private var restoreMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -396,10 +401,39 @@ struct AxisSettingsView: View {
                 } footer: {
                     Text("Rename or recolor the parts of life your avatar grows along. Your notes and growth stay exactly as they are.")
                 }
+
+                Section {
+                    if let backupURL {
+                        ShareLink(item: backupURL) { Label("Export a backup", systemImage: "square.and.arrow.up") }
+                    }
+                    Button { showRestorePicker = true } label: {
+                        Label("Restore from a backup", systemImage: "arrow.down.doc")
+                    }
+                } header: {
+                    Text("Backup")
+                } footer: {
+                    Text("Export your whole graph as a file to keep in Files or iCloud Drive. Restoring replaces everything currently in Numinous.")
+                }
             }
             .navigationTitle("Customize")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .onAppear { backupURL = model.exportBackup() }
+            .fileImporter(isPresented: $showRestorePicker, allowedContentTypes: [.json]) { result in
+                if case .success(let url) = result { pendingRestore = url }
+            }
+            .alert("Restore backup?", isPresented: Binding(get: { pendingRestore != nil }, set: { if !$0 { pendingRestore = nil } })) {
+                Button("Cancel", role: .cancel) { pendingRestore = nil }
+                Button("Replace everything", role: .destructive) {
+                    if let url = pendingRestore {
+                        restoreMessage = model.importBackup(from: url) ? "Backup restored." : "Couldn't read that backup file."
+                    }
+                    pendingRestore = nil
+                }
+            } message: { Text("This replaces all notes, folders, and growth currently in Numinous with the backup's contents.") }
+            .alert("Restore", isPresented: Binding(get: { restoreMessage != nil }, set: { if !$0 { restoreMessage = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: { Text(restoreMessage ?? "") }
         }
     }
 }

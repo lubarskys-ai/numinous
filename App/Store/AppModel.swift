@@ -636,6 +636,38 @@ final class AppModel: ObservableObject {
                                 followUps: followUps))
     }
 
+    // MARK: - Backup / restore (your whole life-graph, as one file)
+
+    /// Write current data to a shareable, dated file and return its URL.
+    func exportBackup() -> URL? {
+        persist()
+        let src = storage.fileURL
+        guard FileManager.default.fileExists(atPath: src.path) else { return nil }
+        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd-HHmm"
+        let dest = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Numinous-backup-\(df.string(from: Date())).json")
+        try? FileManager.default.removeItem(at: dest)
+        do { try FileManager.default.copyItem(at: src, to: dest); return dest } catch { return nil }
+    }
+
+    /// Replace all data with a backup file's contents. Returns whether it worked.
+    @discardableResult
+    func importBackup(from url: URL) -> Bool {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url),
+              let decoded = try? JSONDecoder().decode(StoredData.self, from: data),
+              !decoded.notes.isEmpty || !decoded.folders.isEmpty
+        else { return false }
+        notes = decoded.notes
+        folders = decoded.folders
+        if !decoded.axes.isEmpty { axes = decoded.axes }
+        reflectionLog = decoded.reflections ?? []
+        followUps = decoded.followUps ?? []
+        persist()
+        return true
+    }
+
     // MARK: - Follow-ups (the CRM loop: set a reminder → do it → grow)
 
     /// Reminders set from notes; completing one in iOS rewards the follow-through.
