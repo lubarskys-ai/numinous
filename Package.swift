@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "Numinous",
+    name: "NuminousCore",
     platforms: [.macOS(.v13), .iOS(.v16)],
     products: [
         .library(name: "NuminousCore", targets: ["NuminousCore"]),
