@@ -789,6 +789,39 @@ final class AppModel: ObservableObject {
         AutoLinker().suggest(in: text, candidates: notes.map { (name: $0.displayName, target: $0.title) })
     }
 
+    /// Smarter suggestions: the deterministic matches, plus — on iOS 26+ Apple-
+    /// Intelligence devices — the on-device LLM's read of who/what the note is really
+    /// about, resolved back to notes you already have (catching pronouns and fuzzy
+    /// phrasing exact matching misses). Falls back to the deterministic set anywhere
+    /// the model isn't available, so callers can always `await` this.
+    func smartLinkSuggestions(in text: String) async -> [AutoLinker.Suggestion] {
+        var results = autolinkSuggestions(in: text)
+        #if canImport(FoundationModels)
+        if #available(iOS 26.0, *), SmartLinker.isAvailable {
+            let candidates = notes.map { (name: $0.displayName, target: $0.title) }
+            for mention in await SmartLinker.mentions(in: text) {
+                guard let match = Self.bestNoteMatch(mention, in: candidates) else { continue }
+                if !results.contains(where: { $0.target == match.target }) {
+                    results.append(AutoLinker.Suggestion(name: mention, target: match.target))
+                }
+            }
+        }
+        #endif
+        return results
+    }
+
+    /// Loose match of an LLM-extracted name to an existing note (either contains the
+    /// other, case-insensitively). Deliberately conservative — 3+ chars — so a bare
+    /// "the" or initial never links.
+    private static func bestNoteMatch(_ name: String, in candidates: [(name: String, target: String)]) -> (name: String, target: String)? {
+        let n = name.lowercased().trimmingCharacters(in: .whitespaces)
+        guard n.count >= 3 else { return nil }
+        return candidates.first { c in
+            let cn = c.name.lowercased()
+            return cn == n || cn.contains(n) || n.contains(cn)
+        }
+    }
+
     /// Create a note from captured (spoken or typed) text, titled from its opening
     /// words and filed under `notes`. Links inside the body grow you as usual.
     @discardableResult

@@ -11,6 +11,7 @@ struct CaptureView: View {
     @State private var text = ""
     @State private var suggestions: [AutoLinker.Suggestion] = []
     @State private var didScan = false
+    @State private var scanning = false
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -29,12 +30,21 @@ struct CaptureView: View {
 
                 Section {
                     Button {
-                        suggestions = model.autolinkSuggestions(in: text)
-                        didScan = true
+                        scanning = true
+                        Task {
+                            let found = await model.smartLinkSuggestions(in: text)
+                            suggestions = found
+                            didScan = true
+                            scanning = false
+                        }
                     } label: {
-                        Label("Find links", systemImage: "link.badge.plus")
+                        if scanning {
+                            HStack { ProgressView(); Text("Finding links…") }
+                        } else {
+                            Label("Find links", systemImage: "link.badge.plus")
+                        }
                     }
-                    .disabled(text.trimmingCharacters(in: .whitespaces).count < 3)
+                    .disabled(scanning || text.trimmingCharacters(in: .whitespaces).count < 3)
 
                     if !suggestions.isEmpty {
                         ForEach(suggestions, id: \.target) { s in
