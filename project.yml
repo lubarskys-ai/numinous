@@ -38,6 +38,9 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        # Phone-first app: run full screen (no iPad split-view), which exempts us
+        # from the "support all four orientations" iPad rule that blocks the build.
+        INFOPLIST_KEY_UIRequiresFullScreen: YES
         INFOPLIST_KEY_CFBundleDisplayName: Numinous
         # Declares no non-exempt encryption, so TestFlight skips the export-
         # compliance prompt on every upload.
