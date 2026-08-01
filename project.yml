@@ -11,7 +11,7 @@ options:
 
 packages:
   NuminousCore:
-    path: .
+    path: Core
 
 targets:
   Numinous:
