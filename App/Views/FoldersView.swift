@@ -414,6 +414,18 @@ struct AxisSettingsView: View {
                 } footer: {
                     Text("Export your whole graph as a file to keep in Files or iCloud Drive. Restoring replaces everything currently in Numinous.")
                 }
+
+                Section {
+                    Link(destination: URL(string: "https://sketchfab.com/3d-models/sculpting-a-human-body-a24baf3514834527972bffdad882258e")!) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("3D body: “sculpting a human body”")
+                            Text("by Animation-class-k · CC-BY 4.0 · Sketchfab")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                } header: {
+                    Text("Credits")
+                }
             }
             .navigationTitle("Customize")
             .navigationBarTitleDisplayMode(.inline)
