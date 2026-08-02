@@ -11,6 +11,8 @@ struct ComposeView: View {
     @State private var location = ""
     @State private var newFolderCategory = ""
     @State private var newFolderAxis = Axis.defaultSet.first?.id ?? "body"
+    @State private var showLocationPrompt = false
+    @State private var locationDraft = ""
 
     init(prefillTitle: String?) {
         _title = State(initialValue: prefillTitle ?? "")
@@ -23,7 +25,6 @@ struct ComposeView: View {
     }
     private var knownFolder: Folder? { folderName.isEmpty ? nil : model.folder(named: folderName) }
     private var isNewFolder: Bool { !folderName.isEmpty && knownFolder == nil }
-    private var detectedLinks: [String] { WikilinkParser.extract(from: text) }
 
     var body: some View {
         NavigationStack {
@@ -66,7 +67,20 @@ struct ComposeView: View {
                         Text("4 · vivid (×1.5)").tag(4)
                         Text("5 · profound (×2)").tag(5)
                     }
-                    TextField("Location (optional)", text: $location)
+                    Button {
+                        locationDraft = location
+                        showLocationPrompt = true
+                    } label: {
+                        HStack {
+                            Label(location.isEmpty ? "Add location" : location,
+                                  systemImage: "mappin.and.ellipse")
+                                .foregroundStyle(location.isEmpty ? Color.accentColor : .primary)
+                            Spacer()
+                            if !location.isEmpty {
+                                Text("Edit").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                 }
 
                 Section("Note") {
@@ -74,26 +88,17 @@ struct ComposeView: View {
                     Text("Type [[ to link an existing note, or create a new one.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-
-                if !detectedLinks.isEmpty {
-                    Section("Connections") {
-                        ForEach(detectedLinks, id: \.self) { link in
-                            HStack {
-                                Image(systemName: model.noteExists(titled: link) ? "link" : "plus.circle")
-                                    .foregroundStyle(model.noteExists(titled: link) ? Color.accentColor : .secondary)
-                                Text(link)
-                                Spacer()
-                                if !model.noteExists(titled: link) {
-                                    Text("will be created").font(.caption2).foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
-                }
             }
             .navigationTitle("New Note")
             .navigationBarTitleDisplayMode(.inline)
             .onChange(of: title) { _ in updateSuggestion() }
+            .alert("Location", isPresented: $showLocationPrompt) {
+                TextField("Where were you?", text: $locationDraft)
+                Button("Cancel", role: .cancel) {}
+                Button("Save") { location = locationDraft.trimmingCharacters(in: .whitespaces) }
+            } message: {
+                Text("Add a place to this note.")
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {

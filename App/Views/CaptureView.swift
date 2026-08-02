@@ -9,7 +9,7 @@ struct CaptureView: View {
     var onSaved: (UUID) -> Void
 
     @State private var text = ""
-    @State private var suggestions: [LinkSuggestion] = []
+    @State private var linkedNames: [String] = []
     @State private var didScan = false
     @State private var scanning = false
     @FocusState private var focused: Bool
@@ -21,7 +21,7 @@ struct CaptureView: View {
                     TextEditor(text: $text)
                         .frame(minHeight: 150)
                         .focused($focused)
-                        .onChange(of: text) { _ in didScan = false }
+                        .onChange(of: text) { _ in didScan = false; linkedNames = [] }
                 } header: {
                     Text("Speak or type")
                 } footer: {
@@ -33,7 +33,8 @@ struct CaptureView: View {
                         scanning = true
                         Task {
                             let found = await model.smartLinkSuggestions(in: text)
-                            suggestions = found
+                            for s in found { applyLink(s) }   // write the links right into the note
+                            linkedNames = found.map(\.name)
                             didScan = true
                             scanning = false
                         }
@@ -41,37 +42,22 @@ struct CaptureView: View {
                         if scanning {
                             HStack { ProgressView(); Text("Finding links…") }
                         } else {
-                            Label("Find links", systemImage: "link.badge.plus")
+                            Label("Find & add links", systemImage: "link.badge.plus")
                         }
                     }
                     .disabled(scanning || text.trimmingCharacters(in: .whitespaces).count < 3)
 
-                    if !suggestions.isEmpty {
-                        ForEach(suggestions) { s in
-                            Button { insert(s) } label: {
-                                HStack(spacing: 8) {
-                                    Circle().fill(color(for: s)).frame(width: 8, height: 8)
-                                    Text(s.name).foregroundStyle(.primary)
-                                    Text(s.folderLabel).font(.caption).foregroundStyle(.secondary)
-                                    Spacer()
-                                    if s.isNew {
-                                        Text("New").font(.caption2.weight(.semibold))
-                                            .foregroundStyle(.green)
-                                        Image(systemName: "plus.circle.dashed").foregroundStyle(.green)
-                                    } else {
-                                        Image(systemName: "plus.circle.fill").foregroundStyle(.blue)
-                                    }
-                                }
-                            }
+                    if didScan {
+                        if linkedNames.isEmpty {
+                            Text("Nothing to link yet — try naming a person, place, or thing.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            Label("Linked \(linkedNames.joined(separator: " · "))", systemImage: "checkmark.circle.fill")
+                                .font(.caption).foregroundStyle(.green)
                         }
-                        Button { insertAll() } label: { Label("Add all links", systemImage: "checkmark.circle") }
-                            .font(.callout.weight(.medium))
-                    } else if didScan {
-                        Text("Nothing to link yet — try a note that names a person, place, or thing.")
-                            .font(.caption).foregroundStyle(.secondary)
                     }
                 } footer: {
-                    Text("Links the people, places, and things you mention — tap to add. “New” creates the note for you.")
+                    Text("Finds the people, places, and things you mention and links them right in your note.")
                 }
             }
             .navigationTitle("Capture")
@@ -90,16 +76,6 @@ struct CaptureView: View {
         }
     }
 
-    private func insert(_ s: LinkSuggestion) {
-        applyLink(s)
-        suggestions.removeAll { $0.target == s.target }
-    }
-
-    private func insertAll() {
-        for s in suggestions { applyLink(s) }
-        suggestions = []
-    }
-
     /// Wire `[[target]]` into the note: replace the exact words in place when we can
     /// find them, otherwise append the link so it's never lost (spelling-corrected
     /// names may not match the dictated text verbatim).
@@ -112,11 +88,5 @@ struct CaptureView: View {
         } else {
             text += (text.isEmpty || text.hasSuffix("\n") ? "" : "\n") + wikilink
         }
-    }
-
-    private func color(for s: LinkSuggestion) -> Color {
-        model.note(titled: s.target).flatMap { model.axis(for: $0)?.color }
-            ?? model.folder(named: s.folderLabel)?.axisID.flatMap { model.axis(id: $0)?.color }
-            ?? .secondary
     }
 }

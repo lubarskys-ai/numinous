@@ -188,7 +188,7 @@ struct NoteDetailView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { model.updateBody(note.id, body: editedBody) }
+                    Button("Save") { model.updateBody(note.id, body: editedBody); dismiss() }
                         .disabled(editedBody == note.body)
                 }
             }
