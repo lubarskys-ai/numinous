@@ -29,9 +29,18 @@ struct ReadwiseHighlight: Decodable, Sendable {
     let tags: [ReadwiseTag]?
 }
 
+/// Decodes to nil instead of throwing, so one malformed record can't sink the
+/// whole page — the array decode keeps going and we drop just the bad row.
+private struct Failable<T: Decodable>: Decodable {
+    let value: T?
+    init(from decoder: Decoder) throws { value = try? T(from: decoder) }
+}
+
 private struct ReadwiseExportPage: Decodable {
-    let results: [ReadwiseBook]
+    let results: [Failable<ReadwiseBook>]
     let nextPageCursor: String?
+    /// The rows that decoded cleanly.
+    var books: [ReadwiseBook] { results.compactMap(\.value) }
 }
 
 /// Reads your Kindle (and other) highlights from Readwise. Readwise is the bridge
@@ -70,12 +79,45 @@ enum ReadwiseService {
 
             let decoder = JSONDecoder()
             decoder.keyDecodingStrategy = .convertFromSnakeCase
-            let page = try decoder.decode(ReadwiseExportPage.self, from: data)
-            all.append(contentsOf: page.results)
+            let page: ReadwiseExportPage
+            do {
+                page = try decoder.decode(ReadwiseExportPage.self, from: data)
+            } catch {
+                throw ReadwiseError.network("Couldn't read Readwise's response (\(describe(error))).")
+            }
+            // If rows came back but none matched our format, strict-decode to learn
+            // exactly why, instead of silently importing nothing.
+            if page.books.isEmpty, !page.results.isEmpty {
+                throw ReadwiseError.network("Readwise sent \(page.results.count) item(s) in an unexpected format (\(firstRowError(in: data, decoder: decoder))).")
+            }
+            all.append(contentsOf: page.books)
             cursor = page.nextPageCursor
         } while cursor != nil
 
         return all.filter { categories.contains($0.category ?? "books") }
+    }
+
+    /// A human-readable reason for a decode failure — which field, what was wrong.
+    private static func describe(_ error: Error) -> String {
+        guard let e = error as? DecodingError else { return error.localizedDescription }
+        func path(_ ctx: DecodingError.Context) -> String {
+            let p = ctx.codingPath.map(\.stringValue).joined(separator: ".")
+            return p.isEmpty ? "top level" : p
+        }
+        switch e {
+        case .keyNotFound(let key, let ctx):   return "missing '\(key.stringValue)' at \(path(ctx))"
+        case .typeMismatch(let type, let ctx): return "wrong type (expected \(type)) at \(path(ctx))"
+        case .valueNotFound(let type, let ctx):return "unexpected null (\(type)) at \(path(ctx))"
+        case .dataCorrupted(let ctx):          return "corrupted data at \(path(ctx))"
+        @unknown default:                      return error.localizedDescription
+        }
+    }
+
+    /// Strict-decode the page (no per-row rescue) to surface the first row's error.
+    private static func firstRowError(in data: Data, decoder: JSONDecoder) -> String {
+        struct StrictPage: Decodable { let results: [ReadwiseBook] }
+        do { _ = try decoder.decode(StrictPage.self, from: data); return "unknown reason" }
+        catch { return describe(error) }
     }
 
     // MARK: - Grading
