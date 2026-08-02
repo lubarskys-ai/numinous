@@ -5,7 +5,7 @@ struct RootView: View {
     // Initial tab can be set via the NUMINOUS_TAB env var (used for headless
     // screenshots). The avatar is no longer a tab — it's the floating companion.
     @State private var selection: String =
-        ProcessInfo.processInfo.environment["NUMINOUS_TAB"] ?? "folders"
+        ProcessInfo.processInfo.environment["NUMINOUS_TAB"] ?? "notes"
     @State private var showAvatar = false
     @State private var showCapture = false
     @State private var companionAction: CompanionAction = .idle
@@ -17,6 +17,9 @@ struct RootView: View {
         let tint = (model.axes.max { (balance[$0.id] ?? 0) < (balance[$1.id] ?? 0) })?.color ?? .accentColor
 
         TabView(selection: $selection) {
+            NotesView()
+                .tabItem { Label("Notes", systemImage: "note.text") }
+                .tag("notes")
             FoldersView()
                 .tabItem { Label("Folders", systemImage: "folder") }
                 .tag("folders")
@@ -42,7 +45,7 @@ struct RootView: View {
         .overlay { ConnectionSparkOverlay() }
         .fullScreenCover(isPresented: $showAvatar) { AvatarExpandedView() }
         // Quick-capture (from the Action Button / Siri / Shortcuts) opens here.
-        .sheet(isPresented: $showCapture) { CaptureView(onSaved: { _ in selection = "folders" }) }
+        .sheet(isPresented: $showCapture) { CaptureView(onSaved: { _ in selection = "notes" }) }
         // The companion strolls when you change pages…
         .onChange(of: selection) { _ in trigger(.walk) }
         // …and does a joyful, heart-popping cheer when a new connection forms.
