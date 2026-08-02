@@ -127,6 +127,7 @@ struct NoteDetailView: View {
                     }
                 }
             }
+            if isEntity(note) { entitySummary(note) }
             if let loc = note.location, !loc.isEmpty {
                 LabeledContent("Location", value: loc)
             }
@@ -224,19 +225,77 @@ struct NoteDetailView: View {
     @ViewBuilder
     private func linkedFromSection(_ note: Note) -> some View {
         let back = model.backlinks(to: note)
-        Section {
+        if isEntity(note) {
             if back.isEmpty {
-                Text("Nothing links here yet.").font(.caption).foregroundStyle(.secondary)
+                Section("Mentioned in") {
+                    Text("Nothing links here yet.").font(.caption).foregroundStyle(.secondary)
+                }
             } else {
-                ForEach(back) { b in NavigationLink(value: b.id) { linkLabel(b) } }
+                // Grouped by life area so you see how this connects across your world.
+                ForEach(backlinksByAxis(back), id: \.axisID) { group in
+                    Section {
+                        ForEach(group.notes) { b in NavigationLink(value: b.id) { linkLabel(b) } }
+                    } header: {
+                        HStack(spacing: 6) {
+                            Circle().fill(group.color).frame(width: 7, height: 7)
+                            Text("Mentioned in · \(group.name)")
+                        }
+                    }
+                }
             }
-        } header: {
-            Text(isEntity(note) ? "Mentioned in" : "Linked from")
-        } footer: {
-            if isEntity(note) && !back.isEmpty {
-                Text("Everywhere this comes up across your life.")
+        } else {
+            Section("Linked from") {
+                if back.isEmpty {
+                    Text("Nothing links here yet.").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ForEach(back) { b in NavigationLink(value: b.id) { linkLabel(b) } }
+                }
             }
         }
+    }
+
+    /// A one-line "N connections across these areas" summary with axis dots.
+    @ViewBuilder
+    private func entitySummary(_ note: Note) -> some View {
+        let total = model.backlinks(to: note).count + note.linkTargets.count
+        if total > 0 {
+            HStack(spacing: 8) {
+                Image(systemName: "link").font(.caption).foregroundStyle(.secondary)
+                Text("^[\(total) connection](inflect: true)").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                HStack(spacing: 3) {
+                    ForEach(connectedAxisIDs(note), id: \.self) { id in
+                        Circle().fill(model.axis(id: id)?.color ?? .secondary).frame(width: 7, height: 7)
+                    }
+                }
+            }
+        }
+    }
+
+    private struct AxisGroup { let axisID: String; let name: String; let color: Color; let notes: [Note] }
+
+    /// Backlinks bucketed by the axis of the note doing the linking, in axis order.
+    private func backlinksByAxis(_ back: [Note]) -> [AxisGroup] {
+        var byAxis: [String: [Note]] = [:]
+        for n in back { byAxis[model.axis(for: n)?.id ?? "_none", default: []].append(n) }
+        var out = model.axes.compactMap { axis -> AxisGroup? in
+            guard let notes = byAxis[axis.id] else { return nil }
+            return AxisGroup(axisID: axis.id, name: axis.name, color: axis.color, notes: notes)
+        }
+        if let none = byAxis["_none"] {
+            out.append(AxisGroup(axisID: "_none", name: "Other", color: .secondary, notes: none))
+        }
+        return out
+    }
+
+    /// Distinct axes this note touches (its backlinks + what it links to), axis order.
+    private func connectedAxisIDs(_ note: Note) -> [String] {
+        var ids = Set<String>()
+        for n in model.backlinks(to: note) { if let a = model.axis(for: n)?.id { ids.insert(a) } }
+        for t in note.linkTargets {
+            if let other = model.note(titled: t), let a = model.axis(for: other)?.id { ids.insert(a) }
+        }
+        return model.axes.map(\.id).filter { ids.contains($0) }
     }
 
     @ViewBuilder
