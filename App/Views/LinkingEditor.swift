@@ -122,7 +122,23 @@ private struct LinkTextView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UITextView, context: Context) {
-        if uiView.text != text { uiView.text = text }
+        // Push external changes (e.g. a programmatically inserted link) into the
+        // view — but never disturb the user mid-keystroke. As the linking
+        // suggestions update, SwiftUI re-invokes updateUIView on every character;
+        // reassigning `.text` there snaps the caret to the end (the "jumping"). So
+        // bail when the text already matches, skip during marked-text composition
+        // (autocorrect/IME), and otherwise preserve the caret across the swap.
+        guard uiView.markedTextRange == nil, uiView.text != text else { return }
+        let caretOffset = uiView.selectedTextRange.map {
+            uiView.offset(from: uiView.beginningOfDocument, to: $0.start)
+        }
+        uiView.text = text
+        if let caretOffset {
+            let clamped = min(caretOffset, (text as NSString).length)
+            if let pos = uiView.position(from: uiView.beginningOfDocument, offset: clamped) {
+                uiView.selectedTextRange = uiView.textRange(from: pos, to: pos)
+            }
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
