@@ -92,15 +92,20 @@ struct NotesView: View {
         }
     }
 
-    /// Distinct categories (folder paths) among your written notes, for the filter.
+    /// Top-level categories among your written notes (e.g. "notes", "diary",
+    /// "golf clubs") — not the full nested folder/file structure.
     private var categories: [String] {
-        Set(model.notes.filter { !$0.isStub && !$0.folderName.isEmpty }.map(\.folderName)).sorted()
+        var seen = Set<String>()
+        for note in model.notes where !note.isStub && !note.folderName.isEmpty {
+            seen.insert(note.folderName.split(separator: "/").first.map(String.init) ?? note.folderName)
+        }
+        return seen.sorted()
     }
 
     private func matchesFilter(_ note: Note) -> Bool {
         guard let f = categoryFilter?.lowercased() else { return true }
-        let fn = note.folderName.lowercased()
-        return fn == f || fn.hasPrefix(f + "/")
+        let top = note.folderName.split(separator: "/").first.map(String.init)?.lowercased() ?? note.folderName.lowercased()
+        return top == f
     }
 
     // MARK: - Search

@@ -1018,14 +1018,17 @@ final class AppModel: ObservableObject {
     /// under the chosen category folder (creating it if new). Links inside the body
     /// grow you as usual.
     @discardableResult
-    func createCapturedNote(body: String, folder: String = "notes") -> UUID {
+    func createCapturedNote(body: String, folder: String = "notes",
+                            intensity: Int? = nil, location: String? = nil) -> UUID {
         let category = folder.trimmingCharacters(in: CharacterSet(charactersIn: " /")).isEmpty ? "notes" : folder
         ensureCategoryFolder(category)
         let base = category + "/" + Self.dateTimeStamp()
         var title = base, n = 2
         while notes.contains(where: { Self.norm($0.title) == Self.norm(title) }) { title = "\(base) (\(n))"; n += 1 }
+        let loc = location?.trimmingCharacters(in: .whitespaces)
         let note = Note(title: title, date: Date(), body: body,
-                        intensity: defaultIntensity(forFolderNamed: category))
+                        intensity: intensity ?? defaultIntensity(forFolderNamed: category),
+                        location: (loc?.isEmpty == false) ? loc : nil)
         save(note)   // also creates stubs for any [[links]]
         return note.id
     }

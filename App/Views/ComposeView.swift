@@ -1,63 +1,69 @@
 import SwiftUI
 import NuminousCore
 
+/// Write a note by hand. Like capture, it's titled by date and filed under a
+/// category you choose (an existing folder or a new one); pick intensity, an
+/// optional location, and write freely with inline `[[` linking.
 struct ComposeView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
 
-    @State private var title: String
     @State private var text = ""
     @State private var intensity = 3
     @State private var location = ""
-    @State private var newFolderCategory = ""
-    @State private var newFolderAxis = Axis.defaultSet.first?.id ?? "body"
+    @State private var category: String
+    @State private var showNewCategory = false
+    @State private var newCategoryDraft = ""
     @State private var showLocationPrompt = false
     @State private var locationDraft = ""
     @State private var locating = false
     @StateObject private var locator = LocationService()
 
     init(prefillTitle: String?) {
-        _title = State(initialValue: prefillTitle ?? "")
+        // Historically callers passed a "folder/…"; use its folder as the category.
+        let folder: String? = prefillTitle.flatMap { t in
+            guard let slash = t.lastIndex(of: "/") else { return t.isEmpty ? nil : t }
+            return String(t[..<slash])
+        }
+        _category = State(initialValue: (folder?.isEmpty == false) ? folder! : "notes")
     }
 
-    private var trimmedTitle: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var folderName: String {
-        guard let slash = trimmedTitle.lastIndex(of: "/") else { return "" }
-        return String(trimmedTitle[..<slash])
+    /// Categories to file under: sensible defaults plus your existing folders.
+    private var categoryOptions: [String] {
+        var seen = Set<String>(); var out: [String] = []
+        for c in [category, "notes", "diary"] + model.folders.map(\.name) where seen.insert(c.lowercased()).inserted {
+            out.append(c)
+        }
+        return out
     }
-    private var knownFolder: Folder? { folderName.isEmpty ? nil : model.folder(named: folderName) }
-    private var isNewFolder: Bool { !folderName.isEmpty && knownFolder == nil }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("e.g. people/Sam, books/Dune", text: $title)
-                        .autocorrectionDisabled()
-                        // Folder paths are lowercase; don't auto-capitalize into a new folder.
-                        .textInputAutocapitalization(.never)
-                } header: {
-                    Text("Title")
-                } footer: {
-                    Text("File it as folder/name. End with just \"folder/\" to auto-date.")
-                }
-
-                if let folder = knownFolder {
-                    Section("Folder") {
+                    Menu {
+                        ForEach(categoryOptions, id: \.self) { cat in
+                            Button { category = cat } label: {
+                                if cat == category { Label(cat, systemImage: "checkmark") } else { Text(cat) }
+                            }
+                        }
+                        Divider()
+                        Button { newCategoryDraft = ""; showNewCategory = true } label: {
+                            Label("New category…", systemImage: "plus")
+                        }
+                    } label: {
                         HStack {
-                            Circle().fill(model.axis(id: folder.axisID)?.color ?? .gray).frame(width: 9, height: 9)
-                            Text("\(folder.name) · \(folder.category)")
+                            Label("Category", systemImage: "folder")
                             Spacer()
-                            Text("grows \(model.axis(id: folder.axisID)?.name ?? "—")").foregroundStyle(.secondary)
+                            Text(category).foregroundStyle(.secondary)
+                            Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.secondary)
                         }
-                        .font(.subheadline)
                     }
-                } else if isNewFolder {
-                    Section("New folder “\(folderName)”") {
-                        TextField("Category (e.g. Cognition)", text: $newFolderCategory)
-                        Picker("Grows which axis?", selection: $newFolderAxis) {
-                            ForEach(model.axes) { Text($0.name).tag($0.id) }
-                        }
+                } footer: {
+                    if let axis = model.axis(id: model.folder(named: category)?.axisID) {
+                        Text("Titled by date, filed in \(category) — grows \(axis.name).")
+                    } else {
+                        Text("Titled with today's date and filed in \(category).")
                     }
                 }
 
@@ -70,12 +76,9 @@ struct ComposeView: View {
                         Text("5 · profound (×2)").tag(5)
                     }
                     if location.isEmpty {
-                        Button {
-                            Task { await useCurrentLocation() }
-                        } label: {
+                        Button { Task { await useCurrentLocation() } } label: {
                             HStack {
-                                Label(locating ? "Locating…" : "Use current location",
-                                      systemImage: "location.fill")
+                                Label(locating ? "Locating…" : "Use current location", systemImage: "location.fill")
                                 Spacer()
                                 if locating { ProgressView() }
                             }
@@ -84,13 +87,9 @@ struct ComposeView: View {
                         Button("Enter manually") { locationDraft = ""; showLocationPrompt = true }
                             .font(.callout)
                     } else {
-                        Button {
-                            locationDraft = location
-                            showLocationPrompt = true
-                        } label: {
+                        Button { locationDraft = location; showLocationPrompt = true } label: {
                             HStack {
-                                Label(location, systemImage: "mappin.and.ellipse")
-                                    .foregroundStyle(.primary)
+                                Label(location, systemImage: "mappin.and.ellipse").foregroundStyle(.primary)
                                 Spacer()
                                 Text("Edit").font(.caption).foregroundStyle(.secondary)
                             }
@@ -106,10 +105,18 @@ struct ComposeView: View {
             }
             .navigationTitle("New Note")
             .navigationBarTitleDisplayMode(.inline)
-            .onChange(of: title) { _ in updateSuggestion() }
             .task {
-                // Automatic: if location access is already granted, fill it in silently.
                 if location.isEmpty, locator.isAuthorized { await useCurrentLocation() }
+            }
+            .alert("New category", isPresented: $showNewCategory) {
+                TextField("e.g. golf clubs", text: $newCategoryDraft).autocorrectionDisabled()
+                Button("Cancel", role: .cancel) {}
+                Button("Use") {
+                    let c = newCategoryDraft.trimmingCharacters(in: CharacterSet(charactersIn: " /"))
+                    if !c.isEmpty { category = c }
+                }
+            } message: {
+                Text("Notes here are titled by date. The folder is created for you.")
             }
             .alert("Location", isPresented: $showLocationPrompt) {
                 TextField("Where were you?", text: $locationDraft)
@@ -121,7 +128,7 @@ struct ComposeView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { save() }.disabled(trimmedTitle.isEmpty)
+                    Button("Save") { save() }.disabled(category.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
         }
@@ -132,37 +139,14 @@ struct ComposeView: View {
         if let place = await locator.currentPlace() {
             location = place
         } else if !locator.isAuthorized {
-            // Denied or unavailable — let them type it instead.
             locationDraft = ""; showLocationPrompt = true
         }
         locating = false
     }
 
-    private func updateSuggestion() {
-        // A note inherits its folder's default intensity (still overridable here).
-        if let folder = knownFolder, let d = folder.defaultIntensity { intensity = d }
-        guard isNewFolder, newFolderCategory.isEmpty else { return }
-        if case let .suggest(axisID, _) = model.suggestAxis(forNewFolderNamed: folderName) {
-            newFolderAxis = axisID
-        }
-    }
-
     private func save() {
-        var finalTitle = trimmedTitle
-        guard !finalTitle.isEmpty else { return }
-        if finalTitle.hasSuffix("/") { finalTitle += NotesView.stamp() }
-
-        if isNewFolder {
-            let category = newFolderCategory.trimmingCharacters(in: .whitespaces)
-            model.upsertFolder(name: folderName,
-                               category: category.isEmpty ? folderName.capitalized : category,
-                               axisID: newFolderAxis)
-        }
-
-        let note = Note(title: finalTitle, date: Date(), body: text,
-                        intensity: intensity,
-                        location: location.trimmingCharacters(in: .whitespaces).isEmpty ? nil : location)
-        model.save(note)
+        model.createCapturedNote(body: text, folder: category, intensity: intensity,
+                                 location: location.isEmpty ? nil : location)
         dismiss()
     }
 }
