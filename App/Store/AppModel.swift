@@ -990,19 +990,33 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Create a note from captured (spoken or typed) text, titled from its opening
-    /// words and filed under `notes`. Links inside the body grow you as usual.
+    /// Create a note from captured (spoken or typed) text, titled by date and filed
+    /// under the chosen category folder (creating it if new). Links inside the body
+    /// grow you as usual.
     @discardableResult
-    func createCapturedNote(body: String) -> UUID {
-        let firstLine = body.split(separator: "\n").first.map(String.init) ?? body
-        let words = firstLine.split(separator: " ").prefix(6).joined(separator: " ")
-        let cleaned = words.replacingOccurrences(of: "/", with: "-").trimmingCharacters(in: .whitespaces)
-        let base = "notes/" + (cleaned.isEmpty ? "Note " + Self.dateTimeStamp() : cleaned)
+    func createCapturedNote(body: String, folder: String = "notes") -> UUID {
+        let category = folder.trimmingCharacters(in: CharacterSet(charactersIn: " /")).isEmpty ? "notes" : folder
+        ensureCategoryFolder(category)
+        let base = category + "/" + Self.dateTimeStamp()
         var title = base, n = 2
         while notes.contains(where: { Self.norm($0.title) == Self.norm(title) }) { title = "\(base) (\(n))"; n += 1 }
-        let note = Note(title: title, date: Date(), body: body, intensity: 3)
+        let note = Note(title: title, date: Date(), body: body,
+                        intensity: defaultIntensity(forFolderNamed: category))
         save(note)   // also creates stubs for any [[links]]
         return note.id
+    }
+
+    /// Ensure a category folder exists so captured notes there grow an axis; a brand
+    /// new one gets a suggested axis (diary → Journal/Spirit, matching the app's
+    /// existing diary default).
+    private func ensureCategoryFolder(_ name: String) {
+        guard folder(named: name) == nil else { return }
+        if Folder.normalize(name).contains("diary") {
+            folders.append(Folder(name: name, category: "Journal", axisID: "spirit", defaultIntensity: 4))
+            return
+        }
+        let axis: String? = { if case let .suggest(id, _) = suggestAxis(forNewFolderNamed: name) { return id }; return nil }()
+        folders.append(Folder(name: name, category: name.capitalized, axisID: axis))
     }
 
     /// The folder segment of a `[[folder/Name]]` link target ("" if unqualified).

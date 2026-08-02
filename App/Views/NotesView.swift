@@ -8,6 +8,7 @@ import NuminousCore
 struct NotesView: View {
     @EnvironmentObject var model: AppModel
     @State private var searchText = ""
+    @State private var categoryFilter: String?
     @State private var showCompose = false
     @State private var showCapture = false
     @State private var composePrefill: String?
@@ -21,6 +22,21 @@ struct NotesView: View {
                 .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always),
                             prompt: "Search notes, text, links")
                 .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Menu {
+                            Button { categoryFilter = nil } label: {
+                                if categoryFilter == nil { Label("All", systemImage: "checkmark") } else { Text("All") }
+                            }
+                            if !categories.isEmpty { Divider() }
+                            ForEach(categories, id: \.self) { cat in
+                                Button { categoryFilter = cat } label: {
+                                    if categoryFilter == cat { Label(cat, systemImage: "checkmark") } else { Text(cat) }
+                                }
+                            }
+                        } label: {
+                            Label(categoryFilter ?? "All", systemImage: "line.3.horizontal.decrease.circle")
+                        }
+                    }
                     ToolbarItem(placement: .primaryAction) {
                         Menu {
                             Button { showCapture = true } label: { Label("Dictate a note", systemImage: "mic") }
@@ -68,12 +84,23 @@ struct NotesView: View {
 
     private var streamSections: [DaySection] {
         let cal = Calendar.current
-        let engaged = model.notes.filter { !$0.isStub }
+        let engaged = model.notes.filter { !$0.isStub && matchesFilter($0) }
         let groups = Dictionary(grouping: engaged) { cal.startOfDay(for: $0.date) }
         return groups.keys.sorted(by: >).map { day in
             DaySection(id: day, title: Self.dayTitle(day),
                        notes: groups[day]!.sorted { $0.date > $1.date })
         }
+    }
+
+    /// Distinct categories (folder paths) among your written notes, for the filter.
+    private var categories: [String] {
+        Set(model.notes.filter { !$0.isStub && !$0.folderName.isEmpty }.map(\.folderName)).sorted()
+    }
+
+    private func matchesFilter(_ note: Note) -> Bool {
+        guard let f = categoryFilter?.lowercased() else { return true }
+        let fn = note.folderName.lowercased()
+        return fn == f || fn.hasPrefix(f + "/")
     }
 
     // MARK: - Search

@@ -9,10 +9,20 @@ struct CaptureView: View {
     var onSaved: (UUID) -> Void
 
     @State private var text = ""
+    @State private var category = "notes"
     @State private var linkedNames: [String] = []
     @State private var didScan = false
     @State private var scanning = false
     @FocusState private var focused: Bool
+
+    /// Categories to file under: sensible defaults plus your existing folders.
+    private var categoryOptions: [String] {
+        var seen = Set<String>(); var out: [String] = []
+        for c in ["notes", "diary"] + model.folders.map(\.name) where seen.insert(c.lowercased()).inserted {
+            out.append(c)
+        }
+        return out
+    }
 
     var body: some View {
         NavigationStack {
@@ -26,6 +36,25 @@ struct CaptureView: View {
                     Text("Speak or type")
                 } footer: {
                     Text("Tap the 🎤 on your keyboard to dictate, then find the links.")
+                }
+
+                Section {
+                    Menu {
+                        ForEach(categoryOptions, id: \.self) { cat in
+                            Button { category = cat } label: {
+                                if cat == category { Label(cat, systemImage: "checkmark") } else { Text(cat) }
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Label("Category", systemImage: "folder")
+                            Spacer()
+                            Text(category).foregroundStyle(.secondary)
+                            Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                } footer: {
+                    Text("Titled with today's date and filed here (e.g. diary).")
                 }
 
                 Section {
@@ -72,7 +101,7 @@ struct CaptureView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        let id = model.createCapturedNote(body: text)
+                        let id = model.createCapturedNote(body: text, folder: category)
                         onSaved(id); dismiss()
                     }
                     .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
