@@ -12,6 +12,8 @@ struct NoteDetailView: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var showFollowUp = false
     @State private var followUpMessage: String?
+    @State private var showRename = false
+    @State private var titleDraft = ""
 
     var body: some View {
         if let note = model.note(id: noteID) {
@@ -167,6 +169,11 @@ struct NoteDetailView: View {
                 }
 
                 Section {
+                    Button {
+                        titleDraft = note.title; showRename = true
+                    } label: {
+                        Label("Move or rename…", systemImage: "folder")
+                    }
                     Button("Delete note", role: .destructive) {
                         model.delete([note]); dismiss()
                     }
@@ -201,6 +208,15 @@ struct NoteDetailView: View {
                                                      set: { if !$0 { followUpMessage = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(followUpMessage ?? "") }
+            .alert("Move or rename", isPresented: $showRename) {
+                TextField("folder/Name", text: $titleDraft)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("Cancel", role: .cancel) {}
+                Button("Save") { model.renameNote(note.id, to: titleDraft) }
+            } message: {
+                Text("Change its folder or name — every link to it updates automatically.")
+            }
         } else {
             Text("This note no longer exists.").foregroundStyle(.secondary)
         }

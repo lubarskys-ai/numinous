@@ -309,4 +309,21 @@ h.group("Multi-axis folders (split growth)") {
     h.eq(s.rawTotals.points("body"), 10, "single-axis folder unchanged (full credit)")
 }
 
+h.group("Wikilink rewrite (rename/move propagation)") {
+    let body = "breakfast at [[entertainment/restaurant/dunkin donuts]] with [[people/Sam]]"
+    let moved = WikilinkParser.rewrite(in: body) {
+        $0.lowercased() == "entertainment/restaurant/dunkin donuts" ? "travel/restaurant/dunkin donuts" : $0
+    }
+    h.eq(moved, "breakfast at [[travel/restaurant/dunkin donuts]] with [[people/Sam]]", "rewrites the moved link, leaves others")
+    h.check(WikilinkParser.extract(from: moved).contains("travel/restaurant/dunkin donuts"), "new target is now linked")
+    h.check(!WikilinkParser.extract(from: moved).contains("entertainment/restaurant/dunkin donuts"), "old target no longer linked")
+
+    // Aliases are preserved.
+    let aliased = WikilinkParser.rewrite(in: "see [[old/Name|nickname]]") { $0 == "old/Name" ? "new/Name" : $0 }
+    h.eq(aliased, "see [[new/Name|nickname]]", "keeps the |alias when retargeting")
+    // Unchanged links are left byte-for-byte.
+    let same = "[[a/B]] and [[c/D]]"
+    h.eq(WikilinkParser.rewrite(in: same) { $0 }, same, "unchanged links untouched")
+}
+
 exit(Int32(h.summarize()))

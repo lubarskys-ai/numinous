@@ -33,6 +33,8 @@ struct FoldersView: View {
     @State private var showCompose = false
     @State private var showCapture = false
     @State private var axisPickerFolder: FolderRef?
+    @State private var renameFolderPath: String?
+    @State private var folderNameDraft = ""
     @State private var showReadwise = false
     @State private var composePrefill: String?
     @State private var importMessage: String?
@@ -93,6 +95,15 @@ struct FoldersView: View {
                 }
             }
             .sheet(item: $axisPickerFolder) { ref in FolderAxisPicker(path: ref.id) }
+            .alert("Rename or move folder", isPresented: Binding(get: { renameFolderPath != nil }, set: { if !$0 { renameFolderPath = nil } })) {
+                TextField("folder path", text: $folderNameDraft)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("Cancel", role: .cancel) {}
+                Button("Save") { if let p = renameFolderPath { model.renameFolder(from: p, to: folderNameDraft) } }
+            } message: {
+                Text("Moves every note in this folder. All links update automatically.")
+            }
             .sheet(isPresented: $showCapture) { CaptureView(onSaved: { path.append($0) }) }
             .sheet(isPresented: $showCompose) { ComposeView(prefillTitle: composePrefill) }
             .sheet(isPresented: $showReadwise) { ReadwiseConnectView() }
@@ -216,6 +227,9 @@ struct FoldersView: View {
         Menu {
             Button { axisPickerFolder = FolderRef(id: path) } label: {
                 Label(growthAxes.isEmpty ? "Grows…" : "Grows: \(growthAxes.count) axes", systemImage: "circle.hexagongrid")
+            }
+            Button { renameFolderPath = path; folderNameDraft = path } label: {
+                Label("Rename or move folder…", systemImage: "folder")
             }
             Menu("Default intensity") {
                 Button { model.setFolderIntensity(nil, forFolder: path) } label: {

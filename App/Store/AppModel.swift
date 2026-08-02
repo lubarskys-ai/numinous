@@ -643,6 +643,106 @@ final class AppModel: ObservableObject {
         axes[i].colorHex = hex; persist()
     }
 
+    // MARK: - Rename / move (keeps every link pointing at the note)
+
+    /// Rename or move a single note to `newTitleRaw` (e.g. `travel/restaurant/Dunkin`).
+    /// Every `[[link]]` that pointed at the old title is rewritten, and if a note
+    /// already lives at the new title the two are merged — no orphan left behind.
+    func renameNote(_ id: UUID, to newTitleRaw: String) {
+        guard let i = notes.firstIndex(where: { $0.id == id }) else { return }
+        let old = notes[i].title
+        let new = newTitleRaw.trimmingCharacters(in: .whitespaces)
+        guard !new.isEmpty, Self.norm(new) != Self.norm(old) else { return }
+        ensureFolderExists(for: new, like: old)
+        retitle([(old, new)])
+    }
+
+    /// Rename or move a folder path (e.g. `entertainment/restaurant` →
+    /// `travel/restaurant`): every note under it (and its subfolders) moves, its
+    /// links are rewritten, and the folder's settings carry over to the new path.
+    func renameFolder(from oldPathRaw: String, to newPathRaw: String) {
+        let oldPath = oldPathRaw.trimmingCharacters(in: .whitespaces)
+        let newPath = newPathRaw.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !oldPath.isEmpty, !newPath.isEmpty, Self.norm(oldPath) != Self.norm(newPath) else { return }
+
+        let prefix = oldPath + "/"
+        let pairs: [(String, String)] = notes.compactMap { note in
+            guard Self.norm(note.title) == Self.norm(oldPath) || note.title.lowercased().hasPrefix(prefix.lowercased()) else { return nil }
+            let suffix = note.title.count >= oldPath.count ? String(note.title.dropFirst(oldPath.count)) : ""
+            return (note.title, newPath + suffix)
+        }
+        guard !pairs.isEmpty else { return }
+
+        // Carry the folder's settings to the new path (category, axes, intensity).
+        if let f = folder(named: oldPath) {
+            if folder(named: newPath) == nil {
+                folders.append(Folder(id: Folder.normalize(newPath), name: newPath,
+                                      category: f.category, axisID: f.axisID,
+                                      axisIDs: f.axisIDs, defaultIntensity: f.defaultIntensity))
+            }
+            folders.removeAll { $0.id == f.id }
+        }
+        retitle(pairs)
+    }
+
+    /// Apply a set of title changes, rewrite all links, then merge any collisions.
+    private func retitle(_ pairs: [(old: String, new: String)]) {
+        var map: [String: String] = [:]          // normalized old → new
+        for p in pairs { map[Self.norm(p.old)] = p.new }
+        for i in notes.indices {
+            if let new = map[Self.norm(notes[i].title)] { notes[i].title = new }
+        }
+        for i in notes.indices where notes[i].body.contains("[[") {
+            let rewritten = WikilinkParser.rewrite(in: notes[i].body) { map[Self.norm($0)] ?? $0 }
+            if rewritten != notes[i].body { notes[i].body = rewritten }
+        }
+        dedupeByTitle()
+        persist()
+    }
+
+    /// If moving a note into a folder that has no metadata yet, seed it from the
+    /// old folder so the note keeps its category/axis instead of going "uncategorized".
+    private func ensureFolderExists(for newTitle: String, like oldTitle: String) {
+        let newFolder = Self.folderPart(of: newTitle)
+        guard !newFolder.isEmpty, folder(named: newFolder) == nil else { return }
+        if let src = folder(named: Self.folderPart(of: oldTitle)) {
+            folders.append(Folder(id: Folder.normalize(newFolder), name: newFolder,
+                                  category: src.category, axisID: src.axisID,
+                                  axisIDs: src.axisIDs, defaultIntensity: src.defaultIntensity))
+        }
+    }
+
+    /// The folder path portion of a note title (`travel/restaurant/Dunkin` → `travel/restaurant`).
+    private static func folderPart(of title: String) -> String {
+        guard let slash = title.lastIndex(of: "/") else { return "" }
+        return String(title[..<slash])
+    }
+
+    /// Merge notes that now share a title (after a move collided with an existing
+    /// note): keep the richer one (engaged/non-stub, then longer body).
+    private func dedupeByTitle() {
+        var keptIndexByTitle: [String: Int] = [:]
+        var dropIDs: [UUID] = []
+        for i in notes.indices {
+            let key = Self.norm(notes[i].title)
+            guard let kept = keptIndexByTitle[key] else { keptIndexByTitle[key] = i; continue }
+            if Self.richer(notes[i], than: notes[kept]) {
+                dropIDs.append(notes[kept].id); keptIndexByTitle[key] = i
+            } else {
+                dropIDs.append(notes[i].id)
+            }
+        }
+        if !dropIDs.isEmpty {
+            let drop = Set(dropIDs)
+            notes.removeAll { drop.contains($0.id) }
+        }
+    }
+
+    private static func richer(_ a: Note, than b: Note) -> Bool {
+        if a.isStub != b.isStub { return !a.isStub }   // prefer an engaged note
+        return a.body.count > b.body.count
+    }
+
     // MARK: - Internals
 
     private func persist() {
