@@ -12,6 +12,10 @@ struct CalendarView: View {
     @State private var state: LoadState = .loading
     @State private var path: [UUID] = []
     @State private var showSubscribe = false
+    @State private var showCalendars = false
+    @AppStorage("calendar_excluded_ids") private var excludedRaw = ""
+
+    private var excludedIDs: Set<String> { Set(excludedRaw.split(separator: "\n").map(String.init)) }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -20,11 +24,18 @@ struct CalendarView: View {
                 .navigationDestination(for: UUID.self) { id in NoteDetailView(noteID: id) }
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
-                        Button { showSubscribe = true } label: { Image(systemName: "link.badge.plus") }
-                            .accessibilityLabel("Subscribe to a calendar")
+                        Menu {
+                            Button { showCalendars = true } label: { Label("Choose calendars", systemImage: "calendar") }
+                            Button { showSubscribe = true } label: { Label("Subscribe to a feed", systemImage: "link.badge.plus") }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                        }
                     }
                 }
                 .sheet(isPresented: $showSubscribe) { CalendarSubscribeSheet() }
+                .sheet(isPresented: $showCalendars, onDismiss: { Task { await load() } }) {
+                    CalendarPickerSheet()
+                }
                 .task { await load() }
                 .refreshable { await load() }
         }
@@ -102,7 +113,7 @@ struct CalendarView: View {
 
     private func load() async {
         do {
-            let events = try await CalendarService.fetchEvents()
+            let events = try await CalendarService.fetchEvents(excluding: excludedIDs)
             state = .loaded(events)
         } catch CalendarService.CalError.accessDenied {
             state = .denied
@@ -158,17 +169,78 @@ struct CalendarSubscribeSheet: View {
                     Text("Paste a public calendar link — e.g. your TripIt feed, a team schedule, or a shared calendar. iOS will ask you to subscribe; afterward, pull down to refresh and its events show up here.")
                 }
                 Section {
-                    Button("Subscribe") {
-                        if let url = subscribeURL { openURL(url) }
-                        dismiss()
-                    }
-                    .disabled(subscribeURL == nil)
+                    Button("Subscribe") { subscribe() }
+                        .disabled(subscribeURL == nil)
                 }
             }
             .navigationTitle("Subscribe to Calendar")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+            }
+            .alert("Couldn't subscribe", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: { Text(error ?? "") }
+        }
+    }
+
+    @State private var error: String?
+
+    /// Hand the webcal URL to iOS and wait for the result — dismissing immediately
+    /// (the old bug) could cancel the open, and failures were silent.
+    private func subscribe() {
+        guard let url = subscribeURL else { return }
+        openURL(url) { accepted in
+            if accepted { dismiss() }
+            else { error = "iOS couldn't open that calendar link. Check the URL is a public .ics or webcal feed and try again." }
+        }
+    }
+}
+
+/// Choose which of your calendars feed the Calendar tab. Selections persist as an
+/// "excluded ids" set so new calendars are included by default.
+struct CalendarPickerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("calendar_excluded_ids") private var excludedRaw = ""
+    @State private var calendars: [CalendarInfo] = []
+    @State private var loading = true
+
+    private var excluded: Set<String> {
+        get { Set(excludedRaw.split(separator: "\n").map(String.init)) }
+        nonmutating set { excludedRaw = newSet(newValue) }
+    }
+    private func newSet(_ s: Set<String>) -> String { s.sorted().joined(separator: "\n") }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if loading {
+                    ProgressView("Loading calendars…")
+                } else if calendars.isEmpty {
+                    Text("No calendars found.").foregroundStyle(.secondary)
+                } else {
+                    List(calendars) { cal in
+                        Toggle(isOn: Binding(
+                            get: { !excluded.contains(cal.id) },
+                            set: { on in
+                                var e = excluded
+                                if on { e.remove(cal.id) } else { e.insert(cal.id) }
+                                excluded = e
+                            })) {
+                            HStack(spacing: 10) {
+                                Circle().fill(Color(hex: cal.colorHex)).frame(width: 10, height: 10)
+                                Text(cal.title)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Calendars")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .task {
+                calendars = (try? await CalendarService.availableCalendars()) ?? []
+                loading = false
             }
         }
     }
