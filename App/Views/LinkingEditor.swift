@@ -122,12 +122,15 @@ private struct LinkTextView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UITextView, context: Context) {
+        // Keep the coordinator's write-back binding fresh. SwiftUI recreates this
+        // struct on every parent re-render; without this, the coordinator keeps
+        // writing keystrokes through the ORIGINAL (now stale) `text` binding, so the
+        // text view and the @State drift apart and the caret jumps around wildly.
+        context.coordinator.parent = self
         // Push external changes (e.g. a programmatically inserted link) into the
-        // view — but never disturb the user mid-keystroke. As the linking
-        // suggestions update, SwiftUI re-invokes updateUIView on every character;
-        // reassigning `.text` there snaps the caret to the end (the "jumping"). So
-        // bail when the text already matches, skip during marked-text composition
-        // (autocorrect/IME), and otherwise preserve the caret across the swap.
+        // view — but never disturb the user mid-keystroke. Bail when the text
+        // already matches, skip during marked-text composition (autocorrect/IME),
+        // and otherwise preserve the caret across the swap.
         guard uiView.markedTextRange == nil, uiView.text != text else { return }
         let caretOffset = uiView.selectedTextRange.map {
             uiView.offset(from: uiView.beginningOfDocument, to: $0.start)
@@ -144,7 +147,7 @@ private struct LinkTextView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     final class Coordinator: NSObject, UITextViewDelegate {
-        let parent: LinkTextView
+        var parent: LinkTextView
         weak var textView: UITextView?
         init(_ parent: LinkTextView) { self.parent = parent }
 
