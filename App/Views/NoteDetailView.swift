@@ -115,7 +115,7 @@ struct NoteDetailView: View {
                 }
 
                 Section("Note") {
-                    LinkingEditor(text: $editedBody)
+                    LinkingEditor(text: $editedBody, onCommit: { model.updateBody(note.id, body: $0) })
                     Text("Type [[ to link — pick an existing note, or create a new one.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -190,6 +190,11 @@ struct NoteDetailView: View {
                 if loadedBodyFor != note.id {
                     editedBody = note.body; titleDraft = note.title; loadedBodyFor = note.id
                 }
+            }
+            .onDisappear {
+                // Autosave on leave so edits (and links) persist without a manual Save.
+                if editedBody != note.body { model.updateBody(note.id, body: editedBody) }
+                commitRename(note)
             }
             .onChange(of: photoItem) { newItem in
                 guard let newItem else { return }

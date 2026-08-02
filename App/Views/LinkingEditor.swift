@@ -20,12 +20,15 @@ struct LinkingEditor: View {
     @EnvironmentObject var model: AppModel
     @Binding var text: String
     var minHeight: CGFloat = 130
+    /// Called with the full text right after a link is inserted from the autocomplete,
+    /// so a note can persist links automatically without a manual Save.
+    var onCommit: ((String) -> Void)? = nil
 
     @StateObject private var controller = LinkEditorController()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            LinkTextView(text: $text, controller: controller)
+            LinkTextView(text: $text, controller: controller, onCommit: onCommit)
                 .frame(minHeight: minHeight)
 
             if let query = controller.query {
@@ -108,6 +111,7 @@ struct LinkingEditor: View {
 private struct LinkTextView: UIViewRepresentable {
     @Binding var text: String
     @ObservedObject var controller: LinkEditorController
+    var onCommit: ((String) -> Void)? = nil
 
     func makeUIView(context: Context) -> UITextView {
         let tv = UITextView()
@@ -192,6 +196,7 @@ private struct LinkTextView: UIViewRepresentable {
                 tv.selectedTextRange = tv.textRange(from: pos, to: pos)
             }
             setQuery(nil)
+            parent.onCommit?(newText)      // persist the just-added link immediately
         }
     }
 }
