@@ -55,4 +55,7 @@ targets:
         # never writes to Health in a release build. Remove this key before App Store
         # submission so we don't declare write access we don't use.
         INFOPLIST_KEY_NSHealthUpdateUsageDescription: "Used only in development to write sample workouts and mindful sessions for testing."
-        CODE_SIGNING_ALLOWED: NO
+        # Signing is driven per-invocation: CI passes CODE_SIGNING_ALLOWED=NO for the
+        # simulator build (ci.yml) and =YES for the TestFlight archive (testflight.yml).
+        # For local device runs from Xcode, automatic signing picks up your Team below.
+        CODE_SIGN_STYLE: Automatic
