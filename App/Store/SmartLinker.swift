@@ -4,53 +4,66 @@ import FoundationModels
 #endif
 
 /// On-device LLM layer (Apple Foundation Models) that reads a captured note and
-/// pulls out the specific people, places, restaurants, and things the writer
-/// names — each with a clean corrected title and a classification we map to a
-/// folder. `AppModel` turns those into link suggestions: matched to a note you
-/// already have, or offered as a brand-new note to create.
+/// pulls out the specific people, places, venues, and things the writer names —
+/// each with a clean corrected title and a **folder path**, chosen to reuse the
+/// folders you already have (so a golf course lands in your "golf clubs", a town in
+/// "location"). `AppModel` turns those into link suggestions.
 ///
 /// Available only on iOS 26+ Apple-Intelligence devices; everywhere else this is a
 /// no-op and the deterministic `AutoLinker` stands alone.
 enum SmartLinker {
     #if canImport(FoundationModels)
-    /// What an extracted entity is, so we can file it under the right folder.
-    @available(iOS 26.0, *)
-    @Generable
-    enum Kind {
-        case person, place, restaurant, book, film, activity, organization, thing
-    }
-
     @available(iOS 26.0, *)
     @Generable
     struct Entity {
-        @Guide(description: "The exact words for this thing as they literally appear in the note, copied verbatim so they can be found in the text.")
+        @Guide(description: "The exact words for this thing as they literally appear in the note, copied verbatim.")
         let surface: String
         @Guide(description: "A clean, properly capitalized and correctly spelled name or title.")
         let name: String
-        let kind: Kind
+        @Guide(description: "A lowercase folder path to file this under (e.g. people, location, golf clubs, entertainment/restaurant). Reuse one of the user's existing folders when it fits.")
+        let folder: String
     }
 
     @available(iOS 26.0, *)
     @Generable
     struct Extraction {
-        @Guide(description: "Every specific person, place, restaurant, book, film, activity, or organization the writer names. Skip generic words like 'dinner', 'friend', or 'work'.")
+        @Guide(description: "Every specific person, place, venue, business, book, or film the writer names. Skip generic activity words like dinner, golf, run, work, or friend.")
         let entities: [Entity]
     }
 
-    /// The folder path a kind of entity is filed under (lowercased; matched to your
-    /// folders case-insensitively). New notes land here when there's no existing one.
     @available(iOS 26.0, *)
-    static func folder(for kind: Kind) -> String {
-        switch kind {
-        case .person:       return "people"
-        case .place:        return "location"
-        case .restaurant:   return "entertainment/restaurant"
-        case .film:         return "entertainment/film"
-        case .book:         return "notes"
-        case .activity:     return "notes"
-        case .organization: return "notes"
-        case .thing:        return "notes"
+    static func extract(from text: String, folders: [String]) async -> [Entity] {
+        guard isAvailable else { return [] }
+        let existing = folders.isEmpty ? "people, location, entertainment/restaurant" : folders.joined(separator: ", ")
+        let instructions = """
+        You read a short personal note and list the specific people, places, venues, \
+        businesses, books, and films the writer names, filing each under a lowercase \
+        folder path. Rules:
+        - A city, town, neighborhood, or region is 'location' (Carmel-by-the-Sea → location), \
+        even if a meal or activity happened there.
+        - A specific restaurant, cafe, or bar is 'entertainment/restaurant'.
+        - A person is 'people'.
+        - Reuse one of the user's existing folders whenever it fits: \(existing).
+        - Skip generic activity words (dinner, golf, run, work) — only name real entities.
+        For each entity copy the exact words, give a clean corrected name, and choose the folder.
+        """
+        let session = LanguageModelSession(instructions: instructions)
+        do {
+            let response = try await session.respond(to: text, generating: Extraction.self)
+            return response.content.entities
+        } catch {
+            return []
         }
+    }
+
+    /// Normalize an LLM-suggested folder path (lowercase, trimmed), reusing an
+    /// existing folder when it matches and falling back to "notes" when empty.
+    static func cleanFolder(_ raw: String, existing: [String]) -> String {
+        let f = raw.lowercased()
+            .replacingOccurrences(of: " / ", with: "/")
+            .trimmingCharacters(in: CharacterSet(charactersIn: " /"))
+        guard !f.isEmpty else { return "notes" }
+        return existing.first { $0.lowercased() == f } ?? f
     }
 
     @available(iOS 26.0, *)
@@ -75,19 +88,6 @@ enum SmartLinker {
             return "On-device model unavailable (\(other))."
         @unknown default:
             return "On-device model unavailable."
-        }
-    }
-
-    @available(iOS 26.0, *)
-    static func extract(from text: String) async -> [Entity] {
-        guard isAvailable else { return [] }
-        let session = LanguageModelSession(instructions:
-            "You read a short personal note and list the specific people, places, restaurants, books, films, activities, and organizations the writer names. For each, copy the exact words from the note, give a clean corrected name, and classify it. Skip generic words.")
-        do {
-            let response = try await session.respond(to: text, generating: Extraction.self)
-            return response.content.entities
-        } catch {
-            return []
         }
     }
     #endif

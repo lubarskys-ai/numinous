@@ -958,7 +958,8 @@ final class AppModel: ObservableObject {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, *), SmartLinker.isAvailable {
             let candidates = notes.map { (name: $0.displayName, target: $0.title) }
-            for e in await SmartLinker.extract(from: text) {
+            let folderNames = folders.map(\.name)
+            for e in await SmartLinker.extract(from: text, folders: folderNames) {
                 if let match = Self.bestNoteMatch(e.name, in: candidates) {
                     if seen.insert(match.target.lowercased()).inserted {
                         out.append(LinkSuggestion(name: match.name, target: match.target, surface: e.surface, isNew: false))
@@ -966,7 +967,7 @@ final class AppModel: ObservableObject {
                 } else {
                     let name = e.name.trimmingCharacters(in: .whitespaces)
                     guard name.count >= 2 else { continue }
-                    let target = SmartLinker.folder(for: e.kind) + "/" + name
+                    let target = SmartLinker.cleanFolder(e.folder, existing: folderNames) + "/" + name
                     if seen.insert(target.lowercased()).inserted {
                         out.append(LinkSuggestion(name: name, target: target, surface: e.surface, isNew: true))
                     }
