@@ -91,6 +91,7 @@ final class AppModel: ObservableObject {
         if version < 2, Self.migrateDiaryUnderNotes(&n, &f) { didMigrate = true }
         if version < 3, Self.migrateAddMeaningAxis(&a) { didMigrate = true }
         if version < 4, Self.migrateAddGutAxis(&a) { didMigrate = true }
+        if version < 5, Self.backfillLinkStubs(&n) { didMigrate = true }
 
         self.folders = f
         self.notes = n
@@ -107,7 +108,22 @@ final class AppModel: ObservableObject {
         Task { await checkFollowUps() }
     }
 
-    static let schemaVersion = 4
+    static let schemaVersion = 5
+
+    /// One-time repair: create a stub note for every `[[link]]` in any body that has
+    /// no matching note yet — so links written elsewhere (e.g. Kindle notes synced
+    /// via Readwise) populate their folders/files, just like saving does.
+    private static func backfillLinkStubs(_ notes: inout [Note]) -> Bool {
+        var existing = Set(notes.map { norm($0.title) })
+        var toAdd: [(title: String, date: Date)] = []
+        for note in notes {
+            for target in WikilinkParser.extract(from: note.body) where existing.insert(norm(target)).inserted {
+                toAdd.append((target, note.date))
+            }
+        }
+        for item in toAdd { notes.append(Note(title: item.title, date: item.date, isStub: true)) }
+        return !toAdd.isEmpty
+    }
 
     /// One-time (v3): add the right-brain `meaning` axis to installs that stored
     /// the original four, placing it just after `mind` (its left-brain twin).
@@ -382,6 +398,14 @@ final class AppModel: ObservableObject {
                                   intensity: item.intensity, details: item.details,
                                   origin: item.origin, isStub: item.isDormant))
                 added += 1
+            }
+        }
+        // Auto-create stub notes for any [[links]] inside the imported bodies (e.g.
+        // links you wrote in Readwise highlights), so their folders/files appear —
+        // exactly as saving a note by hand does.
+        for item in items {
+            for target in WikilinkParser.extract(from: item.body) where !noteExists(titled: target) {
+                notes.append(Note(title: target, date: item.date, isStub: true))
             }
         }
         if added + updated > 0 { persist() }
