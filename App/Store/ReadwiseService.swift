@@ -41,6 +41,22 @@ private struct ReadwiseExportPage: Decodable {
     let nextPageCursor: String?
     /// The rows that decoded cleanly.
     var books: [ReadwiseBook] { results.compactMap(\.value) }
+
+    enum CodingKeys: String, CodingKey { case results, nextPageCursor }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        results = try c.decodeIfPresent([Failable<ReadwiseBook>].self, forKey: .results) ?? []
+        // Readwise returns the cursor as a string on some accounts and a number on
+        // others — accept either (and null/absent), normalizing to a string.
+        if let s = try? c.decode(String.self, forKey: .nextPageCursor) {
+            nextPageCursor = s.isEmpty ? nil : s
+        } else if let i = try? c.decode(Int.self, forKey: .nextPageCursor) {
+            nextPageCursor = String(i)
+        } else {
+            nextPageCursor = nil
+        }
+    }
 }
 
 /// Reads your Kindle (and other) highlights from Readwise. Readwise is the bridge
