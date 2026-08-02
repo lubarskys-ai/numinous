@@ -805,6 +805,17 @@ final class AppModel: ObservableObject {
         AutoLinker().suggest(in: text, candidates: notes.map { (name: $0.displayName, target: $0.title) })
     }
 
+    /// nil when on-device AI is powering entity detection; otherwise a short reason
+    /// it isn't (wrong hardware, Apple Intelligence off, still downloading, old iOS).
+    var onDeviceAIHint: String? {
+        #if canImport(FoundationModels)
+        if #available(iOS 26.0, *) { return SmartLinker.unavailableReason }
+        return "On-device AI needs iOS 26 — only exact name matches will link."
+        #else
+        return "On-device AI isn't available in this build — only exact name matches will link."
+        #endif
+    }
+
     /// Smarter suggestions for captured text: the deterministic matches to notes you
     /// already have, plus — on iOS 26+ Apple-Intelligence devices — the on-device
     /// LLM's read of every person, place, restaurant, and thing named. Each of those

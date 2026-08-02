@@ -59,6 +59,25 @@ enum SmartLinker {
         return false
     }
 
+    /// nil when the on-device model is ready; otherwise a human-readable reason,
+    /// so the capture UI can explain why new-entity suggestions didn't appear.
+    @available(iOS 26.0, *)
+    static var unavailableReason: String? {
+        switch SystemLanguageModel.default.availability {
+        case .available: return nil
+        case .unavailable(.deviceNotEligible):
+            return "This iPhone can't run Apple's on-device model."
+        case .unavailable(.appleIntelligenceNotEnabled):
+            return "Turn on Apple Intelligence in Settings to auto-detect people & places."
+        case .unavailable(.modelNotReady):
+            return "Apple Intelligence is still downloading — try again shortly."
+        case .unavailable(let other):
+            return "On-device model unavailable (\(other))."
+        @unknown default:
+            return "On-device model unavailable."
+        }
+    }
+
     @available(iOS 26.0, *)
     static func extract(from text: String) async -> [Entity] {
         guard isAvailable else { return [] }

@@ -49,8 +49,14 @@ struct CaptureView: View {
 
                     if didScan {
                         if linkedNames.isEmpty {
-                            Text("Nothing to link yet — try naming a person, place, or thing.")
-                                .font(.caption).foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Nothing to link yet — try naming a person, place, or thing.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                if let hint = model.onDeviceAIHint {
+                                    Label(hint, systemImage: "sparkles")
+                                        .font(.caption2).foregroundStyle(.orange)
+                                }
+                            }
                         } else {
                             Label("Linked \(linkedNames.joined(separator: " · "))", systemImage: "checkmark.circle.fill")
                                 .font(.caption).foregroundStyle(.green)
