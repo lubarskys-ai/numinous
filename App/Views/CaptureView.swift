@@ -10,6 +10,8 @@ struct CaptureView: View {
 
     @State private var text = ""
     @State private var category = "notes"
+    @State private var showNewCategory = false
+    @State private var newCategoryDraft = ""
     @State private var linkedNames: [String] = []
     @State private var didScan = false
     @State private var scanning = false
@@ -18,7 +20,7 @@ struct CaptureView: View {
     /// Categories to file under: sensible defaults plus your existing folders.
     private var categoryOptions: [String] {
         var seen = Set<String>(); var out: [String] = []
-        for c in ["notes", "diary"] + model.folders.map(\.name) where seen.insert(c.lowercased()).inserted {
+        for c in [category, "notes", "diary"] + model.folders.map(\.name) where seen.insert(c.lowercased()).inserted {
             out.append(c)
         }
         return out
@@ -44,6 +46,10 @@ struct CaptureView: View {
                             Button { category = cat } label: {
                                 if cat == category { Label(cat, systemImage: "checkmark") } else { Text(cat) }
                             }
+                        }
+                        Divider()
+                        Button { newCategoryDraft = ""; showNewCategory = true } label: {
+                            Label("New category…", systemImage: "plus")
                         }
                     } label: {
                         HStack {
@@ -108,6 +114,17 @@ struct CaptureView: View {
                 }
             }
             .onAppear { focused = true }
+            .alert("New category", isPresented: $showNewCategory) {
+                TextField("e.g. golf clubs", text: $newCategoryDraft)
+                    .autocorrectionDisabled()
+                Button("Cancel", role: .cancel) {}
+                Button("Use") {
+                    let c = newCategoryDraft.trimmingCharacters(in: CharacterSet(charactersIn: " /"))
+                    if !c.isEmpty { category = c }
+                }
+            } message: {
+                Text("Notes here are titled by date. The folder is created for you.")
+            }
         }
     }
 
