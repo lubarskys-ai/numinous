@@ -19,6 +19,9 @@ struct ComposeView: View {
     @State private var locating = false
     @State private var showFollowUp = false
     @State private var reminderNoteTitle = ""
+    @State private var scanning = false
+    @State private var didScan = false
+    @State private var linkedNames: [String] = []
     @StateObject private var locator = LocationService()
 
     init(prefillTitle: String?) {
@@ -107,6 +110,37 @@ struct ComposeView: View {
 
                 Section {
                     Button {
+                        scanning = true
+                        Task {
+                            let found = await model.smartLinkSuggestions(in: text)
+                            for s in found { applyLink(s) }
+                            linkedNames = found.map(\.name)
+                            didScan = true
+                            scanning = false
+                        }
+                    } label: {
+                        if scanning {
+                            HStack { ProgressView(); Text("Finding links…") }
+                        } else {
+                            Label("Find & add links", systemImage: "link.badge.plus")
+                        }
+                    }
+                    .disabled(scanning || text.trimmingCharacters(in: .whitespaces).count < 3)
+                    if didScan {
+                        if linkedNames.isEmpty {
+                            Text("Nothing to link yet — try naming a person, place, or thing.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            Label("Linked \(linkedNames.joined(separator: " · "))", systemImage: "checkmark.circle.fill")
+                                .font(.caption).foregroundStyle(.green)
+                        }
+                    }
+                } footer: {
+                    Text("Finds the people, places, and things you mention and links them right in.")
+                }
+
+                Section {
+                    Button {
                         let id = createNote()
                         reminderNoteTitle = model.note(id: id)?.title ?? category
                         showFollowUp = true
@@ -165,6 +199,19 @@ struct ComposeView: View {
     private func createNote() -> UUID {
         model.createCapturedNote(body: text, folder: category, intensity: intensity,
                                  location: location.isEmpty ? nil : location)
+    }
+
+    /// Wire a found link into the note text — replace the words in place (punctuation/
+    /// case-tolerant), or append if the cleaned name isn't found verbatim.
+    private func applyLink(_ s: LinkSuggestion) {
+        let wikilink = "[[\(s.target)]]"
+        if !s.surface.isEmpty, let r = AutoLinker.flexibleRange(of: s.surface, in: text) {
+            text.replaceSubrange(r, with: wikilink)
+        } else if let r = AutoLinker.flexibleRange(of: s.name, in: text) {
+            text.replaceSubrange(r, with: wikilink)
+        } else {
+            text += (text.isEmpty || text.hasSuffix("\n") ? "" : "\n") + wikilink
+        }
     }
 
     /// A sensible reminder title seeded from the note's opening words.
