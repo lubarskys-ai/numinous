@@ -12,12 +12,22 @@ struct NoteDetailView: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var showFollowUp = false
     @State private var followUpMessage: String?
-    @State private var showRename = false
     @State private var titleDraft = ""
 
     var body: some View {
         if let note = model.note(id: noteID) {
             List {
+                Section {
+                    TextField("folder/Name", text: $titleDraft)
+                        .font(.system(.title3, design: .rounded).weight(.semibold))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.done)
+                        .onSubmit { commitRename(note) }
+                } footer: {
+                    Text("Edit the folder or name — links to this note follow it everywhere.")
+                }
+
                 Section {
                     if note.origin?.source == "readwise" { bookHeader(note) }
                     if let folder = model.folder(named: note.folderName) {
@@ -169,11 +179,6 @@ struct NoteDetailView: View {
                 }
 
                 Section {
-                    Button {
-                        titleDraft = note.title; showRename = true
-                    } label: {
-                        Label("Move or rename…", systemImage: "folder")
-                    }
                     Button("Delete note", role: .destructive) {
                         model.delete([note]); dismiss()
                     }
@@ -182,7 +187,9 @@ struct NoteDetailView: View {
             .navigationTitle(note.displayName)
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
-                if loadedBodyFor != note.id { editedBody = note.body; loadedBodyFor = note.id }
+                if loadedBodyFor != note.id {
+                    editedBody = note.body; titleDraft = note.title; loadedBodyFor = note.id
+                }
             }
             .onChange(of: photoItem) { newItem in
                 guard let newItem else { return }
@@ -195,8 +202,12 @@ struct NoteDetailView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { model.updateBody(note.id, body: editedBody); dismiss() }
-                        .disabled(editedBody == note.body)
+                    Button("Save") {
+                        if editedBody != note.body { model.updateBody(note.id, body: editedBody) }
+                        commitRename(note)
+                        dismiss()
+                    }
+                    .disabled(editedBody == note.body && titleDraft.trimmingCharacters(in: .whitespaces) == note.title)
                 }
             }
             .sheet(isPresented: $showFollowUp) {
@@ -208,15 +219,6 @@ struct NoteDetailView: View {
                                                      set: { if !$0 { followUpMessage = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(followUpMessage ?? "") }
-            .alert("Move or rename", isPresented: $showRename) {
-                TextField("folder/Name", text: $titleDraft)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                Button("Cancel", role: .cancel) {}
-                Button("Save") { model.renameNote(note.id, to: titleDraft) }
-            } message: {
-                Text("Change its folder or name — every link to it updates automatically.")
-            }
         } else {
             Text("This note no longer exists.").foregroundStyle(.secondary)
         }
@@ -227,6 +229,13 @@ struct NoteDetailView: View {
         Folder.normalize(note.folderName) == "people"
             ? "Call \(note.displayName)"
             : "Follow up: \(note.displayName)"
+    }
+
+    /// Apply an inline title edit as a rename/move that follows every link.
+    private func commitRename(_ note: Note) {
+        let t = titleDraft.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty, t != note.title else { return }
+        model.renameNote(note.id, to: t)
     }
 
     private func link(to title: String) {

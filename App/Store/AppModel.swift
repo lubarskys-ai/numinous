@@ -854,7 +854,8 @@ final class AppModel: ObservableObject {
     /// about it, adding [[links]]) activates it so it starts growing you.
     func updateBody(_ id: UUID, body: String) {
         guard let i = notes.firstIndex(where: { $0.id == id }) else { return }
-        let oldTargets = Set(notes[i].linkTargets.map { Self.norm($0) })
+        let oldTargetsList = notes[i].linkTargets
+        let oldTargets = Set(oldTargetsList.map { Self.norm($0) })
         notes[i].body = body
         // Editing a note engages it — except a Readwise book, which counts only
         // once you mark it finished (adding links to highlights mustn't do it).
@@ -871,10 +872,32 @@ final class AppModel: ObservableObject {
             if sparkAxis == nil, noteIsPerson { sparkAxis = "heart" }
             if let sparkAxis { spark = ConnectionSpark(id: UUID(), axisID: sparkAxis) }
         }
+
+        // In-body MOVE: if exactly one link changed folder while keeping the same
+        // name (e.g. entertainment/… → travel/…), treat it as a move of that note —
+        // rename it everywhere so nothing is orphaned. Restricted to same-name moves
+        // so editing a link to a *different* note stays a re-point, not a rename.
+        let newList = notes[i].linkTargets
+        let removed = oldTargetsList.filter { o in !newList.contains { Self.norm($0) == Self.norm(o) } }
+        let addedList = newList.filter { n in !oldTargetsList.contains { Self.norm($0) == Self.norm(n) } }
+        if removed.count == 1, addedList.count == 1,
+           Self.leafName(removed[0]).caseInsensitiveCompare(Self.leafName(addedList[0])) == .orderedSame,
+           Self.norm(Self.folderPart(of: removed[0])) != Self.norm(Self.folderPart(of: addedList[0])),
+           let target = notes.first(where: { Self.norm($0.title) == Self.norm(removed[0]) && $0.id != id }) {
+            renameNote(target.id, to: addedList[0])   // propagates + merges + persists
+            return
+        }
+
         for target in notes[i].linkTargets where !noteExists(titled: target) {
             notes.append(Note(title: target, date: notes[i].date, isStub: true))
         }
         persist()
+    }
+
+    /// The leaf (display) name of a title (`travel/restaurant/Dunkin` → `Dunkin`).
+    private static func leafName(_ title: String) -> String {
+        guard let slash = title.lastIndex(of: "/") else { return title }
+        return String(title[title.index(after: slash)...])
     }
 
     /// Create a fresh diary entry auto-titled with the current date & time, filed
