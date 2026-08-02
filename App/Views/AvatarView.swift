@@ -32,7 +32,7 @@ struct AvatarView: View {
                 VStack(spacing: 12) {
                     Avatar3DView(
                         color: { UIColor(model.axis(id: $0)?.color ?? .gray) },
-                        growth: { min(1, model.score.revealedTotals.points($0) / 150) },
+                        growth: { min(1, model.score.revealedTotals.points($0) / 150) * model.axisVitality($0) },
                         nodes: graphNodes,
                         links: graphLinks,
                         maturity: growthPreview ?? model.maturity,

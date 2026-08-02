@@ -100,6 +100,7 @@ final class AppModel: ObservableObject {
         self.followUps = loaded?.followUps ?? []
         self.readwiseToken = UserDefaults.standard.string(forKey: Self.readwiseTokenKey)
         self.score = ScoreEngine().score(notes: n, folders: f, axes: a)
+        recomputeLastTended()
         if loaded == nil || didMigrate || version < Self.schemaVersion {
             storage.save(StoredData(notes: n, folders: f, axes: a, schemaVersion: Self.schemaVersion,
                                     reflections: reflectionLog, followUps: followUps))
@@ -771,9 +772,43 @@ final class AppModel: ObservableObject {
 
     private func persist() {
         score = engine.score(notes: notes, folders: folders, axes: axes)
+        recomputeLastTended()
         storage.save(StoredData(notes: notes, folders: folders, axes: axes,
                                 schemaVersion: Self.schemaVersion, reflections: reflectionLog,
                                 followUps: followUps))
+    }
+
+    // MARK: - Vitality (gentle decay of untended areas — never subtracts real growth)
+
+    private var lastTendedByAxis: [String: Date] = [:]
+
+    private func recomputeLastTended() {
+        var map: [String: Date] = [:]
+        for n in notes where !n.isStub {
+            for a in axesTended(by: n) where map[a] == nil || n.date > map[a]! {
+                map[a] = n.date
+            }
+        }
+        lastTendedByAxis = map
+    }
+
+    /// The axes a note tends: its folder's growth axes plus the axes of what it links to.
+    private func axesTended(by n: Note) -> Set<String> {
+        var out = Set(folder(named: n.folderName)?.growthAxes ?? [])
+        for t in n.linkTargets {
+            if let other = note(titled: t), let a = axis(for: other)?.id { out.insert(a) }
+        }
+        return out
+    }
+
+    /// How alive an axis feels right now: 1 when recently tended, fading toward a
+    /// floor as it goes untended (half-life ~2 weeks). This dims the avatar only —
+    /// real growth is never subtracted, and tending the area restores it at once.
+    func axisVitality(_ axisID: String) -> Double {
+        guard let last = lastTendedByAxis[axisID] else { return 1 }
+        let days = max(0, Date().timeIntervalSince(last) / 86_400)
+        let floor = 0.35, halfLife = 14.0
+        return max(floor, floor + (1 - floor) * pow(0.5, days / halfLife))
     }
 
     // MARK: - Backup / restore (your whole life-graph, as one file)
