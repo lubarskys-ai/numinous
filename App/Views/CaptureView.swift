@@ -9,7 +9,7 @@ struct CaptureView: View {
     var onSaved: (UUID) -> Void
 
     @State private var text = ""
-    @State private var suggestions: [AutoLinker.Suggestion] = []
+    @State private var suggestions: [LinkSuggestion] = []
     @State private var didScan = false
     @State private var scanning = false
     @FocusState private var focused: Bool
@@ -47,25 +47,31 @@ struct CaptureView: View {
                     .disabled(scanning || text.trimmingCharacters(in: .whitespaces).count < 3)
 
                     if !suggestions.isEmpty {
-                        ForEach(suggestions, id: \.target) { s in
+                        ForEach(suggestions) { s in
                             Button { insert(s) } label: {
-                                HStack {
-                                    Circle().fill(color(for: s.target)).frame(width: 8, height: 8)
+                                HStack(spacing: 8) {
+                                    Circle().fill(color(for: s)).frame(width: 8, height: 8)
                                     Text(s.name).foregroundStyle(.primary)
-                                    Text(folder(of: s.target)).font(.caption).foregroundStyle(.secondary)
+                                    Text(s.folderLabel).font(.caption).foregroundStyle(.secondary)
                                     Spacer()
-                                    Image(systemName: "plus.circle.fill").foregroundStyle(.blue)
+                                    if s.isNew {
+                                        Text("New").font(.caption2.weight(.semibold))
+                                            .foregroundStyle(.green)
+                                        Image(systemName: "plus.circle.dashed").foregroundStyle(.green)
+                                    } else {
+                                        Image(systemName: "plus.circle.fill").foregroundStyle(.blue)
+                                    }
                                 }
                             }
                         }
                         Button { insertAll() } label: { Label("Add all links", systemImage: "checkmark.circle") }
                             .font(.callout.weight(.medium))
                     } else if didScan {
-                        Text("No matches to your existing notes.")
+                        Text("Nothing to link yet — try a note that names a person, place, or thing.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 } footer: {
-                    Text("Links to the people, books, and moments you already track — tap to add, or add all.")
+                    Text("Links the people, places, and things you mention — tap to add. “New” creates the note for you.")
                 }
             }
             .navigationTitle("Capture")
@@ -84,26 +90,33 @@ struct CaptureView: View {
         }
     }
 
-    private func insert(_ s: AutoLinker.Suggestion) {
-        if let r = AutoLinker.firstWordRange(of: s.name, in: text) {
-            text.replaceSubrange(r, with: "[[\(s.target)]]")
-        }
+    private func insert(_ s: LinkSuggestion) {
+        applyLink(s)
         suggestions.removeAll { $0.target == s.target }
     }
 
     private func insertAll() {
-        for s in suggestions {
-            if let r = AutoLinker.firstWordRange(of: s.name, in: text) {
-                text.replaceSubrange(r, with: "[[\(s.target)]]")
-            }
-        }
+        for s in suggestions { applyLink(s) }
         suggestions = []
     }
 
-    private func folder(of target: String) -> String {
-        target.contains("/") ? String(target.split(separator: "/").dropLast().joined(separator: "/")) : ""
+    /// Wire `[[target]]` into the note: replace the exact words in place when we can
+    /// find them, otherwise append the link so it's never lost (spelling-corrected
+    /// names may not match the dictated text verbatim).
+    private func applyLink(_ s: LinkSuggestion) {
+        let wikilink = "[[\(s.target)]]"
+        if !s.surface.isEmpty, let r = AutoLinker.firstWordRange(of: s.surface, in: text) {
+            text.replaceSubrange(r, with: wikilink)
+        } else if let r = AutoLinker.firstWordRange(of: s.name, in: text) {
+            text.replaceSubrange(r, with: wikilink)
+        } else {
+            text += (text.isEmpty || text.hasSuffix("\n") ? "" : "\n") + wikilink
+        }
     }
-    private func color(for target: String) -> Color {
-        model.note(titled: target).flatMap { model.axis(for: $0)?.color } ?? .secondary
+
+    private func color(for s: LinkSuggestion) -> Color {
+        model.note(titled: s.target).flatMap { model.axis(for: $0)?.color }
+            ?? model.folder(named: s.folderLabel)?.axisID.flatMap { model.axis(id: $0)?.color }
+            ?? .secondary
     }
 }

@@ -9,6 +9,22 @@ struct FolderGroup: Identifiable {
     let notes: [Note]
 }
 
+/// A capture-time link suggestion. `target` is the wikilink target (e.g.
+/// `people/Shawna Flanagan`); `surface` is the exact words in the note to replace;
+/// `isNew` is true when tapping it will create a brand-new note in that folder.
+struct LinkSuggestion: Identifiable, Equatable {
+    let id = UUID()
+    let name: String       // display name, e.g. "Shawna Flanagan"
+    let target: String     // wikilink target, e.g. "people/Shawna Flanagan"
+    let surface: String    // exact words in the note to replace ("" if unknown)
+    let isNew: Bool         // true → creates a new note on save
+    /// Folder path portion of the target ("people", "entertainment/restaurant", …).
+    var folderLabel: String {
+        guard let slash = target.lastIndex(of: "/") else { return "" }
+        return String(target[..<slash])
+    }
+}
+
 /// A normalized item any import source (Contacts, Calendar, Health…) produces.
 /// `AppModel.ingest` upserts these into notes idempotently by `origin`, creating
 /// the target folder if needed. Adding a new source means mapping it to these.
@@ -789,25 +805,42 @@ final class AppModel: ObservableObject {
         AutoLinker().suggest(in: text, candidates: notes.map { (name: $0.displayName, target: $0.title) })
     }
 
-    /// Smarter suggestions: the deterministic matches, plus — on iOS 26+ Apple-
-    /// Intelligence devices — the on-device LLM's read of who/what the note is really
-    /// about, resolved back to notes you already have (catching pronouns and fuzzy
-    /// phrasing exact matching misses). Falls back to the deterministic set anywhere
-    /// the model isn't available, so callers can always `await` this.
-    func smartLinkSuggestions(in text: String) async -> [AutoLinker.Suggestion] {
-        var results = autolinkSuggestions(in: text)
+    /// Smarter suggestions for captured text: the deterministic matches to notes you
+    /// already have, plus — on iOS 26+ Apple-Intelligence devices — the on-device
+    /// LLM's read of every person, place, restaurant, and thing named. Each of those
+    /// either resolves to an existing note (catching pronouns and fuzzy phrasing) or
+    /// is offered as a brand-new note to create in the right folder. Falls back to
+    /// the deterministic set anywhere the model isn't available.
+    func smartLinkSuggestions(in text: String) async -> [LinkSuggestion] {
+        var out: [LinkSuggestion] = []
+        var seen = Set<String>()   // lowercased targets already offered
+
+        // 1. Deterministic exact matches to existing notes.
+        for s in autolinkSuggestions(in: text) where seen.insert(s.target.lowercased()).inserted {
+            out.append(LinkSuggestion(name: s.name, target: s.target, surface: s.name, isNew: false))
+        }
+
+        // 2. On-device LLM: resolve fuzzy references and surface new entities.
         #if canImport(FoundationModels)
         if #available(iOS 26.0, *), SmartLinker.isAvailable {
             let candidates = notes.map { (name: $0.displayName, target: $0.title) }
-            for mention in await SmartLinker.mentions(in: text) {
-                guard let match = Self.bestNoteMatch(mention, in: candidates) else { continue }
-                if !results.contains(where: { $0.target == match.target }) {
-                    results.append(AutoLinker.Suggestion(name: mention, target: match.target))
+            for e in await SmartLinker.extract(from: text) {
+                if let match = Self.bestNoteMatch(e.name, in: candidates) {
+                    if seen.insert(match.target.lowercased()).inserted {
+                        out.append(LinkSuggestion(name: match.name, target: match.target, surface: e.surface, isNew: false))
+                    }
+                } else {
+                    let name = e.name.trimmingCharacters(in: .whitespaces)
+                    guard name.count >= 2 else { continue }
+                    let target = SmartLinker.folder(for: e.kind) + "/" + name
+                    if seen.insert(target.lowercased()).inserted {
+                        out.append(LinkSuggestion(name: name, target: target, surface: e.surface, isNew: true))
+                    }
                 }
             }
         }
         #endif
-        return results
+        return out
     }
 
     /// Loose match of an LLM-extracted name to an existing note (either contains the

@@ -3,21 +3,54 @@ import Foundation
 import FoundationModels
 #endif
 
-/// On-device LLM layer (Apple Foundation Models) that augments the deterministic
-/// `AutoLinker`: it reads a captured note and names the specific people, books,
-/// activities, and places the writer refers to — resolving pronouns and indirect
-/// phrasing ("the guy from the gym", "that book my sister recommended") that exact
-/// string-matching can't. We then match those names back to notes you already have.
+/// On-device LLM layer (Apple Foundation Models) that reads a captured note and
+/// pulls out the specific people, places, restaurants, and things the writer
+/// names — each with a clean corrected title and a classification we map to a
+/// folder. `AppModel` turns those into link suggestions: matched to a note you
+/// already have, or offered as a brand-new note to create.
 ///
 /// Available only on iOS 26+ Apple-Intelligence devices; everywhere else this is a
-/// no-op and the deterministic matcher stands alone.
+/// no-op and the deterministic `AutoLinker` stands alone.
 enum SmartLinker {
     #if canImport(FoundationModels)
+    /// What an extracted entity is, so we can file it under the right folder.
     @available(iOS 26.0, *)
     @Generable
-    struct Mentions {
-        @Guide(description: "The specific people, books, activities, places, and things the writer refers to — concrete proper names or titles, never generic words like 'friend' or 'book'.")
-        let names: [String]
+    enum Kind {
+        case person, place, restaurant, book, film, activity, organization, thing
+    }
+
+    @available(iOS 26.0, *)
+    @Generable
+    struct Entity {
+        @Guide(description: "The exact words for this thing as they literally appear in the note, copied verbatim so they can be found in the text.")
+        let surface: String
+        @Guide(description: "A clean, properly capitalized and correctly spelled name or title.")
+        let name: String
+        let kind: Kind
+    }
+
+    @available(iOS 26.0, *)
+    @Generable
+    struct Extraction {
+        @Guide(description: "Every specific person, place, restaurant, book, film, activity, or organization the writer names. Skip generic words like 'dinner', 'friend', or 'work'.")
+        let entities: [Entity]
+    }
+
+    /// The folder path a kind of entity is filed under (lowercased; matched to your
+    /// folders case-insensitively). New notes land here when there's no existing one.
+    @available(iOS 26.0, *)
+    static func folder(for kind: Kind) -> String {
+        switch kind {
+        case .person:       return "people"
+        case .place:        return "location"
+        case .restaurant:   return "entertainment/restaurant"
+        case .film:         return "entertainment/film"
+        case .book:         return "notes"
+        case .activity:     return "notes"
+        case .organization: return "notes"
+        case .thing:        return "notes"
+        }
     }
 
     @available(iOS 26.0, *)
@@ -27,13 +60,13 @@ enum SmartLinker {
     }
 
     @available(iOS 26.0, *)
-    static func mentions(in text: String) async -> [String] {
+    static func extract(from text: String) async -> [Entity] {
         guard isAvailable else { return [] }
         let session = LanguageModelSession(instructions:
-            "You extract the specific people, books, activities, places, and things a writer mentions in a short personal note. Resolve pronouns and indirect references to the actual name or title when the note makes it clear. Return only concrete names and titles, not generic words.")
+            "You read a short personal note and list the specific people, places, restaurants, books, films, activities, and organizations the writer names. For each, copy the exact words from the note, give a clean corrected name, and classify it. Skip generic words.")
         do {
-            let response = try await session.respond(to: text, generating: Mentions.self)
-            return response.content.names
+            let response = try await session.respond(to: text, generating: Extraction.self)
+            return response.content.entities
         } catch {
             return []
         }
