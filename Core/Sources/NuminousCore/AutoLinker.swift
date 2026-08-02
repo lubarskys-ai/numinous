@@ -35,6 +35,21 @@ public struct AutoLinker {
         return results
     }
 
+    /// A looser range: matches `phrase` in `text` ignoring case AND punctuation
+    /// between/around words, on word boundaries. Finds "Dunkin' Donuts" for the
+    /// cleaned name "dunkin donuts" (dictation adds caps/apostrophes the LLM drops),
+    /// so a suggested link can replace the words in place instead of appending.
+    public static func flexibleRange(of phrase: String, in text: String) -> Range<String.Index>? {
+        // Alphanumeric tokens, matched in order separated by any run of non-alphanumerics.
+        let tokens = phrase.split { !$0.isLetter && !$0.isNumber }.map(String.init)
+        guard !tokens.isEmpty else { return nil }
+        let pattern = "(?<![A-Za-z0-9])" + tokens.joined(separator: "[^A-Za-z0-9]+") + "(?![A-Za-z0-9])"
+        guard let re = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        let ns = text as NSString
+        guard let m = re.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)) else { return nil }
+        return Range(m.range, in: text)
+    }
+
     /// The first whole-word, case-insensitive occurrence of `name` in `text`.
     public static func firstWordRange(of name: String, in text: String) -> Range<String.Index>? {
         let needle = name.trimmingCharacters(in: .whitespaces)

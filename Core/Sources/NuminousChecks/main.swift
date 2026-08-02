@@ -280,6 +280,16 @@ h.group("Auto-linking (deterministic)") {
 
     let s4 = linker.suggest(in: "reading Atomic Habits", candidates: [("Atomic", "x/Atomic"), ("Atomic Habits", "books/Atomic Habits")])
     h.eq(s4.map(\.target), ["books/Atomic Habits"], "prefers the longer match over a substring")
+
+    // Flexible (punctuation/case-tolerant) matching for cleaned-name replacement.
+    let text = "breakfast at Dunkin' Donuts"
+    if let r = AutoLinker.flexibleRange(of: "dunkin donuts", in: text) {
+        h.eq(String(text[r]), "Dunkin' Donuts", "flexibleRange spans the apostrophe'd words")
+    } else {
+        h.check(false, "flexibleRange finds 'dunkin donuts' in \"Dunkin' Donuts\"")
+    }
+    h.check(AutoLinker.flexibleRange(of: "Sam", in: "met Samuel today") == nil, "flexibleRange respects word boundaries (not inside Samuel)")
+    h.check(AutoLinker.flexibleRange(of: "san francisco", in: "flew to San Francisco") != nil, "flexibleRange matches across a plain space + case")
 }
 
 h.group("Multi-axis folders (split growth)") {

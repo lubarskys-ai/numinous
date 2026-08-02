@@ -87,9 +87,11 @@ struct CaptureView: View {
     /// names may not match the dictated text verbatim).
     private func applyLink(_ s: LinkSuggestion) {
         let wikilink = "[[\(s.target)]]"
-        if !s.surface.isEmpty, let r = AutoLinker.firstWordRange(of: s.surface, in: text) {
+        // Punctuation/case-tolerant so the dictated "Dunkin' Donuts" is replaced in
+        // place by the cleaned name "dunkin donuts" rather than appended at the end.
+        if !s.surface.isEmpty, let r = AutoLinker.flexibleRange(of: s.surface, in: text) {
             text.replaceSubrange(r, with: wikilink)
-        } else if let r = AutoLinker.firstWordRange(of: s.name, in: text) {
+        } else if let r = AutoLinker.flexibleRange(of: s.name, in: text) {
             text.replaceSubrange(r, with: wikilink)
         } else {
             text += (text.isEmpty || text.hasSuffix("\n") ? "" : "\n") + wikilink
