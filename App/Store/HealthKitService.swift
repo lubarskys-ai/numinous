@@ -92,8 +92,14 @@ enum HealthKitService {
     }
 
     #if DEBUG
+    /// Metadata key stamped on every sample we seed, so we can find and remove them
+    /// again (and never mix them up with the user's real data).
+    static let sampleMetadataKey = "NuminousSampleData"
+    private static var sampleMetadata: [String: Any] { [sampleMetadataKey: true] }
+
     /// Test-only: writes a few sample workouts + mindful sessions to HealthKit so
-    /// the Health tab has something to read in the simulator.
+    /// the Health tab has something to read. Idempotent by design — the caller only
+    /// seeds once (a persisted toggle), and every sample is tagged for later removal.
     static func seedSampleData() async {
         guard HKHealthStore.isHealthDataAvailable() else { return }
         let store = HKHealthStore()
@@ -117,6 +123,7 @@ enum HealthKitService {
             }(), device: nil)
             do {
                 try await builder.beginCollection(at: start)
+                try? await builder.addMetadata(sampleMetadata)   // tag it as ours
                 try await builder.endCollection(at: end)
                 _ = try await builder.finishWorkout()   // saves the workout itself
             } catch { }
@@ -127,7 +134,7 @@ enum HealthKitService {
             let base = cal.date(byAdding: .day, value: -daysAgo, to: Date()) ?? Date()
             let end = cal.date(bySettingHour: 21, minute: 0, second: 0, of: base) ?? base
             let start = end.addingTimeInterval(-Double(minutes) * 60)
-            mindful.append(HKCategorySample(type: mindfulType, value: HKCategoryValue.notApplicable.rawValue, start: start, end: end))
+            mindful.append(HKCategorySample(type: mindfulType, value: HKCategoryValue.notApplicable.rawValue, start: start, end: end, metadata: sampleMetadata))
         }
         try? await store.save(mindful)
 
@@ -137,7 +144,7 @@ enum HealthKitService {
         func q(_ id: HKQuantityTypeIdentifier, _ unit: HKUnit, _ value: Double, _ day: Date) -> HKQuantitySample? {
             guard let t = HKObjectType.quantityType(forIdentifier: id) else { return nil }
             let end = cal.date(bySettingHour: 20, minute: 0, second: 0, of: day) ?? day
-            return HKQuantitySample(type: t, quantity: HKQuantity(unit: unit, doubleValue: value), start: end.addingTimeInterval(-3600), end: end)
+            return HKQuantitySample(type: t, quantity: HKQuantity(unit: unit, doubleValue: value), start: end.addingTimeInterval(-3600), end: end, metadata: sampleMetadata)
         }
         for (daysAgo, kcal, protein, fiber) in daily {
             let day = cal.date(byAdding: .day, value: -daysAgo, to: Date()) ?? Date()
@@ -146,6 +153,24 @@ enum HealthKitService {
             if let s = q(.dietaryFiber, .gram(), fiber, day) { nutrition.append(s) }
         }
         try? await store.save(nutrition)
+    }
+
+    /// Remove exactly the samples we seeded (matched by our metadata tag), leaving
+    /// any real HealthKit data untouched — so the toggle can be switched off.
+    static func removeSampleData() async {
+        guard HKHealthStore.isHealthDataAvailable() else { return }
+        let store = HKHealthStore()
+        let predicate = HKQuery.predicateForObjects(withMetadataKey: sampleMetadataKey)
+        var types: [HKSampleType] = [HKObjectType.workoutType()]
+        if let m = HKObjectType.categoryType(forIdentifier: .mindfulSession) { types.append(m) }
+        for id in [HKQuantityTypeIdentifier.dietaryEnergyConsumed, .dietaryProtein, .dietaryFiber] {
+            if let t = HKObjectType.quantityType(forIdentifier: id) { types.append(t) }
+        }
+        for type in types {
+            await withCheckedContinuation { cont in
+                store.deleteObjects(of: type, predicate: predicate) { _, _, _ in cont.resume() }
+            }
+        }
     }
     #endif
 

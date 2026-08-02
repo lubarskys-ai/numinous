@@ -9,6 +9,10 @@ struct HealthView: View {
     enum LoadState { case loading, denied, loaded([HealthItem]), failed(String) }
     @State private var state: LoadState = .loading
     @State private var path: [UUID] = []
+    #if DEBUG
+    @AppStorage("health_sample_seeded") private var sampleSeeded = false
+    @State private var seeding = false
+    #endif
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -20,12 +24,35 @@ struct HealthView: View {
                 #if DEBUG
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
-                        Button("Seed") { Task { await HealthKitService.seedSampleData(); await load() } }
+                        Menu {
+                            Toggle("Sample health data", isOn: sampleBinding)
+                        } label: {
+                            Image(systemName: "testtube.2")
+                        }
+                        .disabled(seeding)
                     }
                 }
                 #endif
         }
     }
+
+    #if DEBUG
+    /// One-time, persistent sample data: seeding writes once (tagged so it can be
+    /// removed) and stays across launches; turning it off deletes exactly what we
+    /// seeded, leaving real data alone.
+    private var sampleBinding: Binding<Bool> {
+        Binding(get: { sampleSeeded }, set: { on in
+            seeding = true
+            Task {
+                if on { await HealthKitService.seedSampleData() }
+                else { await HealthKitService.removeSampleData() }
+                sampleSeeded = on
+                await load()
+                seeding = false
+            }
+        })
+    }
+    #endif
 
     @ViewBuilder
     private var content: some View {
