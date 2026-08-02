@@ -17,161 +17,26 @@ struct NoteDetailView: View {
     var body: some View {
         if let note = model.note(id: noteID) {
             List {
-                Section {
-                    TextField("folder/Name", text: $titleDraft)
-                        .font(.system(.title3, design: .rounded).weight(.semibold))
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .submitLabel(.done)
-                        .onSubmit { commitRename(note) }
-                } footer: {
-                    Text("Edit the folder or name — links to this note follow it everywhere.")
+                titleSection(note)
+                headerSection(note)
+                if isEntity(note) {
+                    // A thing you relate to (person, place, concept) — lead with its
+                    // web of connections; your own notes are secondary.
+                    linkedFromSection(note)
+                    linksToSection(note)
+                    suggestionsSection(note)
+                    bodySection(note, label: "Notes", minHeight: 70)
+                    reminderSection
+                } else {
+                    // A journal entry — your writing comes first.
+                    bodySection(note, label: "Note", minHeight: 130)
+                    reminderSection
+                    suggestionsSection(note)
+                    linksToSection(note)
+                    linkedFromSection(note)
                 }
-
-                Section {
-                    if note.origin?.source == "readwise" { bookHeader(note) }
-                    if let folder = model.folder(named: note.folderName) {
-                        let axis = model.axis(id: folder.axisID)
-                        HStack(spacing: 8) {
-                            Circle().fill(axis?.color ?? .secondary).frame(width: 8, height: 8)
-                            Text(folder.name).font(.subheadline).foregroundStyle(.secondary)
-                            Spacer()
-                            if let axis {
-                                Text(axis.name).font(.caption).foregroundStyle(axis.color)
-                            }
-                            if !note.isStub {
-                                Text("· ⚡\(note.intensity)").font(.caption).foregroundStyle(.tertiary)
-                            }
-                        }
-                    }
-                    if let loc = note.location, !loc.isEmpty {
-                        LabeledContent("Location", value: loc)
-                    }
-                    if note.origin?.source == "readwise" {
-                        Toggle(isOn: Binding(get: { !note.isStub },
-                                             set: { model.setFinished(note.id, $0) })) {
-                            Label(note.isStub ? "Mark as finished" : "Finished reading",
-                                  systemImage: note.isStub ? "book.closed" : "checkmark.seal.fill")
-                        }
-                        .tint(.green)
-                        if note.isStub {
-                            Text("A book grows Mind only once you finish it.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    } else if note.isStub {
-                        Label("Dormant — write about them or add a [[link]] to start growing.",
-                              systemImage: "moon.zzz")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    if note.origin?.source == "healthkit" {
-                        Label("Verified activity", systemImage: "checkmark.seal.fill")
-                            .font(.caption).foregroundStyle(.green)
-                    }
-                    if note.origin?.source == "followup" {
-                        Label("Followed through", systemImage: "checkmark.seal.fill")
-                            .font(.caption).foregroundStyle(.green)
-                    }
-                }
-
-                let suggestions = model.connectionSuggestions(for: note)
-                if !suggestions.isEmpty {
-                    Section {
-                        ForEach(suggestions) { suggestion in
-                            let candidate = suggestion.note
-                            HStack(spacing: 10) {
-                                Circle().fill(model.axis(for: candidate)?.color ?? .gray).frame(width: 8, height: 8)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(candidate.displayName)
-                                    Text(suggestion.reason)
-                                        .font(.caption2).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Button("Link") { link(to: candidate.title) }
-                                    .buttonStyle(.borderless)
-                            }
-                        }
-                    } header: {
-                        Text("Suggested connections")
-                    } footer: {
-                        Text("People and moments from around this time. Linking one connects it into your web.")
-                    }
-                }
-
-                Section("Note") {
-                    LinkingEditor(text: $editedBody, onCommit: { model.updateBody(note.id, body: $0) })
-                    Text("Type [[ to link — pick an existing note, or create a new one.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-
-                Section {
-                    Button { showFollowUp = true } label: {
-                        Label("Remind me to follow up…", systemImage: "bell.badge")
-                    }
-                }
-
-                // A book already has its cover; no photo picker needed.
-                if note.origin?.source != "readwise" {
-                Section("Photos") {
-                    let photos = note.photos ?? []
-                    if !photos.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 10) {
-                                ForEach(photos, id: \.self) { name in
-                                    if let image = ImageStore.load(name) {
-                                        Image(uiImage: image)
-                                            .resizable().scaledToFill()
-                                            .frame(width: 84, height: 84)
-                                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                                            .overlay(alignment: .topTrailing) {
-                                                Button {
-                                                    model.removePhoto(from: note.id, name: name)
-                                                } label: {
-                                                    Image(systemName: "xmark.circle.fill")
-                                                        .foregroundStyle(.white, .black.opacity(0.5))
-                                                }
-                                                .padding(3)
-                                            }
-                                    }
-                                }
-                            }
-                            .padding(.vertical, 2)
-                        }
-                    }
-                    PhotosPicker(selection: $photoItem, matching: .images) {
-                        Label("Add photo", systemImage: "photo.badge.plus")
-                    }
-                }
-                }
-
-                Section("Links to") {
-                    let targets = note.linkTargets
-                    if targets.isEmpty {
-                        Text("No links yet.").font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        ForEach(targets, id: \.self) { target in
-                            if let other = model.note(titled: target) {
-                                NavigationLink(value: other.id) { linkLabel(other) }
-                            } else {
-                                Label(target + " · new", systemImage: "plus.circle").foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-
-                Section("Linked from") {
-                    let back = model.backlinks(to: note)
-                    if back.isEmpty {
-                        Text("Nothing links here yet.").font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        ForEach(back) { b in NavigationLink(value: b.id) { linkLabel(b) } }
-                    }
-                }
-
-                Section {
-                    Button("Delete note", role: .destructive) {
-                        model.delete([note]); dismiss()
-                    }
-                }
+                photosSection(note)
+                deleteSection(note)
             }
             .navigationTitle(note.displayName)
             .navigationBarTitleDisplayMode(.inline)
@@ -217,6 +82,210 @@ struct NoteDetailView: View {
             Text("This note no longer exists.").foregroundStyle(.secondary)
         }
     }
+
+    // MARK: - Entry vs entity
+
+    /// A journal entry is titled by date; everything else — people, places, and
+    /// concepts like history/1860s — is an entity we relate to, shown
+    /// connections-first (links & relations) rather than as a writing surface.
+    private func isEntity(_ note: Note) -> Bool { !Self.isDateTitled(note.displayName) }
+    private static func isDateTitled(_ name: String) -> Bool {
+        name.range(of: #"^\d{4}-\d{2}-\d{2}"#, options: .regularExpression) != nil
+    }
+
+    // MARK: - Sections
+
+    @ViewBuilder
+    private func titleSection(_ note: Note) -> some View {
+        Section {
+            TextField("folder/Name", text: $titleDraft)
+                .font(.system(.title3, design: .rounded).weight(.semibold))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.done)
+                .onSubmit { commitRename(note) }
+        } footer: {
+            Text("Edit the folder or name — links to this note follow it everywhere.")
+        }
+    }
+
+    @ViewBuilder
+    private func headerSection(_ note: Note) -> some View {
+        Section {
+            if note.origin?.source == "readwise" { bookHeader(note) }
+            if let folder = model.folder(named: note.folderName) {
+                let axis = model.axis(id: folder.axisID)
+                HStack(spacing: 8) {
+                    Circle().fill(axis?.color ?? .secondary).frame(width: 8, height: 8)
+                    Text(folder.name).font(.subheadline).foregroundStyle(.secondary)
+                    Spacer()
+                    if let axis {
+                        Text(axis.name).font(.caption).foregroundStyle(axis.color)
+                    }
+                    if !note.isStub {
+                        Text("· ⚡\(note.intensity)").font(.caption).foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            if let loc = note.location, !loc.isEmpty {
+                LabeledContent("Location", value: loc)
+            }
+            if note.origin?.source == "readwise" {
+                Toggle(isOn: Binding(get: { !note.isStub },
+                                     set: { model.setFinished(note.id, $0) })) {
+                    Label(note.isStub ? "Mark as finished" : "Finished reading",
+                          systemImage: note.isStub ? "book.closed" : "checkmark.seal.fill")
+                }
+                .tint(.green)
+                if note.isStub {
+                    Text("A book grows Mind only once you finish it.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } else if note.isStub {
+                Label("Dormant — write about it or add a [[link]] to start growing.",
+                      systemImage: "moon.zzz")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if note.origin?.source == "healthkit" {
+                Label("Verified activity", systemImage: "checkmark.seal.fill")
+                    .font(.caption).foregroundStyle(.green)
+            }
+            if note.origin?.source == "followup" {
+                Label("Followed through", systemImage: "checkmark.seal.fill")
+                    .font(.caption).foregroundStyle(.green)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func suggestionsSection(_ note: Note) -> some View {
+        let suggestions = model.connectionSuggestions(for: note)
+        if !suggestions.isEmpty {
+            Section {
+                ForEach(suggestions) { suggestion in
+                    let candidate = suggestion.note
+                    HStack(spacing: 10) {
+                        Circle().fill(model.axis(for: candidate)?.color ?? .gray).frame(width: 8, height: 8)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(candidate.displayName)
+                            Text(suggestion.reason)
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Link") { link(to: candidate.title) }
+                            .buttonStyle(.borderless)
+                    }
+                }
+            } header: {
+                Text("Suggested connections")
+            } footer: {
+                Text("People and moments from around this time. Linking one connects it into your web.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func bodySection(_ note: Note, label: String, minHeight: CGFloat) -> some View {
+        Section(label) {
+            LinkingEditor(text: $editedBody, minHeight: minHeight,
+                          onCommit: { model.updateBody(note.id, body: $0) })
+            Text("Type [[ to link — pick an existing note, or create a new one.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var reminderSection: some View {
+        Section {
+            Button { showFollowUp = true } label: {
+                Label("Remind me to follow up…", systemImage: "bell.badge")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func linksToSection(_ note: Note) -> some View {
+        Section(isEntity(note) ? "Connects to" : "Links to") {
+            let targets = note.linkTargets
+            if targets.isEmpty {
+                Text("No links yet.").font(.caption).foregroundStyle(.secondary)
+            } else {
+                ForEach(targets, id: \.self) { target in
+                    if let other = model.note(titled: target) {
+                        NavigationLink(value: other.id) { linkLabel(other) }
+                    } else {
+                        Label(target + " · new", systemImage: "plus.circle").foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func linkedFromSection(_ note: Note) -> some View {
+        let back = model.backlinks(to: note)
+        Section {
+            if back.isEmpty {
+                Text("Nothing links here yet.").font(.caption).foregroundStyle(.secondary)
+            } else {
+                ForEach(back) { b in NavigationLink(value: b.id) { linkLabel(b) } }
+            }
+        } header: {
+            Text(isEntity(note) ? "Mentioned in" : "Linked from")
+        } footer: {
+            if isEntity(note) && !back.isEmpty {
+                Text("Everywhere this comes up across your life.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func photosSection(_ note: Note) -> some View {
+        // A book already has its cover; no photo picker needed.
+        if note.origin?.source != "readwise" {
+            Section("Photos") {
+                let photos = note.photos ?? []
+                if !photos.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(photos, id: \.self) { name in
+                                if let image = ImageStore.load(name) {
+                                    Image(uiImage: image)
+                                        .resizable().scaledToFill()
+                                        .frame(width: 84, height: 84)
+                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                        .overlay(alignment: .topTrailing) {
+                                            Button {
+                                                model.removePhoto(from: note.id, name: name)
+                                            } label: {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .foregroundStyle(.white, .black.opacity(0.5))
+                                            }
+                                            .padding(3)
+                                        }
+                                }
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+                PhotosPicker(selection: $photoItem, matching: .images) {
+                    Label("Add photo", systemImage: "photo.badge.plus")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func deleteSection(_ note: Note) -> some View {
+        Section {
+            Button("Delete note", role: .destructive) {
+                model.delete([note]); dismiss()
+            }
+        }
+    }
+
+    // MARK: - Helpers
 
     /// A sensible default reminder title — person-aware ("Call Sam").
     private func defaultFollowUpTitle(_ note: Note) -> String {
