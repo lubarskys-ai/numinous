@@ -37,14 +37,10 @@ struct AvatarView: View {
                         links: graphLinks,
                         maturity: growthPreview ?? model.maturity,
                         zoom: zoom,
-                        onTapNode: { openNote = IdentifiedID(id: $0) }
+                        onTapNode: { openNote = IdentifiedID(id: $0) },
+                        onZoomChange: { zoom = $0; committedZoom = $0 }
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .gesture(
-                        MagnificationGesture()
-                            .onChanged { zoom = min(30, max(0.12, committedZoom * $0)) }
-                            .onEnded { _ in committedZoom = zoom }
-                    )
                     .overlay(alignment: .bottomLeading) { growButton.padding(14) }
                     .overlay(alignment: .bottomTrailing) { zoomControls.padding(14) }
 

@@ -22,8 +22,11 @@ struct Avatar3DView: UIViewRepresentable {
     var zoom: Double
     /// Called with a note's id when its node is tapped.
     var onTapNode: ((UUID) -> Void)? = nil
+    var onZoomChange: ((Double) -> Void)? = nil
 
     static let baseDistance: Float = 8.5
+    static let minZoom: Double = 0.12
+    static let maxZoom: Double = 30
 
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView()
@@ -35,17 +38,24 @@ struct Avatar3DView: UIViewRepresentable {
         view.antialiasingMode = .multisampling4X
         view.isPlaying = true          // keep the render loop live for the neural pulses
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pan(_:)))
+        pan.maximumNumberOfTouches = 1     // leave two-finger gestures to the pinch
         view.addGestureRecognizer(pan)
+        let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pinch(_:)))
+        view.addGestureRecognizer(pinch)
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tap(_:)))
         view.addGestureRecognizer(tap)
         context.coordinator.view = view
         context.coordinator.builtMaturity = maturity
         context.coordinator.onTapNode = onTapNode
+        context.coordinator.zoom = zoom
+        context.coordinator.onZoomChange = onZoomChange
         return view
     }
 
     func updateUIView(_ view: SCNView, context: Context) {
         context.coordinator.onTapNode = onTapNode
+        context.coordinator.onZoomChange = onZoomChange
+        context.coordinator.zoom = zoom
         // Rebuild when maturity changes (e.g. the "watch it grow" animation stepping
         // it) so the birth sequence plays; otherwise just track zoom.
         if abs(context.coordinator.builtMaturity - maturity) > 0.004 {
@@ -62,12 +72,24 @@ struct Avatar3DView: UIViewRepresentable {
         weak var view: SCNView?
         var builtMaturity: Double = -1
         var onTapNode: ((UUID) -> Void)?
+        var onZoomChange: ((Double) -> Void)?
+        var zoom: Double = 1
+        private var pinchStartZoom: Double = 1
         @objc func pan(_ g: UIPanGestureRecognizer) {
             guard let figure = view?.scene?.rootNode.childNode(withName: "figure", recursively: true) else { return }
             let t = g.translation(in: view)
             figure.eulerAngles.y += Float(t.x) * 0.01
             figure.eulerAngles.x = max(-1.2, min(1.2, figure.eulerAngles.x + Float(t.y) * 0.01))
             g.setTranslation(.zero, in: view)
+        }
+        /// Pinch to zoom: scale the committed zoom, move the camera for instant
+        /// feedback, and report it back so the +/- buttons and clamp stay in sync.
+        @objc func pinch(_ g: UIPinchGestureRecognizer) {
+            if g.state == .began { pinchStartZoom = zoom }
+            let z = min(Avatar3DView.maxZoom, max(Avatar3DView.minZoom, pinchStartZoom * Double(g.scale)))
+            zoom = z
+            view?.pointOfView?.position.z = Avatar3DView.baseDistance / Float(max(0.1, z))
+            onZoomChange?(z)
         }
         /// Open the note whose node is nearest the tap (projected to the screen),
         /// which is far more forgiving than hit-testing tiny spheres.
