@@ -46,6 +46,7 @@ targets:
         # compliance prompt on every upload.
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         INFOPLIST_KEY_NSContactsUsageDescription: "Numinous reads your contacts on your device to fill your People folder. They are never uploaded."
+        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "Numinous fills in where you were on your device so a note remembers its place. Your location is never uploaded."
         INFOPLIST_KEY_NSCalendarsUsageDescription: "Numinous reads your calendar on your device so you can turn events into notes. Nothing is uploaded."
         INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: "Numinous reads your calendar and can add events you create from a note. Nothing is uploaded."
         INFOPLIST_KEY_NSRemindersUsageDescription: "Numinous creates follow-up reminders from your notes, and rewards you when you complete them. Nothing is uploaded."

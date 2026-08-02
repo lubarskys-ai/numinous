@@ -13,6 +13,8 @@ struct ComposeView: View {
     @State private var newFolderAxis = Axis.defaultSet.first?.id ?? "body"
     @State private var showLocationPrompt = false
     @State private var locationDraft = ""
+    @State private var locating = false
+    @StateObject private var locator = LocationService()
 
     init(prefillTitle: String?) {
         _title = State(initialValue: prefillTitle ?? "")
@@ -67,16 +69,29 @@ struct ComposeView: View {
                         Text("4 · vivid (×1.5)").tag(4)
                         Text("5 · profound (×2)").tag(5)
                     }
-                    Button {
-                        locationDraft = location
-                        showLocationPrompt = true
-                    } label: {
-                        HStack {
-                            Label(location.isEmpty ? "Add location" : location,
-                                  systemImage: "mappin.and.ellipse")
-                                .foregroundStyle(location.isEmpty ? Color.accentColor : .primary)
-                            Spacer()
-                            if !location.isEmpty {
+                    if location.isEmpty {
+                        Button {
+                            Task { await useCurrentLocation() }
+                        } label: {
+                            HStack {
+                                Label(locating ? "Locating…" : "Use current location",
+                                      systemImage: "location.fill")
+                                Spacer()
+                                if locating { ProgressView() }
+                            }
+                        }
+                        .disabled(locating)
+                        Button("Enter manually") { locationDraft = ""; showLocationPrompt = true }
+                            .font(.callout)
+                    } else {
+                        Button {
+                            locationDraft = location
+                            showLocationPrompt = true
+                        } label: {
+                            HStack {
+                                Label(location, systemImage: "mappin.and.ellipse")
+                                    .foregroundStyle(.primary)
+                                Spacer()
                                 Text("Edit").font(.caption).foregroundStyle(.secondary)
                             }
                         }
@@ -92,6 +107,10 @@ struct ComposeView: View {
             .navigationTitle("New Note")
             .navigationBarTitleDisplayMode(.inline)
             .onChange(of: title) { _ in updateSuggestion() }
+            .task {
+                // Automatic: if location access is already granted, fill it in silently.
+                if location.isEmpty, locator.isAuthorized { await useCurrentLocation() }
+            }
             .alert("Location", isPresented: $showLocationPrompt) {
                 TextField("Where were you?", text: $locationDraft)
                 Button("Cancel", role: .cancel) {}
@@ -106,6 +125,17 @@ struct ComposeView: View {
                 }
             }
         }
+    }
+
+    private func useCurrentLocation() async {
+        locating = true
+        if let place = await locator.currentPlace() {
+            location = place
+        } else if !locator.isAuthorized {
+            // Denied or unavailable — let them type it instead.
+            locationDraft = ""; showLocationPrompt = true
+        }
+        locating = false
     }
 
     private func updateSuggestion() {
