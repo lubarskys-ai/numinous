@@ -103,10 +103,20 @@ private struct DrawerView: View {
             .onTapGesture(perform: onToggle)
 
             if isOpen {
-                RiffleDeck(notes: cabinet.notes, color: cabinet.color, onOpenNote: onOpenNote)
-                    .frame(height: 250)
-                    .padding(.top, 10)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                if cabinet.notes.isEmpty {
+                    Text("No files yet").font(.callout).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity).padding(.vertical, 20)
+                } else {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
+                                        GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                        ForEach(cabinet.notes) { note in
+                            MiniFileCard(note: note, color: cabinet.color)
+                                .onTapGesture { onOpenNote(note.id) }
+                        }
+                    }
+                    .padding(.top, 12)
+                    .transition(.opacity)
+                }
             }
         }
     }
@@ -131,86 +141,33 @@ private struct DrawerView: View {
     }
 }
 
-/// The files of one drawer, fanned in depth. Swipe to rifle through; tap the
-/// front file to open it.
-private struct RiffleDeck: View {
-    let notes: [Note]
-    let color: Color
-    let onOpenNote: (UUID) -> Void
-    @State private var index = 0
-    @GestureState private var dragX: CGFloat = 0
-
-    var body: some View {
-        if notes.isEmpty {
-            Text("No files yet").font(.callout).foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, minHeight: 120)
-        } else {
-            GeometryReader { geo in
-                ZStack {
-                    ForEach(Array(notes.enumerated()), id: \.element.id) { pair in
-                        let rel = Double(pair.offset) - Double(index) - Double(dragX / 150)
-                        if abs(rel) < 3.4 {
-                            FileCard(note: pair.element, color: color)
-                                .frame(width: geo.size.width * 0.72, height: 208)
-                                .scaleEffect(1 - min(0.28, abs(rel) * 0.08))
-                                .offset(x: CGFloat(rel) * 48, y: CGFloat(abs(rel)) * 7)
-                                .rotation3DEffect(.degrees(rel * -13), axis: (x: 0, y: 1, z: 0), perspective: 0.6)
-                                .opacity(rel < -1.7 ? 0 : 1)
-                                .zIndex(-abs(rel))
-                                .onTapGesture {
-                                    if pair.offset == index { onOpenNote(pair.element.id) }
-                                    else { withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) { index = pair.offset } }
-                                }
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture()
-                        .updating($dragX) { value, state, _ in state = value.translation.width }
-                        .onEnded { value in
-                            let step = Int((-value.translation.width / 110).rounded())
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) {
-                                index = max(0, min(notes.count - 1, index + step))
-                            }
-                        }
-                )
-            }
-        }
-    }
-}
-
-/// A single "file": a hanging-file card with a colored tab.
-private struct FileCard: View {
+/// A single compact "file" card in the drawer grid: name, a short preview, and a
+/// small colored dot. Tap to open. Small and uniform so many fit at a glance.
+private struct MiniFileCard: View {
     let note: Note
     let color: Color
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(tab)
-                .font(.caption2.weight(.semibold)).foregroundStyle(color)
-                .padding(.horizontal, 10).padding(.vertical, 4)
-                .background(color.opacity(0.18), in: Capsule())
-            Text(note.displayName)
-                .font(.system(.title3, design: .rounded).weight(.semibold)).lineLimit(2)
-            if let snippet { Text(snippet).font(.subheadline).foregroundStyle(.secondary).lineLimit(4) }
-            Spacer(minLength: 0)
-            if note.isStub {
-                Label("dormant", systemImage: "moon.zzz").font(.caption).foregroundStyle(.secondary)
-            } else {
-                Label("\(note.intensity)", systemImage: "bolt.fill").font(.caption).foregroundStyle(.orange)
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 5) {
+                Circle().fill(note.isStub ? Color.secondary.opacity(0.5) : color).frame(width: 7, height: 7)
+                Text(note.displayName)
+                    .font(.caption.weight(.semibold)).lineLimit(1).foregroundStyle(.primary)
             }
+            if let snippet {
+                Text(snippet).font(.caption2).foregroundStyle(.secondary).lineLimit(3)
+            } else if note.isStub {
+                Text("dormant").font(.caption2).foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 0)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(uiColor: .systemBackground)))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(color.opacity(0.22)))
-        .shadow(color: .black.opacity(0.14), radius: 9, y: 5)
-    }
-
-    private var tab: String {
-        note.folderName.contains("/") ? String(note.folderName.split(separator: "/").last!) : note.folderName
+        .padding(10)
+        .frame(height: 92, alignment: .topLeading)
+        .frame(maxWidth: .infinity)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(uiColor: .systemBackground)))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(color.opacity(0.16)))
+        .shadow(color: .black.opacity(0.06), radius: 3, y: 2)
+        .contentShape(Rectangle())
     }
 
     private var snippet: String? {
