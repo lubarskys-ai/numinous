@@ -17,6 +17,8 @@ struct ComposeView: View {
     @State private var showLocationPrompt = false
     @State private var locationDraft = ""
     @State private var locating = false
+    @State private var showFollowUp = false
+    @State private var reminderNoteTitle = ""
     @StateObject private var locator = LocationService()
 
     init(prefillTitle: String?) {
@@ -102,6 +104,16 @@ struct ComposeView: View {
                     Text("Type [[ to link an existing note, or create a new one.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+
+                Section {
+                    Button {
+                        let id = createNote()
+                        reminderNoteTitle = model.note(id: id)?.title ?? category
+                        showFollowUp = true
+                    } label: {
+                        Label("Remind me to follow up…", systemImage: "bell.badge")
+                    }
+                }
             }
             .navigationTitle("New Note")
             .navigationBarTitleDisplayMode(.inline)
@@ -125,6 +137,9 @@ struct ComposeView: View {
             } message: {
                 Text("Add a place to this note.")
             }
+            .sheet(isPresented: $showFollowUp, onDismiss: { dismiss() }) {
+                FollowUpSheet(noteTitle: reminderNoteTitle, defaultTitle: followUpDefault) { _ in }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
@@ -144,9 +159,18 @@ struct ComposeView: View {
         locating = false
     }
 
-    private func save() {
+    private func save() { _ = createNote(); dismiss() }
+
+    @discardableResult
+    private func createNote() -> UUID {
         model.createCapturedNote(body: text, folder: category, intensity: intensity,
                                  location: location.isEmpty ? nil : location)
-        dismiss()
+    }
+
+    /// A sensible reminder title seeded from the note's opening words.
+    private var followUpDefault: String {
+        let firstLine = text.split(separator: "\n").first.map(String.init) ?? ""
+        let words = firstLine.split(separator: " ").prefix(4).joined(separator: " ")
+        return words.isEmpty ? "Follow up" : "Follow up: \(words)"
     }
 }

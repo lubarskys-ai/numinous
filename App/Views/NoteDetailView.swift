@@ -32,27 +32,16 @@ struct NoteDetailView: View {
                     if note.origin?.source == "readwise" { bookHeader(note) }
                     if let folder = model.folder(named: note.folderName) {
                         let axis = model.axis(id: folder.axisID)
-                        HStack(spacing: 12) {
-                            AxisIconTile(symbol: folderSymbol(folder.name, folder.category),
-                                         color: axis?.color ?? .secondary, size: 34)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(folder.name).font(.system(.subheadline, design: .rounded).weight(.semibold))
-                                Text(folder.category).font(.caption).foregroundStyle(.secondary)
-                            }
+                        HStack(spacing: 8) {
+                            Circle().fill(axis?.color ?? .secondary).frame(width: 8, height: 8)
+                            Text(folder.name).font(.subheadline).foregroundStyle(.secondary)
                             Spacer()
                             if let axis {
-                                Text(axis.name)
-                                    .font(.caption.weight(.medium))
-                                    .foregroundStyle(axis.color)
-                                    .padding(.horizontal, 10).padding(.vertical, 4)
-                                    .background(axis.color.opacity(0.15), in: Capsule())
+                                Text(axis.name).font(.caption).foregroundStyle(axis.color)
                             }
-                        }
-                        .padding(.vertical, 2)
-                    }
-                    if !note.isStub {
-                        LabeledContent("Intensity") {
-                            Text("⚡ \(note.intensity)").font(.callout.weight(.medium))
+                            if !note.isStub {
+                                Text("· ⚡\(note.intensity)").font(.caption).foregroundStyle(.tertiary)
+                            }
                         }
                     }
                     if let loc = note.location, !loc.isEmpty {
@@ -84,12 +73,6 @@ struct NoteDetailView: View {
                     }
                 }
 
-                Section {
-                    Button { showFollowUp = true } label: {
-                        Label("Remind me to follow up…", systemImage: "bell.badge")
-                    }
-                }
-
                 let suggestions = model.connectionSuggestions(for: note)
                 if !suggestions.isEmpty {
                     Section {
@@ -118,6 +101,12 @@ struct NoteDetailView: View {
                     LinkingEditor(text: $editedBody, onCommit: { model.updateBody(note.id, body: $0) })
                     Text("Type [[ to link — pick an existing note, or create a new one.")
                         .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Section {
+                    Button { showFollowUp = true } label: {
+                        Label("Remind me to follow up…", systemImage: "bell.badge")
+                    }
                 }
 
                 // A book already has its cover; no photo picker needed.
