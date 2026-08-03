@@ -41,21 +41,26 @@ enum CalendarService {
         }
     }
 
-    /// Every event calendar available to the user, for the selection UI.
+    /// Every event calendar available to the user, for the selection UI. Birthday
+    /// calendars are excluded — they're an auto-generated flood (one per contact),
+    /// not events you'd turn into notes.
     static func availableCalendars() async throws -> [CalendarInfo] {
         let store = EKEventStore()
         guard try await ensureAccess(store) else { throw CalError.accessDenied }
         return store.calendars(for: .event)
+            .filter { $0.type != .birthday }
             .map { CalendarInfo(id: $0.calendarIdentifier, title: $0.title, colorHex: Self.hex(from: $0.cgColor)) }
             .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
     }
 
-    static func fetchEvents(daysBack: Int = 30, daysForward: Int = 14,
+    static func fetchEvents(daysBack: Int = 60, daysForward: Int = 120,
                             excluding: Set<String> = []) async throws -> [CalendarEvent] {
         let store = EKEventStore()
         guard try await ensureAccess(store) else { throw CalError.accessDenied }
 
-        var calendars = store.calendars(for: .event)
+        // Skip the Birthdays calendar (auto-generated from Contacts) — with a big
+        // address book it swamps everything else.
+        var calendars = store.calendars(for: .event).filter { $0.type != .birthday }
         if !excluding.isEmpty { calendars = calendars.filter { !excluding.contains($0.calendarIdentifier) } }
         guard !calendars.isEmpty else { return [] }
         let cal = Calendar.current
@@ -63,9 +68,11 @@ enum CalendarService {
         let end = cal.date(byAdding: .day, value: daysForward, to: Date()) ?? Date()
         let predicate = store.predicateForEvents(withStart: start, end: end, calendars: calendars)
 
+        // Keep the events nearest to now (past or future) so the cap never drops the
+        // ones you care about in favour of far-off entries.
         let events = store.events(matching: predicate)
-            .sorted { $0.startDate > $1.startDate }
-            .prefix(200)
+            .sorted { abs($0.startDate.timeIntervalSinceNow) < abs($1.startDate.timeIntervalSinceNow) }
+            .prefix(300)
 
         return events.map { event in
             CalendarEvent(
