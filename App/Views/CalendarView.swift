@@ -72,15 +72,24 @@ struct CalendarView: View {
 
     private func eventList(_ events: [CalendarEvent]) -> some View {
         let byDay = Dictionary(grouping: events) { Calendar.current.startOfDay(for: $0.start) }
-        let days = byDay.keys.sorted(by: >)
-        return List {
-            ForEach(days, id: \.self) { day in
-                Section(Self.dayLabel(day)) {
-                    ForEach(byDay[day] ?? []) { event in
-                        Button { open(event) } label: { row(event) }
-                            .buttonStyle(.plain)
+        let days = byDay.keys.sorted()                    // past → future
+        let today = Calendar.current.startOfDay(for: Date())
+        let anchor = days.first { $0 >= today } ?? days.last   // today, or the next day with events
+        return ScrollViewReader { proxy in
+            List {
+                ForEach(days, id: \.self) { day in
+                    Section(Self.dayLabel(day)) {
+                        ForEach(byDay[day] ?? []) { event in
+                            Button { open(event) } label: { row(event) }
+                                .buttonStyle(.plain)
+                        }
                     }
+                    .id(day)
                 }
+            }
+            .onAppear {
+                guard let anchor else { return }
+                DispatchQueue.main.async { proxy.scrollTo(anchor, anchor: .top) }
             }
         }
     }
