@@ -42,7 +42,15 @@ struct Avatar3DView: UIViewRepresentable {
         pan.maximumNumberOfTouches = 1     // leave two-finger gestures to the pinch
         view.addGestureRecognizer(pan)
         let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pinch(_:)))
+        pinch.delegate = context.coordinator
         view.addGestureRecognizer(pinch)
+        // Two-finger drag pans the camera so you can move to (and zoom into) any part,
+        // not just the centre. Recognizes simultaneously with pinch.
+        let camPan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.camPan(_:)))
+        camPan.minimumNumberOfTouches = 2
+        camPan.maximumNumberOfTouches = 2
+        camPan.delegate = context.coordinator
+        view.addGestureRecognizer(camPan)
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tap(_:)))
         view.addGestureRecognizer(tap)
         context.coordinator.view = view
@@ -69,13 +77,26 @@ struct Avatar3DView: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    final class Coordinator: NSObject {
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         weak var view: SCNView?
         var builtMaturity: Double = -1
         var onTapNode: ((UUID) -> Void)?
         var onZoomChange: ((Double) -> Void)?
         var zoom: Double = 1
         private var pinchStartZoom: Double = 1
+
+        func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+
+        /// Two-finger drag pans the camera (in its own plane), so you can bring any
+        /// section to centre and zoom into it.
+        @objc func camPan(_ g: UIPanGestureRecognizer) {
+            guard let cam = view?.pointOfView else { return }
+            let t = g.translation(in: view)
+            let s = cam.position.z * 0.0016   // scale by distance so it feels 1:1
+            cam.position.x -= Float(t.x) * s
+            cam.position.y += Float(t.y) * s
+            g.setTranslation(.zero, in: view)
+        }
         @objc func pan(_ g: UIPanGestureRecognizer) {
             guard let figure = view?.scene?.rootNode.childNode(withName: "figure", recursively: true) else { return }
             let t = g.translation(in: view)
@@ -233,17 +254,20 @@ struct Avatar3DView: UIViewRepresentable {
         // gathers onto the body's surface as the avatar matures — stardust → human.
         // The body materializes from a shimmer of motes that gathers onto its
         // surface — only during the body stage, once connections have multiplied.
-        if !bodySamples.isEmpty, bodyAppear > 0.02 {
+        if !bodySamples.isEmpty {
             for i in 0..<460 {
                 let target = bodySamples[(i * 89) % bodySamples.count]
-                let p = lerpV(diffusePoint(i), target, bodyAppear)
                 let ax = GLTFBody.axis(forX: Double(target.x), y: Double(target.y))
-                // Bright + emissive so it glows against the dark cosmos backdrop.
+                // Each mote gathers onto the surface at ITS region's rate — so an
+                // ungrown part stays a scattered, ethereal cloud (graph/space-like)
+                // while a grown part condenses into solid form.
+                let reg = smoothstep(0.0, 1.0, max(0, min(1, regionMaturity(ax))))
+                let p = lerpV(diffusePoint(i), target, reg)
                 let col = GLTFBody.blend(UIColor(white: 0.9, alpha: 1), color(ax), CGFloat(0.4 + matur * 0.5))
                 let dot = ball(0.016); dot.segmentCount = 6
                 let dm = SCNMaterial(); dm.lightingModel = .constant
                 dm.diffuse.contents = col; dm.emission.contents = col; dm.emission.intensity = 0.9
-                dm.transparency = CGFloat(0.6 * bodyAppear)
+                dm.transparency = CGFloat(0.18 + 0.42 * reg)   // faint when scattered, bright when gathered
                 dm.writesToDepthBuffer = false
                 dot.materials = [dm]
                 let n = SCNNode(geometry: dot); n.position = p; n.renderingOrder = 5

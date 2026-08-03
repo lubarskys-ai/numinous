@@ -42,6 +42,21 @@ struct AvatarView: View {
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .overlay(alignment: .bottomTrailing) { zoomControls.padding(14) }
+                    #if DEBUG
+                    .overlay(alignment: .topLeading) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            ForEach(model.axes) { ax in
+                                Text("\(ax.name) \(String(format: "%.2f", model.axisMaturity(ax.id)))")
+                                    .foregroundStyle(ax.color)
+                            }
+                            Text("overall \(String(format: "%.2f", model.maturity))").foregroundStyle(.yellow)
+                        }
+                        .font(.caption2.monospaced())
+                        .padding(8)
+                        .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+                        .padding(10)
+                    }
+                    #endif
 
                     if let reflection {
                         reflectionCard(reflection, tint: dominantColor(balance))
