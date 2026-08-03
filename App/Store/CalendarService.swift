@@ -75,8 +75,12 @@ enum CalendarService {
             .prefix(300)
 
         return events.map { event in
-            CalendarEvent(
-                id: event.eventIdentifier ?? UUID().uuidString,
+            // Recurring events share one eventIdentifier across all occurrences, which
+            // collides in SwiftUI's List (only one per day survives). Make the id
+            // unique per occurrence by folding in the start time.
+            let base = event.eventIdentifier ?? UUID().uuidString
+            return CalendarEvent(
+                id: "\(base)@\(Int(event.startDate.timeIntervalSince1970))",
                 title: event.title ?? "(untitled)",
                 start: event.startDate,
                 end: event.endDate,
