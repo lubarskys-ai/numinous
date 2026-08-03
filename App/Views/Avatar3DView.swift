@@ -14,6 +14,7 @@ struct GraphEdge { let a: UUID; let b: UUID; let cross: Bool }
 struct Avatar3DView: UIViewRepresentable {
     var color: (String) -> UIColor
     var growth: (String) -> CGFloat
+    var regionMaturity: (String) -> Double = { _ in 1 }
     var nodes: [GraphNode]
     var links: [GraphEdge]
     /// 0→1 overall growth (fidelity): drives how materialized the body is.
@@ -201,9 +202,13 @@ struct Avatar3DView: UIViewRepresentable {
         let bodyAppear  = smoothstep(0.42, 0.90, matur)
 
         // The real sculpted body, re-skinned grey→color; primitives if it can't load.
+        // Each region fades in on its OWN axis maturity, so parts form at different
+        // rates and ungrown ones stay ethereal.
+        let regionKeys = ["mind", "meaning", "heart", "spirit", "gut", "body"]
+        let maxRegion = regionKeys.map { regionMaturity($0) }.max() ?? 0
         var bodySamples: [SCNVector3] = []
-        if let loaded = GLTFBody.load(color: color, growth: growth, maturity: bodyAppear) {
-            if bodyAppear > 0.02 { bodyFloat.addChildNode(loaded.node) }   // no ghost body before the body stage
+        if let loaded = GLTFBody.load(color: color, growth: growth, regionMaturity: regionMaturity) {
+            if maxRegion > 0.02 { bodyFloat.addChildNode(loaded.node) }   // present once any part forms
             bodySamples = loaded.samples
         } else {
             part(ball(0.17), "mind",    v(-0.07, 0.80, 0), scale: v(0.85, 1.15, 1.0))

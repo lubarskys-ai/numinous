@@ -69,10 +69,23 @@ final class AppModel: ObservableObject {
     /// stage (~0.42) takes on the order of 1500 points ≈ dozens of cross-axis links.
     /// Fully formed only after this many connections — deliberately a lot, so the
     /// avatar spends a long time as scattered nodes slowly drifting together.
-    static let maturityFullAtLinks = 120.0
+    /// Counted connections touching one axis needed for that body region to fully
+    /// form. High, so growth is slow and each part earns its solidity separately.
+    static let maturityFullPerAxis = 140.0
+
+    /// Per-axis maturity 0→1 — how *formed* that body region is, from the counted
+    /// connections touching it. Regions grow independently: a neglected axis stays
+    /// ethereal (graph-like) while a rich one solidifies.
+    func axisMaturity(_ axisID: String) -> Double {
+        let n = score.links.filter { $0.isCounted && ($0.axisA == axisID || $0.axisB == axisID) }.count
+        return min(1, Double(n) / Self.maturityFullPerAxis)
+    }
+
+    /// Overall maturity — the average across axes, so the avatar as a whole forms
+    /// slowly and only once growth is *broad* (drives staging + the companion).
     var maturity: Double {
-        let connections = score.links.filter { $0.isCounted }.count
-        return min(1, Double(connections) / Self.maturityFullAtLinks)
+        guard !axes.isEmpty else { return 0 }
+        return axes.map { axisMaturity($0.id) }.reduce(0, +) / Double(axes.count)
     }
 
     private let engine = ScoreEngine()

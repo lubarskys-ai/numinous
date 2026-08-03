@@ -47,7 +47,7 @@ enum GLTFBody {
         let meshes: [Mesh]; let nodes: [Node]; let scenes: [Scene]?; let scene: Int?
     }
 
-    static func load(color: (String) -> UIColor, growth: (String) -> CGFloat, maturity: Double = 1) -> (node: SCNNode, samples: [SCNVector3])? {
+    static func load(color: (String) -> UIColor, growth: (String) -> CGFloat, regionMaturity: (String) -> Double = { _ in 1 }) -> (node: SCNNode, samples: [SCNVector3])? {
         guard let gltfURL = Bundle.main.url(forResource: "scene", withExtension: "gltf", subdirectory: "HumanBody")
                 ?? Bundle.main.url(forResource: "scene", withExtension: "gltf"),
               let json = try? Data(contentsOf: gltfURL),
@@ -120,7 +120,7 @@ enum GLTFBody {
         }
         let scale = 1.7 / max(1e-6, maxY - minY)
         let cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2
-        var colors = [Float](); colors.reserveCapacity(raw.count * 3)
+        var colors = [Float](); colors.reserveCapacity(raw.count * 4)
         let grey = UIColor(white: 0.62, alpha: 1)
         for p in raw {
             let nx = (p.0 - cx) * scale, ny = (p.1 - minY) * scale - 0.85, nz = (p.2 - cz) * scale
@@ -129,38 +129,40 @@ enum GLTFBody {
             let c = Self.blend(grey, color(ax), min(1, max(0, growth(ax))) * 0.85)
             var r: CGFloat = 0, gg: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
             c.getRed(&r, green: &gg, blue: &b, alpha: &a)
-            colors.append(Float(r)); colors.append(Float(gg)); colors.append(Float(b))
+            // Per-vertex alpha = this region's maturity (eased), so each body part
+            // solidifies at its own rate; young regions stay ethereal/graph-like.
+            let m = Float(max(0, min(1, regionMaturity(ax))))
+            let alpha = m * m * (3 - 2 * m)
+            colors.append(Float(r)); colors.append(Float(gg)); colors.append(Float(b)); colors.append(alpha)
         }
 
         let vSource = SCNGeometrySource(vertices: vertices)
         let cSource = SCNGeometrySource(data: Data(bytes: colors, count: colors.count * 4), semantic: .color,
-                                        vectorCount: raw.count, usesFloatComponents: true, componentsPerVector: 3,
-                                        bytesPerComponent: 4, dataOffset: 0, dataStride: 12)
+                                        vectorCount: raw.count, usesFloatComponents: true, componentsPerVector: 4,
+                                        bytesPerComponent: 4, dataOffset: 0, dataStride: 16)
         var sources = [vSource, cSource]
         if !normals.isEmpty { sources.append(SCNGeometrySource(normals: normals)) }
         let element = SCNGeometryElement(indices: indices, primitiveType: .triangles)
         let geo = SCNGeometry(sources: sources, elements: [element])
 
-        // Materialize from mist: young = nearly invisible (just a luminous rim
-        // silhouette around the connectome); mature = a solid condensed body.
-        let mat = max(0, min(1, maturity))
+        // Materialize from mist, per region: a body part is invisible when its axis
+        // is young and solid once it's grown — driven by the per-vertex alpha above.
         let m = SCNMaterial()
         m.lightingModel = .physicallyBased
-        m.diffuse.contents = UIColor.white          // modulated by vertex colors
+        m.diffuse.contents = UIColor.white          // modulated by vertex colors (incl. alpha)
         m.roughness.contents = 0.45
         m.emission.contents = UIColor(white: 0.06, alpha: 1)   // lift shadows on the pale bg
-        m.transparency = CGFloat(0.63 * mat)  // fully invisible when young, solid when formed
+        m.transparency = 1
         m.isDoubleSided = true
         m.writesToDepthBuffer = false
-        // Fresnel rim glow — brightest when young so the ghost still reads as a
-        // figure; softens as the body solidifies.
-        // Rim grows with maturity — no ghost silhouette when young (the diffuse
-        // cloud stands in for the not-yet-formed body).
-        let rim = String(format: "%.4f", 0.6 * mat)
+        // Per-region opacity + a fresnel rim that only lights where the region is
+        // forming, so ungrown parts read as an ethereal graph, not a ghost body.
         m.shaderModifiers = [.fragment: """
         #pragma transparent
+        float _reg = _surface.diffuse.a;
+        _output.color.a = _reg * 0.63;
         float _f = 1.0 - abs(dot(normalize(_surface.normal), normalize(_surface.view)));
-        _f = pow(_f, 2.0) * \(rim);
+        _f = pow(_f, 2.0) * 0.6 * _reg;
         _output.color.rgb += float3(0.72, 0.83, 1.0) * _f;
         _output.color.a = max(_output.color.a, _f * 0.9);
         """]
