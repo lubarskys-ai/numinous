@@ -20,31 +20,34 @@ enum SmartLinker {
         let surface: String
         @Guide(description: "A clean, properly capitalized and correctly spelled name or title.")
         let name: String
-        @Guide(description: "A lowercase folder path to file this under (e.g. people, location, golf clubs, entertainment/restaurant). Reuse one of the user's existing folders when it fits.")
+        @Guide(description: "A lowercase folder for this entity: people, location, books, or notes. Use notes when you are unsure. Only use entertainment/restaurant for an actual named place to eat or drink.")
         let folder: String
     }
 
     @available(iOS 26.0, *)
     @Generable
     struct Extraction {
-        @Guide(description: "Every specific person, place, venue, business, book, or film the writer names. Skip generic activity words like dinner, golf, run, work, or friend.")
+        @Guide(description: "Only the specific, clearly-named people, places, businesses, books, and films the writer actually names. Be conservative: skip generic words (dinner, golf, work, friend) and skip anything you're unsure is a real named entity.")
         let entities: [Entity]
     }
 
     @available(iOS 26.0, *)
     static func extract(from text: String, folders: [String]) async -> [Entity] {
         guard isAvailable else { return [] }
-        let existing = folders.isEmpty ? "people, location, entertainment/restaurant" : folders.joined(separator: ", ")
+        let existing = folders.isEmpty ? "people, location, books" : folders.joined(separator: ", ")
         let instructions = """
-        You read a short personal note and list the specific people, places, venues, \
-        businesses, books, and films the writer names, filing each under a lowercase \
-        folder path. Rules:
-        - A city, town, neighborhood, or region is 'location' (Carmel-by-the-Sea → location), \
-        even if a meal or activity happened there.
-        - A specific restaurant, cafe, or bar is 'entertainment/restaurant'.
-        - A person is 'people'.
-        - Reuse one of the user's existing folders whenever it fits: \(existing).
-        - Skip generic activity words (dinner, golf, run, work) — only name real entities.
+        You read a short personal note and list only the specific, clearly-named \
+        people, places, businesses, books, and films the writer actually mentions, \
+        filing each under a lowercase folder. Be conservative — when in doubt, leave \
+        it out. Choosing the folder:
+        - A person → people
+        - A city, town, neighborhood, or region → location (even if a meal or activity \
+        happened there)
+        - A book → books; a film or show → entertainment/film
+        - A named restaurant, cafe, or bar → entertainment/restaurant, but ONLY when it \
+        is genuinely a place to eat or drink. Do NOT put other things there.
+        - Anything else, or whenever you are unsure what kind of thing it is → notes
+        You may reuse one of the user's existing folders only when it clearly fits: \(existing).
         For each entity copy the exact words, give a clean corrected name, and choose the folder.
         """
         let session = LanguageModelSession(instructions: instructions)
