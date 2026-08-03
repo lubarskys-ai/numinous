@@ -122,6 +122,20 @@ final class AppModel: ObservableObject {
         }
         // Reward any follow-ups you've since completed in iOS Reminders.
         Task { await checkFollowUps() }
+        // Silently refresh already-connected sources (contacts, Readwise).
+        Task { await autoSync() }
+    }
+
+    /// Refresh already-connected import sources on launch/foreground. Idempotent
+    /// (matched by id, so no duplicates) and never prompts: contacts sync only when
+    /// access is already granted; Readwise only when a token is stored.
+    func autoSync() async {
+        if ContactsImporter.isAuthorized, let contacts = try? await ContactsImporter.fetchContacts() {
+            importContacts(contacts)
+        }
+        if let token = readwiseToken, let books = try? await ReadwiseService.fetch(token: token) {
+            importReadwise(books)
+        }
     }
 
     static let schemaVersion = 6

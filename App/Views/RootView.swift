@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject var model: AppModel
+    @Environment(\.scenePhase) private var scenePhase
     // Initial tab can be set via the NUMINOUS_TAB env var (used for headless
     // screenshots). The avatar is no longer a tab — it's the floating companion.
     @State private var selection: String =
@@ -50,6 +51,8 @@ struct RootView: View {
         .onChange(of: selection) { _ in trigger(.walk) }
         // …and does a joyful, heart-popping cheer when a new connection forms.
         .onChange(of: model.spark?.id) { id in if id != nil { trigger(.cheer) } }
+        // Refresh already-connected sources (contacts, Readwise) when returning to the app.
+        .onChange(of: scenePhase) { if $0 == .active { Task { await model.autoSync() } } }
         .onChange(of: quickCapture.requested) { if $0 { showCapture = true; quickCapture.requested = false } }
         .onAppear { if quickCapture.requested { showCapture = true; quickCapture.requested = false } }
     }

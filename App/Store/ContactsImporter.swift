@@ -16,6 +16,12 @@ enum ContactsImporter {
 
     enum ImportError: Error { case accessDenied }
 
+    /// True only when access is already granted — so we can auto-sync on launch
+    /// without ever triggering the permission prompt.
+    static var isAuthorized: Bool {
+        CNContactStore.authorizationStatus(for: .contacts) == .authorized
+    }
+
     static func fetchContacts() async throws -> [ImportedContact] {
         let store = CNContactStore()
 
