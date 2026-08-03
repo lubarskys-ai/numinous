@@ -8,6 +8,7 @@ struct CabinetView: View {
     @EnvironmentObject var model: AppModel
     var onOpenNote: (UUID) -> Void
     var onEditAxes: (String) -> Void
+    var onBrowseFolder: (String) -> Void
     @State private var openCategory: String?
 
     struct Cabinet: Identifiable {
@@ -48,7 +49,8 @@ struct CabinetView: View {
                                    }
                                },
                                onOpenNote: onOpenNote,
-                               onEditAxes: onEditAxes)
+                               onEditAxes: onEditAxes,
+                               onBrowseFolder: onBrowseFolder)
                 }
             }
             .padding(.horizontal)
@@ -66,6 +68,10 @@ private struct DrawerView: View {
     let onToggle: () -> Void
     let onOpenNote: (UUID) -> Void
     let onEditAxes: (String) -> Void
+    let onBrowseFolder: (String) -> Void
+
+    /// Above this many files a grid is unwieldy — show a peek + "Browse all".
+    private let gridLimit = 18
 
     var body: some View {
         VStack(spacing: 0) {
@@ -107,15 +113,27 @@ private struct DrawerView: View {
                     Text("No files yet").font(.callout).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity).padding(.vertical, 20)
                 } else {
+                    let shown = cabinet.notes.count > gridLimit ? Array(cabinet.notes.prefix(6)) : cabinet.notes
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
                                         GridItem(.flexible(), spacing: 10)], spacing: 10) {
-                        ForEach(cabinet.notes) { note in
+                        ForEach(shown) { note in
                             MiniFileCard(note: note, color: cabinet.color)
                                 .onTapGesture { onOpenNote(note.id) }
                         }
                     }
                     .padding(.top, 12)
                     .transition(.opacity)
+                    if cabinet.notes.count > gridLimit {
+                        Button { onBrowseFolder(cabinet.id) } label: {
+                            Label("Browse all \(cabinet.notes.count), A–Z", systemImage: "list.bullet.indent")
+                                .font(.callout.weight(.medium))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(cabinet.color)
+                        .padding(.top, 8)
+                    }
                 }
             }
         }

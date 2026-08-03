@@ -38,7 +38,7 @@ struct FoldersView: View {
     @State private var showReadwise = false
     @State private var composePrefill: String?
     @State private var importMessage: String?
-    @State private var path: [UUID] = []
+    @State private var path = NavigationPath()
     @State private var searchText = ""
     @AppStorage("foldersCabinetMode") private var cabinetMode = true
 
@@ -49,7 +49,8 @@ struct FoldersView: View {
                     searchResults(searchText)
                 } else if cabinetMode {
                     CabinetView(onOpenNote: { path.append($0) },
-                                onEditAxes: { axisPickerFolder = FolderRef(id: $0) })
+                                onEditAxes: { axisPickerFolder = FolderRef(id: $0) },
+                                onBrowseFolder: { path.append($0) })
                 } else {
                     List {
                         OutlineGroup(buildTree(), children: \.children) { node in
@@ -65,6 +66,7 @@ struct FoldersView: View {
             .autocorrectionDisabled()
             .navigationTitle("Folders")
             .navigationDestination(for: UUID.self) { id in NoteDetailView(noteID: id) }
+            .navigationDestination(for: String.self) { category in FolderBrowserView(category: category) }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { showSettings = true } label: { Image(systemName: "gearshape") }
