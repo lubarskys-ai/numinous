@@ -18,8 +18,6 @@ struct CaptureView: View {
     @State private var didScan = false
     @State private var confirmed: [LinkSuggestion] = []   // will link on save (auto or approved)
     @State private var pending: [LinkSuggestion] = []     // proposed new notes, awaiting a decision
-    @State private var editingSuggestion: LinkSuggestion?
-    @State private var editingIsPending = false
     @State private var editSheetFor: LinkSuggestion?
     @State private var editName = ""
     @State private var editFolder = "notes"
@@ -39,6 +37,7 @@ struct CaptureView: View {
         NavigationStack {
             Form {
                 noteSection
+                if reviewing { pendingSection }
                 categorySection
                 if !reviewing { findSection }
             }
@@ -62,19 +61,6 @@ struct CaptureView: View {
             } message: {
                 Text("Notes here are titled by date. The folder is created for you.")
             }
-            .confirmationDialog("Link", isPresented: dialogBinding, presenting: editingSuggestion) { s in
-                if editingIsPending {
-                    Button("Add link · \(s.target)") { confirm(s) }
-                    Button("Edit folder…") { beginEdit(s) }
-                    Button("Skip", role: .destructive) { pending.removeAll { $0.id == s.id } }
-                } else {
-                    Button("Edit…") { beginEdit(s) }
-                    Button("Remove link", role: .destructive) { confirmed.removeAll { $0.id == s.id } }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: { s in
-                Text(editingIsPending ? "New note “\(s.name)” in \(folderPart(s.target))" : s.target)
-            }
             .sheet(item: $editSheetFor) { s in editSheet(s) }
         }
     }
@@ -86,7 +72,6 @@ struct CaptureView: View {
         Section {
             if reviewing {
                 Text(reviewText())
-                    .environment(\.openURL, OpenURLAction { url in handleTap(url); return .handled })
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 4)
                 Button { exitReview() } label: {
@@ -103,9 +88,41 @@ struct CaptureView: View {
             Text(reviewing ? "Review links" : "Speak or type")
         } footer: {
             if reviewing {
-                Text("Orange = tap to add or edit · Blue = auto-linked. Unconfirmed ones are skipped when you save.")
+                Text("Blue = auto-linked. Orange = suggested new notes, listed below to add or skip.")
             } else {
                 Text("Tap the 🎤 on your keyboard to dictate, then find the links.")
+            }
+        }
+    }
+
+    /// Reliable list of proposed new links — add, edit the folder, or skip each.
+    @ViewBuilder
+    private var pendingSection: some View {
+        if !pending.isEmpty {
+            Section {
+                ForEach(pending) { s in
+                    HStack(spacing: 10) {
+                        Circle().fill(Color.orange).frame(width: 8, height: 8)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(s.name).font(.callout.weight(.medium))
+                            Text(folderPart(s.target)).font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Add") { confirm(s) }.buttonStyle(.borderless)
+                        Menu {
+                            Button { beginEdit(s) } label: { Label("Edit folder…", systemImage: "folder") }
+                            Button(role: .destructive) { pending.removeAll { $0.id == s.id } } label: {
+                                Label("Skip", systemImage: "xmark")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle").foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            } header: {
+                Text("New links to review")
+            } footer: {
+                Text("Add the ones that fit; skip the rest. Nothing is written until you save.")
             }
         }
     }
@@ -234,21 +251,6 @@ struct CaptureView: View {
         confirmed = []; pending = []; didScan = false
     }
 
-    private func handleTap(_ url: URL) {
-        guard let host = url.host, let i = Int(host) else { return }
-        switch url.scheme {
-        case "numinous-pending":
-            if i < pending.count { editingIsPending = true; editingSuggestion = pending[i] }
-        case "numinous-confirmed":
-            if i < confirmed.count { editingIsPending = false; editingSuggestion = confirmed[i] }
-        default: break
-        }
-    }
-
-    private var dialogBinding: Binding<Bool> {
-        Binding(get: { editingSuggestion != nil }, set: { if !$0 { editingSuggestion = nil } })
-    }
-
     private func save() {
         var body = text
         for s in confirmed { body = insert(s, into: body) }
@@ -284,11 +286,9 @@ struct CaptureView: View {
             var chip = AttributedString(String(text[m.range]))
             if m.pending {
                 chip.backgroundColor = Color.orange.opacity(0.30)
-                chip.link = URL(string: "numinous-pending://\(m.index)")
             } else {
                 chip.foregroundColor = .blue
                 chip.underlineStyle = .single
-                chip.link = URL(string: "numinous-confirmed://\(m.index)")
             }
             out += chip
             cursor = m.range.upperBound

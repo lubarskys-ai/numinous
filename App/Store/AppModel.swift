@@ -977,6 +977,30 @@ final class AppModel: ObservableObject {
         return note.id
     }
 
+    /// Append a line to today's most recent diary entry (creating one if there isn't
+    /// one yet). Any `[[links]]` in the line become real connections, as usual.
+    @discardableResult
+    func appendToTodayDiary(_ line: String) -> UUID {
+        let cal = Calendar.current
+        if let i = notes.indices
+            .filter({ Folder.normalize(notes[$0].folderName).contains("diary") && cal.isDateInToday(notes[$0].date) })
+            .max(by: { notes[$0].date < notes[$1].date }) {
+            let sep = notes[i].body.isEmpty ? "" : "\n"
+            updateBody(notes[i].id, body: notes[i].body + sep + line)
+            return notes[i].id
+        }
+        return createCapturedNote(body: line, folder: "notes/diary")
+    }
+
+    /// Delete a folder and every note filed under it (and its subfolders).
+    func deleteFolder(_ path: String) {
+        let p = path.lowercased()
+        func under(_ s: String) -> Bool { let l = s.lowercased(); return l == p || l.hasPrefix(p + "/") }
+        notes.removeAll { under($0.folderName) }
+        folders.removeAll { under($0.name) }
+        persist()
+    }
+
     private static func dateTimeStamp() -> String {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm"
         return f.string(from: Date())

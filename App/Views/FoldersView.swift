@@ -35,6 +35,7 @@ struct FoldersView: View {
     @State private var axisPickerFolder: FolderRef?
     @State private var renameFolderPath: String?
     @State private var folderNameDraft = ""
+    @State private var deleteFolderPath: String?
     @State private var showReadwise = false
     @State private var composePrefill: String?
     @State private var importMessage: String?
@@ -50,7 +51,8 @@ struct FoldersView: View {
                 } else if cabinetMode {
                     CabinetView(onOpenNote: { path.append($0) },
                                 onEditAxes: { axisPickerFolder = FolderRef(id: $0) },
-                                onBrowseFolder: { path.append($0) })
+                                onBrowseFolder: { path.append($0) },
+                                onDeleteFolder: { deleteFolderPath = $0 })
                 } else {
                     List {
                         OutlineGroup(buildTree(), children: \.children) { node in
@@ -105,6 +107,13 @@ struct FoldersView: View {
                 Button("Save") { if let p = renameFolderPath { model.renameFolder(from: p, to: folderNameDraft) } }
             } message: {
                 Text("Moves every note in this folder. All links update automatically.")
+            }
+            .confirmationDialog("Delete this folder?", isPresented: Binding(get: { deleteFolderPath != nil }, set: { if !$0 { deleteFolderPath = nil } }), presenting: deleteFolderPath) { folder in
+                Button("Delete “\(folder)” and its notes", role: .destructive) { model.deleteFolder(folder) }
+                Button("Cancel", role: .cancel) {}
+            } message: { folder in
+                let n = model.notes.filter { $0.folderName.lowercased() == folder.lowercased() || $0.folderName.lowercased().hasPrefix(folder.lowercased() + "/") }.count
+                Text("Permanently removes this folder and \(n) note\(n == 1 ? "" : "s") inside it.")
             }
             .sheet(isPresented: $showCapture) { CaptureView(onSaved: { path.append($0) }) }
             .sheet(isPresented: $showCompose) { ComposeView(prefillTitle: composePrefill) }
@@ -242,6 +251,10 @@ struct FoldersView: View {
                         if intensity == level { Label("⚡ \(level)", systemImage: "checkmark") } else { Text("⚡ \(level)") }
                     }
                 }
+            }
+            Divider()
+            Button(role: .destructive) { deleteFolderPath = path } label: {
+                Label("Delete folder…", systemImage: "trash")
             }
         } label: {
             Image(systemName: "ellipsis.circle").foregroundStyle(.secondary)

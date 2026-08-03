@@ -9,6 +9,7 @@ struct CabinetView: View {
     var onOpenNote: (UUID) -> Void
     var onEditAxes: (String) -> Void
     var onBrowseFolder: (String) -> Void
+    var onDeleteFolder: (String) -> Void
     @State private var openCategory: String?
 
     struct Cabinet: Identifiable {
@@ -50,7 +51,8 @@ struct CabinetView: View {
                                },
                                onOpenNote: onOpenNote,
                                onEditAxes: onEditAxes,
-                               onBrowseFolder: onBrowseFolder)
+                               onBrowseFolder: onBrowseFolder,
+                               onDeleteFolder: onDeleteFolder)
                 }
             }
             .padding(.horizontal)
@@ -69,6 +71,7 @@ private struct DrawerView: View {
     let onOpenNote: (UUID) -> Void
     let onEditAxes: (String) -> Void
     let onBrowseFolder: (String) -> Void
+    let onDeleteFolder: (String) -> Void
 
     /// Above this many files a grid is unwieldy — show a peek + "Browse all".
     private let gridLimit = 18
@@ -152,6 +155,10 @@ private struct DrawerView: View {
                         if intensity == level { Label("⚡ \(level)", systemImage: "checkmark") } else { Text("⚡ \(level)") }
                     }
                 }
+            }
+            Divider()
+            Button(role: .destructive) { onDeleteFolder(cabinet.id) } label: {
+                Label("Delete folder…", systemImage: "trash")
             }
         } label: {
             Image(systemName: "ellipsis.circle").font(.title3).foregroundStyle(cabinet.color.opacity(0.7))

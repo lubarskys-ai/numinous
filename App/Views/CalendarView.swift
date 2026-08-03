@@ -1,8 +1,10 @@
 import SwiftUI
+import UIKit
 import NuminousCore
 
-/// A tab that reads events across all your calendars. Tap any event to turn it
-/// into a note (pre-filled with its date, location, and [[people/…]] links).
+/// A tab that reads events across all your calendars. Tap any event to copy a diary
+/// snippet (with [[people/…]] links) or drop it into today's diary — without spawning
+/// a note per event.
 struct CalendarView: View {
     @EnvironmentObject var model: AppModel
 
@@ -13,6 +15,8 @@ struct CalendarView: View {
     @State private var path: [UUID] = []
     @State private var showSubscribe = false
     @State private var showCalendars = false
+    @State private var actionEvent: CalendarEvent?
+    @State private var toast: String?
     @AppStorage("calendar_excluded_ids") private var excludedRaw = ""
 
     private var excludedIDs: Set<String> { Set(excludedRaw.split(separator: "\n").map(String.init)) }
@@ -38,7 +42,41 @@ struct CalendarView: View {
                 }
                 .task { await load() }
                 .refreshable { await load() }
+                .confirmationDialog("Add to your diary", isPresented: eventDialog, presenting: actionEvent) { event in
+                    Button("Copy for diary") {
+                        UIPasteboard.general.string = diarySnippet(event)
+                        toast = "Copied — paste it into a diary entry."
+                    }
+                    Button("Add to today's diary") {
+                        model.appendToTodayDiary(diarySnippet(event))
+                        toast = "Added to today's diary."
+                    }
+                    Button("Create a note", role: .none) { open(event) }
+                    Button("Cancel", role: .cancel) {}
+                } message: { event in
+                    Text(diarySnippet(event))
+                }
+                .alert("Calendar", isPresented: Binding(get: { toast != nil }, set: { if !$0 { toast = nil } })) {
+                    Button("OK", role: .cancel) {}
+                } message: { Text(toast ?? "") }
         }
+    }
+
+    private var eventDialog: Binding<Bool> {
+        Binding(get: { actionEvent != nil }, set: { if !$0 { actionEvent = nil } })
+    }
+
+    /// A diary-ready line for an event: title, who was there (as [[people/…]] links),
+    /// time, and place — to paste into a diary entry or drop straight in.
+    private func diarySnippet(_ e: CalendarEvent) -> String {
+        var parts = [e.title]
+        let people = e.attendees.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        if !people.isEmpty {
+            parts.append("with " + people.map { "[[people/\($0)]]" }.joined(separator: ", "))
+        }
+        parts.append(Self.timeLabel(e))
+        if let loc = e.location, !loc.isEmpty { parts.append("📍 \(loc)") }
+        return parts.joined(separator: " · ")
     }
 
     @ViewBuilder
@@ -80,7 +118,7 @@ struct CalendarView: View {
                 ForEach(days, id: \.self) { day in
                     Section(Self.dayLabel(day)) {
                         ForEach(byDay[day] ?? []) { event in
-                            Button { open(event) } label: { row(event) }
+                            Button { actionEvent = event } label: { row(event) }
                                 .buttonStyle(.plain)
                         }
                     }
