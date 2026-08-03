@@ -120,53 +120,47 @@ enum GLTFBody {
         }
         let scale = 1.7 / max(1e-6, maxY - minY)
         let cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2
-        var colors = [Float](); colors.reserveCapacity(raw.count * 4)
+        var colors = [Float](); colors.reserveCapacity(raw.count * 3)
+        var vertexAxis = [String](); vertexAxis.reserveCapacity(raw.count)
         let grey = UIColor(white: 0.62, alpha: 1)
         for p in raw {
             let nx = (p.0 - cx) * scale, ny = (p.1 - minY) * scale - 0.85, nz = (p.2 - cz) * scale
             vertices.append(SCNVector3(Float(nx), Float(ny), Float(nz)))
             let ax = axis(forX: nx, y: ny)
+            vertexAxis.append(ax)
             let c = Self.blend(grey, color(ax), min(1, max(0, growth(ax))) * 0.85)
             var r: CGFloat = 0, gg: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
             c.getRed(&r, green: &gg, blue: &b, alpha: &a)
-            // Per-vertex alpha = this region's maturity (eased), so each body part
-            // solidifies at its own rate; young regions stay ethereal/graph-like.
-            let m = Float(max(0, min(1, regionMaturity(ax))))
-            let alpha = m * m * (3 - 2 * m)
-            colors.append(Float(r)); colors.append(Float(gg)); colors.append(Float(b)); colors.append(alpha)
+            colors.append(Float(r)); colors.append(Float(gg)); colors.append(Float(b))
         }
 
         let vSource = SCNGeometrySource(vertices: vertices)
         let cSource = SCNGeometrySource(data: Data(bytes: colors, count: colors.count * 4), semantic: .color,
-                                        vectorCount: raw.count, usesFloatComponents: true, componentsPerVector: 4,
-                                        bytesPerComponent: 4, dataOffset: 0, dataStride: 16)
+                                        vectorCount: raw.count, usesFloatComponents: true, componentsPerVector: 3,
+                                        bytesPerComponent: 4, dataOffset: 0, dataStride: 12)
         var sources = [vSource, cSource]
         if !normals.isEmpty { sources.append(SCNGeometrySource(normals: normals)) }
-        let element = SCNGeometryElement(indices: indices, primitiveType: .triangles)
-        let geo = SCNGeometry(sources: sources, elements: [element])
 
-        // Materialize from mist, per region: a body part is invisible when its axis
-        // is young and solid once it's grown — driven by the per-vertex alpha above.
-        let m = SCNMaterial()
-        m.lightingModel = .physicallyBased
-        m.diffuse.contents = UIColor.white          // modulated by vertex colors (incl. alpha)
-        m.roughness.contents = 0.45
-        m.emission.contents = UIColor(white: 0.06, alpha: 1)   // lift shadows on the pale bg
-        m.transparency = 1
-        m.isDoubleSided = true
-        m.writesToDepthBuffer = false
-        // Per-region opacity + a fresnel rim that only lights where the region is
-        // forming, so ungrown parts read as an ethereal graph, not a ghost body.
-        m.shaderModifiers = [.fragment: """
-        #pragma transparent
-        float _reg = _surface.diffuse.a;
-        _output.color.a = _reg * 0.63;
-        float _f = 1.0 - abs(dot(normalize(_surface.normal), normalize(_surface.view)));
-        _f = pow(_f, 2.0) * 0.6 * _reg;
-        _output.color.rgb += float3(0.72, 0.83, 1.0) * _f;
-        _output.color.a = max(_output.color.a, _f * 0.9);
-        """]
-        geo.materials = [m]
+        // Split triangles by body region (each triangle → its first vertex's axis) so
+        // every part gets its OWN material opacity — material transparency is reliable
+        // where per-vertex alpha wasn't. Each region fades in on its axis maturity.
+        let regionKeys = ["mind", "meaning", "heart", "spirit", "gut", "body"]
+        var byRegion: [String: [UInt32]] = [:]
+        var i = 0
+        while i + 2 < indices.count {
+            let region = vertexAxis[Int(indices[i])]
+            byRegion[region, default: []].append(indices[i]); byRegion[region, default: []].append(indices[i+1]); byRegion[region, default: []].append(indices[i+2])
+            i += 3
+        }
+        var elements: [SCNGeometryElement] = []
+        var materials: [SCNMaterial] = []
+        for key in regionKeys {
+            guard let idx = byRegion[key], !idx.isEmpty else { continue }
+            elements.append(SCNGeometryElement(indices: idx, primitiveType: .triangles))
+            materials.append(Self.bodyMaterial(regionMaturity(key)))
+        }
+        let geo = SCNGeometry(sources: sources, elements: elements)
+        geo.materials = materials
 
         let node = SCNNode(geometry: geo)
         node.renderingOrder = 0
@@ -198,6 +192,30 @@ enum GLTFBody {
     static func applyDir(_ m: [Double], _ x: Double, _ y: Double, _ z: Double) -> (Double, Double, Double) {
         (m[0]*x + m[4]*y + m[8]*z, m[1]*x + m[5]*y + m[9]*z, m[2]*x + m[6]*y + m[10]*z)
     }
+    /// A body-region material whose opacity + rim glow scale with that region's
+    /// maturity: young → invisible/ethereal, grown → solid.
+    static func bodyMaterial(_ maturity: Double) -> SCNMaterial {
+        let m = max(0, min(1, maturity))
+        let eased = m * m * (3 - 2 * m)
+        let mat = SCNMaterial()
+        mat.lightingModel = .physicallyBased
+        mat.diffuse.contents = UIColor.white
+        mat.roughness.contents = 0.45
+        mat.emission.contents = UIColor(white: 0.06, alpha: 1)
+        mat.transparency = CGFloat(0.63 * eased)
+        mat.isDoubleSided = true
+        mat.writesToDepthBuffer = false
+        let rim = String(format: "%.4f", 0.6 * eased)
+        mat.shaderModifiers = [.fragment: """
+        #pragma transparent
+        float _f = 1.0 - abs(dot(normalize(_surface.normal), normalize(_surface.view)));
+        _f = pow(_f, 2.0) * \(rim);
+        _output.color.rgb += float3(0.72, 0.83, 1.0) * _f;
+        _output.color.a = max(_output.color.a, _f * 0.9);
+        """]
+        return mat
+    }
+
     static func blend(_ a: UIColor, _ b: UIColor, _ t: CGFloat) -> UIColor {
         var ar: CGFloat = 0, ag: CGFloat = 0, ab: CGFloat = 0, aa: CGFloat = 0
         var br: CGFloat = 0, bg: CGFloat = 0, bb: CGFloat = 0, ba: CGFloat = 0
