@@ -413,7 +413,9 @@ final class AppModel: ObservableObject {
         return (added, updated)
     }
 
-    /// Import contacts into the People folder (idempotent by contact identifier).
+    /// Import contacts into the `contacts` folder (idempotent by contact identifier).
+    /// Kept distinct from `people` — contacts are your address book (met, have their
+    /// number); `people` is reserved for names you mention, read, or talk about.
     @discardableResult
     func importContacts(_ contacts: [ImportedContact]) -> (added: Int, updated: Int) {
         let items: [ImportedItem] = contacts.compactMap { contact in
@@ -424,9 +426,9 @@ final class AppModel: ObservableObject {
             var lines: [String] = []
             if let phone = contact.phones.first { lines.append("Phone: \(phone)") }
             if let email = contact.emails.first { lines.append("Email: \(email)") }
-            return ImportedItem(folder: "people", name: name, body: lines.joined(separator: "\n"),
+            return ImportedItem(folder: "contacts", name: name, body: lines.joined(separator: "\n"),
                                 origin: NoteOrigin(source: "contacts", externalID: contact.id),
-                                folderCategory: "Relationships", folderAxisID: "heart",
+                                folderCategory: "Contacts", folderAxisID: "heart",
                                 isDormant: true)
         }
         return ingest(items)

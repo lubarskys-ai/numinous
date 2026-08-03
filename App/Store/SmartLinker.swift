@@ -40,7 +40,7 @@ enum SmartLinker {
         people, places, businesses, books, and films the writer actually mentions, \
         filing each under a lowercase folder. Be conservative — when in doubt, leave \
         it out. Choosing the folder:
-        - A person → people
+        - A person the writer mentions → people (never contacts)
         - A city, town, neighborhood, or region → location (even if a meal or activity \
         happened there)
         - A book → books; a film or show → entertainment/film

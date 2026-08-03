@@ -12,6 +12,7 @@ struct NotesView: View {
     @State private var showCompose = false
     @State private var showCapture = false
     @State private var composePrefill: String?
+    @State private var importMessage: String?
     @State private var path: [UUID] = []
 
     var body: some View {
@@ -42,6 +43,8 @@ struct NotesView: View {
                             Button { showCapture = true } label: { Label("Dictate a note", systemImage: "mic") }
                             Button { composePrefill = nil; showCompose = true } label: { Label("New note", systemImage: "square.and.pencil") }
                             Button { composePrefill = "notes/diary/" + Self.stamp(); showCompose = true } label: { Label("New diary entry", systemImage: "calendar.badge.plus") }
+                            Divider()
+                            Button { importContacts() } label: { Label("Sync contacts", systemImage: "person.crop.circle.badge.plus") }
                         } label: {
                             Image(systemName: "square.and.pencil")
                         }
@@ -50,6 +53,9 @@ struct NotesView: View {
                 }
                 .sheet(isPresented: $showCompose) { ComposeView(prefillTitle: composePrefill) }
                 .sheet(isPresented: $showCapture) { CaptureView(onSaved: { path.append($0) }) }
+                .alert("Contacts", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
+                    Button("OK", role: .cancel) {}
+                } message: { Text(importMessage ?? "") }
         }
     }
 
@@ -171,6 +177,22 @@ struct NotesView: View {
         let f = DateFormatter()
         f.dateFormat = cal.isDate(day, equalTo: Date(), toGranularity: .year) ? "EEEE, MMMM d" : "MMMM d, yyyy"
         return f.string(from: day)
+    }
+
+    private func importContacts() {
+        Task {
+            do {
+                let contacts = try await ContactsImporter.fetchContacts()
+                let (added, updated) = model.importContacts(contacts)
+                importMessage = contacts.isEmpty
+                    ? "No contacts found on this device."
+                    : "Synced \(added) new, updated \(updated) into your Contacts folder."
+            } catch ContactsImporter.ImportError.accessDenied {
+                importMessage = "Contacts access was declined. You can enable it in Settings → Numinous."
+            } catch {
+                importMessage = "Couldn't sync contacts: \(error.localizedDescription)"
+            }
+        }
     }
 
     static func stamp() -> String {

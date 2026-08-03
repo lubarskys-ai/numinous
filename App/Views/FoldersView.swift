@@ -84,7 +84,7 @@ struct FoldersView: View {
                         Button { composePrefill = nil; showCompose = true } label: { Label("New note", systemImage: "square.and.pencil") }
                         Button { path.append(model.createDiaryEntry()) } label: { Label("Diary entry", systemImage: "calendar.badge.plus") }
                         Divider()
-                        Button { importContacts() } label: { Label("Import contacts", systemImage: "person.crop.circle.badge.plus") }
+                        Button { importContacts() } label: { Label("Sync contacts", systemImage: "person.crop.circle.badge.plus") }
                         Button { showReadwise = true } label: { Label("Import from Readwise", systemImage: "books.vertical") }
                         #if DEBUG
                         Button { let (a, u) = model.importReadwise(ReadwiseService.sampleBooks); importMessage = "Readwise (sample): \(a) new, \(u) updated." } label: { Label("Readwise sample (debug)", systemImage: "ladybug") }
@@ -307,7 +307,7 @@ struct FoldersView: View {
                 let contacts = try await ContactsImporter.fetchContacts()
                 let (added, updated) = model.importContacts(contacts)
                 importMessage = contacts.isEmpty ? "No contacts found on this device."
-                    : "Imported \(added) new, updated \(updated) in your People folder."
+                    : "Synced \(added) new, updated \(updated) into your Contacts folder."
             } catch ContactsImporter.ImportError.accessDenied {
                 importMessage = "Contacts access was declined. You can enable it in Settings → Numinous."
             } catch {
