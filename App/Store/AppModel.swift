@@ -92,6 +92,7 @@ final class AppModel: ObservableObject {
         if version < 3, Self.migrateAddMeaningAxis(&a) { didMigrate = true }
         if version < 4, Self.migrateAddGutAxis(&a) { didMigrate = true }
         if version < 5, Self.backfillLinkStubs(&n) { didMigrate = true }
+        if version < 6, Self.backfillFolderAxes(n, &f) { didMigrate = true }
 
         self.folders = f
         self.notes = n
@@ -109,7 +110,25 @@ final class AppModel: ObservableObject {
         Task { await checkFollowUps() }
     }
 
-    static let schemaVersion = 5
+    static let schemaVersion = 6
+
+    /// One-time repair: give existing axis-less folders a sensible default axis, and
+    /// create a Folder (with an axis) for any note-folder path that never had one —
+    /// so all those imported/linked connections finally count toward growth.
+    private static func backfillFolderAxes(_ notes: [Note], _ folders: inout [Folder]) -> Bool {
+        var changed = false
+        for i in folders.indices where folders[i].axisID == nil && (folders[i].axisIDs?.isEmpty ?? true) {
+            if let a = defaultAxis(forFolderNamed: folders[i].name) { folders[i].axisID = a; changed = true }
+        }
+        var existing = Set(folders.map { $0.id })
+        for note in notes {
+            let fn = note.folderName
+            guard !fn.isEmpty, existing.insert(Folder.normalize(fn)).inserted else { continue }
+            folders.append(Folder(name: fn, category: fn.capitalized, axisID: defaultAxis(forFolderNamed: fn)))
+            changed = true
+        }
+        return changed
+    }
 
     /// One-time repair: create a stub note for every `[[link]]` in any body that has
     /// no matching note yet — so links written elsewhere (e.g. Kindle notes synced
@@ -307,6 +326,8 @@ final class AppModel: ObservableObject {
         if let i = notes.firstIndex(where: { $0.id == note.id }) { notes[i] = note }
         else { notes.append(note) }
         for target in note.linkTargets where !noteExists(titled: target) {
+            // Give the linked folder an axis so this connection counts toward growth.
+            ensureCategoryFolder(Self.folderPart(of: target))
             notes.append(Note(title: target, date: note.date, isStub: true))
         }
         persist()
@@ -1098,13 +1119,42 @@ final class AppModel: ObservableObject {
     /// new one gets a suggested axis (diary → Journal/Spirit, matching the app's
     /// existing diary default).
     private func ensureCategoryFolder(_ name: String) {
-        guard folder(named: name) == nil else { return }
-        if Folder.normalize(name).contains("diary") {
-            folders.append(Folder(name: name, category: "Journal", axisID: "spirit", defaultIntensity: 4))
+        let n = name.trimmingCharacters(in: CharacterSet(charactersIn: " /"))
+        guard !n.isEmpty, folder(named: n) == nil else { return }
+        if Folder.normalize(n).contains("diary") {
+            folders.append(Folder(name: n, category: "Journal", axisID: "spirit", defaultIntensity: 4))
             return
         }
-        let axis: String? = { if case let .suggest(id, _) = suggestAxis(forNewFolderNamed: name) { return id }; return nil }()
-        folders.append(Folder(name: name, category: name.capitalized, axisID: axis))
+        // A recognizable folder gets a sensible axis so its connections COUNT toward
+        // growth; otherwise fall back to the similarity classifier.
+        let axis = Self.defaultAxis(forFolderNamed: n)
+            ?? { if case let .suggest(id, _) = suggestAxis(forNewFolderNamed: n) { return id }; return nil }()
+        folders.append(Folder(name: n, category: n.capitalized, axisID: axis))
+    }
+
+    /// A sensible default growth axis for common folder names, so their links count
+    /// (a link only counts when both ends' folders have an axis). Overridable by the
+    /// user via "Grows…". Returns nil for folders we can't confidently place.
+    static func defaultAxis(forFolderNamed name: String) -> String? {
+        let base = name.lowercased().split(separator: "/").first.map(String.init) ?? name.lowercased()
+        switch base {
+        case "people", "person", "friends", "family", "relationships", "contacts", "colleagues":
+            return "heart"
+        case "work", "career", "job", "projects", "school", "study", "notes", "ideas":
+            return "mind"
+        case "books", "reading", "learning", "articles", "podcasts":
+            return "mind"
+        case "health", "fitness", "exercise", "workouts", "sports", "golf clubs", "body":
+            return "body"
+        case "food", "nutrition", "diet", "meals", "cooking", "restaurants":
+            return "gut"
+        case "spirit", "faith", "meditation", "gratitude", "journal", "diary", "prayer":
+            return "spirit"
+        case "location", "locations", "places", "travel", "home", "entertainment", "movies", "music", "hobbies", "experiences":
+            return "meaning"
+        default:
+            return nil
+        }
     }
 
     /// The folder segment of a `[[folder/Name]]` link target ("" if unqualified).
