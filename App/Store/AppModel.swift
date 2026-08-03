@@ -70,8 +70,9 @@ final class AppModel: ObservableObject {
     /// Fully formed only after this many connections — deliberately a lot, so the
     /// avatar spends a long time as scattered nodes slowly drifting together.
     /// Counted connections touching one axis needed for that body region to fully
-    /// form. High, so growth is slow and each part earns its solidity separately.
-    static let maturityFullPerAxis = 140.0
+    /// form. Now that only *engaged* notes count, this is lower — but still enough
+    /// that each part earns its solidity slowly and separately.
+    static let maturityFullPerAxis = 70.0
 
     /// Per-axis maturity 0→1 — how *formed* that body region is, from the counted
     /// connections touching it. Regions grow independently: a neglected axis stays

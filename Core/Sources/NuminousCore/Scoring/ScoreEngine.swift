@@ -87,11 +87,13 @@ public struct ScoreEngine {
         }
 
         // MARK: 2. Links — the core mechanic. Unique undirected edges from
-        // manual note bodies. Passive notes have no bodies, so earn no bonuses.
+        // *engaged* (non-dormant) manual note bodies. Dormant imports (a contact you
+        // haven't written about, an unfinished book) don't count — otherwise a single
+        // import dump would inflate growth. Growth = engagement, not volume.
         var seenEdges = Set<String>()
         var links: [ScoredLink] = []
 
-        for note in notes where note.source == .manual {
+        for note in notes where note.source == .manual && !note.isStub {
             for target in note.linkTargets {
                 let key = target.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
                 guard let other = notesByTitle[key], other.id != note.id else { continue }
