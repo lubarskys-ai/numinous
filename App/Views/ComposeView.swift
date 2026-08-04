@@ -5,6 +5,11 @@ import NuminousCore
 /// A full-screen note editor: the writing area is the hero (a big text view, NOT a
 /// Form row — which is what bounced the cursor), with category, details, and links
 /// tucked into compact bars. Titled by date, filed under a chosen category.
+///
+/// "Find links" never rewrites what you typed. It scans the text and shows its
+/// findings as **highlights** — blue for things it can auto-link to notes you already
+/// have, orange for brand-new notes it proposes — and you add, edit, or skip each.
+/// Wikilinks are only written into the saved note, and only for the ones you keep.
 struct ComposeView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -22,7 +27,11 @@ struct ComposeView: View {
     @State private var reminderNoteTitle = ""
     @State private var scanning = false
     @State private var didScan = false
-    @State private var linkedNames: [String] = []
+    @State private var confirmed: [LinkSuggestion] = []   // auto-linked (blue) — applied on save
+    @State private var pending: [LinkSuggestion] = []     // proposed new notes (orange) — awaiting a decision
+    @State private var editSheetFor: LinkSuggestion?
+    @State private var editName = ""
+    @State private var editFolder = "notes"
     @StateObject private var locator = LocationService()
 
     /// Optional: notified with the new note's id after Save (used by quick-capture /
@@ -38,6 +47,10 @@ struct ComposeView: View {
         _category = State(initialValue: (folder?.isEmpty == false) ? folder! : "notes")
     }
 
+    /// True once a scan found something to review. In this mode the note text is shown
+    /// read-only with the findings highlighted, so nothing gets rewritten under you.
+    private var reviewing: Bool { didScan && (!confirmed.isEmpty || !pending.isEmpty) }
+
     private var categoryOptions: [String] {
         var seen = Set<String>(); var out: [String] = []
         for c in [category, "notes", "diary"] + model.folders.map(\.name) where seen.insert(c.lowercased()).inserted {
@@ -51,13 +64,17 @@ struct ComposeView: View {
             VStack(spacing: 0) {
                 categoryBar
                 Divider()
-                LinkingEditor(text: $text)
-                    .padding(.horizontal, 14)
-                    .padding(.top, 6)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                if didScan { linkStatus }
+                if reviewing {
+                    reviewArea
+                } else {
+                    LinkingEditor(text: $text)
+                        .padding(.horizontal, 14)
+                        .padding(.top, 6)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    if didScan { linkStatus }
+                }
             }
-            .navigationTitle("New Note")
+            .navigationTitle(reviewing ? "Review links" : "New Note")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -66,11 +83,15 @@ struct ComposeView: View {
                         .disabled(category.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
                 ToolbarItemGroup(placement: .bottomBar) {
-                    Button { findLinks() } label: {
-                        if scanning { HStack { ProgressView(); Text("Finding…") } }
-                        else { Label("Find links", systemImage: "link.badge.plus") }
+                    if reviewing {
+                        Button { exitReview() } label: { Label("Edit text", systemImage: "pencil") }
+                    } else {
+                        Button { findLinks() } label: {
+                            if scanning { HStack { ProgressView(); Text("Finding…") } }
+                            else { Label("Find links", systemImage: "link.badge.plus") }
+                        }
+                        .disabled(scanning || text.trimmingCharacters(in: .whitespaces).count < 3)
                     }
-                    .disabled(scanning || text.trimmingCharacters(in: .whitespaces).count < 3)
                     Spacer()
                     detailsMenu
                 }
@@ -89,6 +110,7 @@ struct ComposeView: View {
                 Button("Cancel", role: .cancel) {}
                 Button("Save") { location = locationDraft.trimmingCharacters(in: .whitespaces) }
             } message: { Text("Add a place to this note.") }
+            .sheet(item: $editSheetFor) { s in editSheet(s) }
             .sheet(isPresented: $showFollowUp, onDismiss: { dismiss() }) {
                 FollowUpSheet(noteTitle: reminderNoteTitle, defaultTitle: followUpDefault) { _ in }
             }
@@ -121,13 +143,58 @@ struct ComposeView: View {
         .foregroundStyle(.primary)
     }
 
+    // MARK: - Review (highlighted preview — the note text is never rewritten here)
+
+    private var reviewArea: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(reviewText())
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 10)
+
+                if !pending.isEmpty {
+                    Divider()
+                    Text("New links to review").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    ForEach(pending) { s in pendingRow(s) }
+                }
+
+                Label("Blue = linked to notes you already have. Orange = suggested new notes.",
+                      systemImage: "info.circle")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .padding(.top, 4)
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 20)
+        }
+    }
+
+    private func pendingRow(_ s: LinkSuggestion) -> some View {
+        HStack(spacing: 10) {
+            Circle().fill(Color.orange).frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(s.name).font(.callout.weight(.medium))
+                Text(folderPart(s.target)).font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Add") { confirm(s) }.buttonStyle(.borderless)
+            Menu {
+                Button { beginEdit(s) } label: { Label("Edit folder…", systemImage: "folder") }
+                Button(role: .destructive) { pending.removeAll { $0.id == s.id } } label: {
+                    Label("Skip", systemImage: "xmark")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle").foregroundStyle(.secondary)
+            }
+        }
+    }
+
     @ViewBuilder
     private var linkStatus: some View {
         Group {
-            if linkedNames.isEmpty {
-                Text("Nothing to link yet — name a person, place, or thing.").foregroundStyle(.secondary)
+            if !confirmed.isEmpty || !pending.isEmpty {
+                Label("Found \(confirmed.count + pending.count) — review above.", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
             } else {
-                Label("Linked \(linkedNames.joined(separator: " · "))", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                Text("Nothing to link yet — name a person, place, or thing.").foregroundStyle(.secondary)
             }
         }
         .font(.caption)
@@ -160,17 +227,78 @@ struct ComposeView: View {
 
     // MARK: - Actions
 
+    /// Scan for links and enter review — WITHOUT touching the note text. Findings are
+    /// held as suggestions and only written into the note when you save.
     private func findLinks() {
-        // Dismiss the keyboard so found links actually render (the editor ignores
-        // programmatic text while it's first responder — which keeps the caret stable).
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         scanning = true
         Task {
             let found = await model.smartLinkSuggestions(in: text)
-            for s in found { applyLink(s) }
-            linkedNames = found.map(\.name)
+            confirmed = found.filter { !$0.isNew }
+            pending = found.filter { $0.isNew }
             didScan = true
             scanning = false
+        }
+    }
+
+    private func confirm(_ s: LinkSuggestion) {
+        pending.removeAll { $0.id == s.id }
+        if !confirmed.contains(where: { $0.id == s.id }) { confirmed.append(s) }
+    }
+
+    private func beginEdit(_ s: LinkSuggestion) {
+        editName = s.name
+        editFolder = folderPart(s.target)
+        editSheetFor = s
+    }
+
+    private func commitEdit(_ s: LinkSuggestion) {
+        let folder = editFolder.trimmingCharacters(in: CharacterSet(charactersIn: " /"))
+        let name = editName.trimmingCharacters(in: .whitespaces)
+        let target = (folder.isEmpty ? "notes" : folder) + "/" + name
+        let edited = LinkSuggestion(name: name, target: target, surface: s.surface, isNew: true)
+        pending.removeAll { $0.id == s.id }
+        confirmed.removeAll { $0.id == s.id }
+        confirmed.append(edited)
+        editSheetFor = nil
+    }
+
+    /// Leave review and return to editing; discards the scan so the highlights don't
+    /// linger over text you're changing.
+    private func exitReview() {
+        confirmed = []; pending = []; didScan = false
+    }
+
+    private func editSheet(_ s: LinkSuggestion) -> some View {
+        NavigationStack {
+            Form {
+                Section("Name") { TextField("Name", text: $editName) }
+                Section("Folder") {
+                    TextField("folder path", text: $editFolder)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(categoryOptions, id: \.self) { cat in
+                                Button { editFolder = cat } label: {
+                                    Text(cat).font(.caption.weight(.medium))
+                                        .padding(.horizontal, 11).padding(.vertical, 6)
+                                        .background((editFolder == cat ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.12)), in: Capsule())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Edit link")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editSheetFor = nil } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") { commitEdit(s) }
+                        .disabled(editName.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
         }
     }
 
@@ -183,21 +311,71 @@ struct ComposeView: View {
 
     private func save() { let id = createNote(); onSaved?(id); dismiss() }
 
+    /// Build the note body with the confirmed/kept links woven in, then create it.
+    /// This is the ONLY place the note text gains wikilinks from a scan.
     @discardableResult
     private func createNote() -> UUID {
-        model.createCapturedNote(body: text, folder: category, intensity: intensity,
-                                 location: location.isEmpty ? nil : location)
+        var body = text
+        for s in confirmed { body = insert(s, into: body) }
+        return model.createCapturedNote(body: body, folder: category, intensity: intensity,
+                                        location: location.isEmpty ? nil : location)
     }
 
-    private func applyLink(_ s: LinkSuggestion) {
-        let wikilink = "[[\(s.target)]]"
-        if !s.surface.isEmpty, let r = AutoLinker.flexibleRange(of: s.surface, in: text) {
-            text.replaceSubrange(r, with: wikilink)
-        } else if let r = AutoLinker.flexibleRange(of: s.name, in: text) {
-            text.replaceSubrange(r, with: wikilink)
-        } else {
-            text += (text.isEmpty || text.hasSuffix("\n") ? "" : "\n") + wikilink
+    // MARK: - Text helpers
+
+    /// The note text with confident links (blue) and proposed new ones (orange) marked,
+    /// for the review preview. The note text itself is untouched.
+    private func reviewText() -> AttributedString {
+        struct Mark { let range: Range<String.Index>; let pending: Bool }
+        var marks: [Mark] = []
+        for s in confirmed {
+            if let r = AutoLinker.flexibleRange(of: s.surface.isEmpty ? s.name : s.surface, in: text) {
+                marks.append(Mark(range: r, pending: false))
+            }
         }
+        for s in pending {
+            if let r = AutoLinker.flexibleRange(of: s.surface.isEmpty ? s.name : s.surface, in: text) {
+                marks.append(Mark(range: r, pending: true))
+            }
+        }
+        marks.sort { $0.range.lowerBound < $1.range.lowerBound }
+
+        var out = AttributedString()
+        var cursor = text.startIndex
+        for m in marks where m.range.lowerBound >= cursor {
+            if cursor < m.range.lowerBound {
+                out += AttributedString(String(text[cursor..<m.range.lowerBound]))
+            }
+            var chip = AttributedString(String(text[m.range]))
+            if m.pending {
+                chip.backgroundColor = Color.orange.opacity(0.30)
+            } else {
+                chip.foregroundColor = .blue
+                chip.underlineStyle = .single
+            }
+            out += chip
+            cursor = m.range.upperBound
+        }
+        if cursor < text.endIndex { out += AttributedString(String(text[cursor...])) }
+        return out
+    }
+
+    private func insert(_ s: LinkSuggestion, into body: String) -> String {
+        var body = body
+        let wikilink = "[[\(s.target)]]"
+        if !s.surface.isEmpty, let r = AutoLinker.flexibleRange(of: s.surface, in: body) {
+            body.replaceSubrange(r, with: wikilink)
+        } else if let r = AutoLinker.flexibleRange(of: s.name, in: body) {
+            body.replaceSubrange(r, with: wikilink)
+        } else {
+            body += (body.isEmpty || body.hasSuffix("\n") ? "" : "\n") + wikilink
+        }
+        return body
+    }
+
+    private func folderPart(_ target: String) -> String {
+        guard let slash = target.lastIndex(of: "/") else { return "notes" }
+        return String(target[..<slash])
     }
 
     private var followUpDefault: String {

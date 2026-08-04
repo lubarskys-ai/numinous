@@ -644,7 +644,7 @@ struct Avatar3DView: UIViewRepresentable {
                 // updateUIView). Billboarded so it always faces you.
                 if !gn.label.isEmpty {
                     let txt = SCNText(string: gn.label, extrusionDepth: 0)
-                    txt.font = UIFont.systemFont(ofSize: 7, weight: .semibold)
+                    txt.font = UIFont.systemFont(ofSize: 11, weight: .semibold)
                     txt.flatness = 0.3
                     let tm = SCNMaterial(); tm.lightingModel = .constant
                     tm.diffuse.contents = UIColor.white; tm.emission.contents = UIColor.white
@@ -711,7 +711,7 @@ struct Avatar3DView: UIViewRepresentable {
             mat.emission.intensity = (e.cross ? 0.5 : 0.32) * linksAppear
             mat.transparency = CGFloat((e.cross ? 0.6 : 0.42) * linksAppear)
             mat.writesToDepthBuffer = false
-            thread(a, b, e.cross ? 0.006 : 0.004, mat, name: "link:\(e.a.uuidString):\(e.b.uuidString)")
+            thread(a, b, e.cross ? 0.004 : 0.0026, mat, name: "link:\(e.a.uuidString):\(e.b.uuidString)")
         }
 
         // Cross-axis threads carry a small travelling signal along the strand.
