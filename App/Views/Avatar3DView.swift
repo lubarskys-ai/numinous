@@ -527,6 +527,61 @@ struct Avatar3DView: UIViewRepresentable {
             "gut": (0.08, 0.06, 0.055), "body": (0.10, 0.20, 0.06),
         ]
 
+        // ── Force-directed graph layout (Obsidian-style): connected nodes attract,
+        // all nodes repel, so the web self-organizes into readable clusters. Computed
+        // once at build (Fruchterman–Reingold), then centered and scaled to fit.
+        let ids = nodes.map(\.id)
+        var fx = [UUID: Double](), fy = [UUID: Double](), fz = [UUID: Double]()
+        for (i, id) in ids.enumerated() {
+            let a = Double(abs(id.hashValue) % 997) / 997 * 2 * .pi
+            let b = Double(i) * 2.399963
+            fx[id] = 1.2 * cos(a) * sin(b); fy[id] = 1.2 * cos(b); fz[id] = 1.2 * sin(a) * sin(b)
+        }
+        if ids.count > 1 {
+            let k = 0.85
+            var temp = 0.5
+            let iters = ids.count > 800 ? 18 : (ids.count > 400 ? 32 : 80)
+            for _ in 0..<iters {
+                var dx = [UUID: Double](), dy = [UUID: Double](), dz = [UUID: Double]()
+                for ai in 0..<ids.count {
+                    let A = ids[ai]
+                    for bi in (ai + 1)..<ids.count {
+                        let B = ids[bi]
+                        var ex = fx[A]! - fx[B]!, ey = fy[A]! - fy[B]!, ez = fz[A]! - fz[B]!
+                        var dist = (ex * ex + ey * ey + ez * ez).squareRoot()
+                        if dist < 0.02 { ex += 0.02; dist = 0.02 }
+                        let rep = (k * k) / (dist * dist)
+                        dx[A, default: 0] += ex * rep; dy[A, default: 0] += ey * rep; dz[A, default: 0] += ez * rep
+                        dx[B, default: 0] -= ex * rep; dy[B, default: 0] -= ey * rep; dz[B, default: 0] -= ez * rep
+                    }
+                }
+                for e in links where fx[e.a] != nil && fx[e.b] != nil {
+                    let ex = fx[e.a]! - fx[e.b]!, ey = fy[e.a]! - fy[e.b]!, ez = fz[e.a]! - fz[e.b]!
+                    let dist = max(0.02, (ex * ex + ey * ey + ez * ez).squareRoot())
+                    let att = dist / k
+                    dx[e.a, default: 0] -= ex * att; dy[e.a, default: 0] -= ey * att; dz[e.a, default: 0] -= ez * att
+                    dx[e.b, default: 0] += ex * att; dy[e.b, default: 0] += ey * att; dz[e.b, default: 0] += ez * att
+                }
+                for id in ids {
+                    let mx = dx[id] ?? 0, my = dy[id] ?? 0, mz = dz[id] ?? 0
+                    let len = max(0.0001, (mx * mx + my * my + mz * mz).squareRoot())
+                    let s = min(len, temp) / len
+                    fx[id]! += mx * s; fy[id]! += my * s; fz[id]! += mz * s
+                }
+                temp *= 0.96
+            }
+            // Center and scale to a consistent extent.
+            let n = Double(ids.count)
+            let cx = ids.map { fx[$0]! }.reduce(0, +) / n
+            let cy = ids.map { fy[$0]! }.reduce(0, +) / n
+            let cz = ids.map { fz[$0]! }.reduce(0, +) / n
+            var maxR = 0.01
+            for id in ids { maxR = max(maxR, ((fx[id]! - cx) * (fx[id]! - cx) + (fy[id]! - cy) * (fy[id]! - cy) + (fz[id]! - cz) * (fz[id]! - cz)).squareRoot()) }
+            let sc = 1.7 / maxR
+            for id in ids { fx[id] = (fx[id]! - cx) * sc; fy[id] = (fy[id]! - cy) * sc; fz[id] = (fz[id]! - cz) * sc }
+        }
+        func graphPos(_ id: UUID) -> SCNVector3 { v(fx[id] ?? 0, fy[id] ?? 0, fz[id] ?? 0) }
+
         var pos: [UUID: SCNVector3] = [:]
         for (axisKey, group) in Dictionary(grouping: nodes, by: { $0.axis }) {
             let c = region(axisKey)
@@ -545,7 +600,9 @@ struct Avatar3DView: UIViewRepresentable {
                 // into the body form as the avatar matures — so a low-growth avatar is
                 // a spread graph, not a body-shaped pile of nodes.
                 let converge = smoothstep(0.35, 0.85, matur)
-                let p = lerpV(diffusePoint(abs(gn.id.hashValue % 90000) + 3), anatomical, converge)
+                // Low growth → the force-directed graph; high growth → drawn into the
+                // body form.
+                let p = lerpV(graphPos(gn.id), anatomical, converge)
                 pos[gn.id] = p
                 guard nodesAppear > 0.02 else { continue }
                 let col = color(gn.axis)
