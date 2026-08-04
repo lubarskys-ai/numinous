@@ -27,7 +27,7 @@ struct Avatar3DView: UIViewRepresentable {
 
     static let baseDistance: Float = 8.5
     static let minZoom: Double = 0.12
-    static let maxZoom: Double = 30
+    static let maxZoom: Double = 120
 
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView()
@@ -527,26 +527,29 @@ struct Avatar3DView: UIViewRepresentable {
             "gut": (0.08, 0.06, 0.055), "body": (0.10, 0.20, 0.06),
         ]
 
-        // ── Force-directed graph layout (Obsidian-style): connected nodes attract,
-        // all nodes repel, so the web self-organizes into readable clusters. Computed
-        // once at build (Fruchterman–Reingold), then centered and scaled to fit.
+        // ── Force-directed graph layout (Obsidian-style). Run Fruchterman–Reingold
+        // only on the LINKED nodes (fast even with thousands of files), then scatter
+        // the unlinked files on a surrounding shell so every file still shows.
         let ids = nodes.map(\.id)
+        let idSet = Set(ids)
+        let linkedSet: Set<UUID> = Set(links.flatMap { [$0.a, $0.b] }).intersection(idSet)
+        let fdIds = ids.filter { linkedSet.contains($0) }
         var fx = [UUID: Double](), fy = [UUID: Double](), fz = [UUID: Double]()
-        for (i, id) in ids.enumerated() {
+        for (i, id) in fdIds.enumerated() {
             let a = Double(abs(id.hashValue) % 997) / 997 * 2 * .pi
             let b = Double(i) * 2.399963
             fx[id] = 1.2 * cos(a) * sin(b); fy[id] = 1.2 * cos(b); fz[id] = 1.2 * sin(a) * sin(b)
         }
-        if ids.count > 1 {
+        if fdIds.count > 1 {
             let k = 0.85
             var temp = 0.5
-            let iters = ids.count > 800 ? 18 : (ids.count > 400 ? 32 : 80)
+            let iters = fdIds.count > 800 ? 18 : (fdIds.count > 400 ? 32 : 80)
             for _ in 0..<iters {
                 var dx = [UUID: Double](), dy = [UUID: Double](), dz = [UUID: Double]()
-                for ai in 0..<ids.count {
-                    let A = ids[ai]
-                    for bi in (ai + 1)..<ids.count {
-                        let B = ids[bi]
+                for ai in 0..<fdIds.count {
+                    let A = fdIds[ai]
+                    for bi in (ai + 1)..<fdIds.count {
+                        let B = fdIds[bi]
                         var ex = fx[A]! - fx[B]!, ey = fy[A]! - fy[B]!, ez = fz[A]! - fz[B]!
                         var dist = (ex * ex + ey * ey + ez * ez).squareRoot()
                         if dist < 0.02 { ex += 0.02; dist = 0.02 }
@@ -562,7 +565,7 @@ struct Avatar3DView: UIViewRepresentable {
                     dx[e.a, default: 0] -= ex * att; dy[e.a, default: 0] -= ey * att; dz[e.a, default: 0] -= ez * att
                     dx[e.b, default: 0] += ex * att; dy[e.b, default: 0] += ey * att; dz[e.b, default: 0] += ez * att
                 }
-                for id in ids {
+                for id in fdIds {
                     let mx = dx[id] ?? 0, my = dy[id] ?? 0, mz = dz[id] ?? 0
                     let len = max(0.0001, (mx * mx + my * my + mz * mz).squareRoot())
                     let s = min(len, temp) / len
@@ -570,15 +573,22 @@ struct Avatar3DView: UIViewRepresentable {
                 }
                 temp *= 0.96
             }
-            // Center and scale to a consistent extent.
-            let n = Double(ids.count)
-            let cx = ids.map { fx[$0]! }.reduce(0, +) / n
-            let cy = ids.map { fy[$0]! }.reduce(0, +) / n
-            let cz = ids.map { fz[$0]! }.reduce(0, +) / n
+            let n = Double(fdIds.count)
+            let cx = fdIds.map { fx[$0]! }.reduce(0, +) / n
+            let cy = fdIds.map { fy[$0]! }.reduce(0, +) / n
+            let cz = fdIds.map { fz[$0]! }.reduce(0, +) / n
             var maxR = 0.01
-            for id in ids { maxR = max(maxR, ((fx[id]! - cx) * (fx[id]! - cx) + (fy[id]! - cy) * (fy[id]! - cy) + (fz[id]! - cz) * (fz[id]! - cz)).squareRoot()) }
+            for id in fdIds { maxR = max(maxR, ((fx[id]! - cx) * (fx[id]! - cx) + (fy[id]! - cy) * (fy[id]! - cy) + (fz[id]! - cz) * (fz[id]! - cz)).squareRoot()) }
             let sc = 1.7 / maxR
-            for id in ids { fx[id] = (fx[id]! - cx) * sc; fy[id] = (fy[id]! - cy) * sc; fz[id] = (fz[id]! - cz) * sc }
+            for id in fdIds { fx[id] = (fx[id]! - cx) * sc; fy[id] = (fy[id]! - cy) * sc; fz[id] = (fz[id]! - cz) * sc }
+        }
+        // Unlinked files sit on a surrounding shell (fibonacci sphere).
+        let unlinked = ids.filter { !linkedSet.contains($0) }
+        let golden = Double.pi * (1 + 5.0.squareRoot())
+        for (i, id) in unlinked.enumerated() {
+            let t = (Double(i) + 0.5) / Double(max(1, unlinked.count))
+            let phi = acos(1 - 2 * t), theta = golden * Double(i)
+            fx[id] = 2.4 * sin(phi) * cos(theta); fy[id] = 2.4 * cos(phi); fz[id] = 2.4 * sin(phi) * sin(theta)
         }
         func graphPos(_ id: UUID) -> SCNVector3 { v(fx[id] ?? 0, fy[id] ?? 0, fz[id] ?? 0) }
 
@@ -608,7 +618,7 @@ struct Avatar3DView: UIViewRepresentable {
                 let col = color(gn.axis)
                 // Your nodes read clearly bigger/brighter than the decorative sky
                 // stars — they're *you*, not scenery. Grows with connections.
-                let r = min(0.05, 0.02 + 0.011 * Double(degree[gn.id] ?? 0).squareRoot())
+                let r = min(0.032, 0.005 + 0.009 * Double(degree[gn.id] ?? 0).squareRoot())
                 let s = ball(r); s.segmentCount = 14
                 let m = SCNMaterial(); m.lightingModel = .constant
                 m.diffuse.contents = col; m.emission.contents = col
@@ -621,7 +631,7 @@ struct Avatar3DView: UIViewRepresentable {
                 // updateUIView). Billboarded so it always faces you.
                 if !gn.label.isEmpty {
                     let txt = SCNText(string: gn.label, extrusionDepth: 0)
-                    txt.font = UIFont.systemFont(ofSize: 10, weight: .semibold)
+                    txt.font = UIFont.systemFont(ofSize: 7, weight: .semibold)
                     txt.flatness = 0.3
                     let tm = SCNMaterial(); tm.lightingModel = .constant
                     tm.diffuse.contents = UIColor.white; tm.emission.contents = UIColor.white
@@ -629,7 +639,7 @@ struct Avatar3DView: UIViewRepresentable {
                     txt.materials = [tm]
                     let label = SCNNode(geometry: txt)
                     label.name = "textlabel"
-                    label.scale = SCNVector3(0.011, 0.011, 0.011)
+                    label.scale = SCNVector3(0.005, 0.005, 0.005)
                     let (minB, maxB) = txt.boundingBox
                     label.pivot = SCNMatrix4MakeTranslation((minB.x + maxB.x) / 2, minB.y, 0)
                     label.position = v(Double(p.x), Double(p.y) + Double(r) + 0.03, Double(p.z))

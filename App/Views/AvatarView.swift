@@ -17,8 +17,9 @@ struct AvatarView: View {
 
     var body: some View {
         let balance = model.score.axisBalance(over: model.axes)
+        // Every file is a node (Obsidian-style) — unlinked ones just float unconnected.
         let graphNodes: [GraphNode] = model.notes.compactMap { note in
-            guard !note.isStub, let axis = model.axis(for: note) else { return nil }
+            guard let axis = model.axis(for: note) else { return nil }
             return GraphNode(id: note.id, axis: axis.id, label: note.displayName)
         }
         let graphLinks: [GraphEdge] = model.score.links
@@ -121,7 +122,7 @@ struct AvatarView: View {
     }
 
     private func setZoom(_ z: Double) {
-        let clamped = min(30, max(0.12, z))
+        let clamped = min(120, max(0.12, z))
         zoom = clamped
         committedZoom = clamped
     }
