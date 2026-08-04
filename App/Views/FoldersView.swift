@@ -84,7 +84,7 @@ struct FoldersView: View {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         Button { composePrefill = nil; showCompose = true } label: { Label("New note", systemImage: "square.and.pencil") }
-                        Button { path.append(model.createDiaryEntry()) } label: { Label("Diary entry", systemImage: "calendar.badge.plus") }
+                        Button { path.append(model.openTodayDiary()) } label: { Label("Add to today's diary", systemImage: "calendar.badge.plus") }
                         Divider()
                         Button { importContacts() } label: { Label("Sync contacts", systemImage: "person.crop.circle.badge.plus") }
                         Button { showReadwise = true } label: { Label("Import from Readwise", systemImage: "books.vertical") }
