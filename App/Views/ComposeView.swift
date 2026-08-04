@@ -203,6 +203,7 @@ struct ComposeView: View {
                     pending.removeAll { $0.id == s.id }; actionFor = nil
                 }
             } else {
+                Button("Edit link…") { actionFor = nil; beginEdit(s) }
                 Button("Remove link", role: .destructive) { confirmed.removeAll { $0.id == s.id }; actionFor = nil }
             }
         } message: { s in
@@ -284,7 +285,9 @@ struct ComposeView: View {
             confirmed = found.filter { !$0.isNew }
             pending = found.filter { $0.isNew }
             didScan = true
-            manualEdit = false      // show the highlighted review for the fresh results
+            // Stay editable by default — the note text must never lock. Suggestions sit
+            // in the strip below; "Highlights" shows the marked-up read-only view on demand.
+            manualEdit = true
             scanning = false
         }
     }
