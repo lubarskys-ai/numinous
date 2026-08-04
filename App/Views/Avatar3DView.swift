@@ -278,7 +278,7 @@ struct Avatar3DView: UIViewRepresentable {
         let maxRegion = regionKeys.map { regionMaturity($0) }.max() ?? 0
         var bodySamples: [SCNVector3] = []
         if let loaded = GLTFBody.load(color: color, growth: growth, regionMaturity: regionMaturity) {
-            if maxRegion > 0.02 { bodyFloat.addChildNode(loaded.node) }   // present once any part forms
+            if maxRegion > 0.4 { bodyFloat.addChildNode(loaded.node) }   // no solid body until a region truly forms
             bodySamples = loaded.samples
         } else {
             part(ball(0.17), "mind",    v(-0.07, 0.80, 0), scale: v(0.85, 1.15, 1.0))
@@ -541,7 +541,10 @@ struct Avatar3DView: UIViewRepresentable {
                 let anatomical = v(c.0 + rx * rad * cos(ga),
                                    c.1 + (t - 0.5) * 2 * ry,
                                    c.2 + rz * rad * sin(ga))
-                let converge = 1.0   // nodes sit in their region positions — a readable graph
+                // Nodes spread out as a loose web when young and only draw together
+                // into the body form as the avatar matures — so a low-growth avatar is
+                // a spread graph, not a body-shaped pile of nodes.
+                let converge = smoothstep(0.35, 0.85, matur)
                 let p = lerpV(diffusePoint(abs(gn.id.hashValue % 90000) + 3), anatomical, converge)
                 pos[gn.id] = p
                 guard nodesAppear > 0.02 else { continue }
@@ -575,7 +578,7 @@ struct Avatar3DView: UIViewRepresentable {
                     label.position = v(Double(p.x), Double(p.y) + Double(r) + 0.03, Double(p.z))
                     label.constraints = [SCNBillboardConstraint()]
                     label.renderingOrder = 20
-                    label.isHidden = true
+                    label.isHidden = zoom <= 1.8   // only when zoomed in
                     connectomeFloat.addChildNode(label)
                 }
                 // Soft glow halo so a node reads as a living orb, not a pinprick.

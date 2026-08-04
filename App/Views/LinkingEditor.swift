@@ -139,12 +139,9 @@ private struct LinkTextView: UIViewRepresentable {
         // writing keystrokes through the ORIGINAL (now stale) `text` binding, so the
         // text view and the @State drift apart and the caret jumps around wildly.
         context.coordinator.parent = self
-        // NEVER reassign the text view while the user is typing in it. A re-render
-        // mid-keystroke (e.g. the [[ autocomplete appearing) would otherwise push a
-        // stale, one-bracket-behind value and snap the caret back. The binding catches
-        // up via the delegate; programmatic inserts resign first responder first.
-        guard !uiView.isFirstResponder else { return }
-        // Otherwise sync external changes, preserving the caret across the swap.
+        // Sync external changes (e.g. found links) into the view, preserving the caret.
+        // The caret-snap-back on "[[" is prevented at the source: the delegate writes
+        // the binding BEFORE the autocomplete re-render, so `text` is never stale here.
         guard uiView.markedTextRange == nil, uiView.text != text else { return }
         let caretOffset = uiView.selectedTextRange.map {
             uiView.offset(from: uiView.beginningOfDocument, to: $0.start)
@@ -166,7 +163,12 @@ private struct LinkTextView: UIViewRepresentable {
         init(_ parent: LinkTextView) { self.parent = parent }
 
         func textViewDidChange(_ tv: UITextView) { parent.text = tv.text; updateQuery() }
-        func textViewDidChangeSelection(_ tv: UITextView) { updateQuery() }
+        func textViewDidChangeSelection(_ tv: UITextView) {
+            // Sync the binding BEFORE updateQuery re-renders (showing the [[ suggestions),
+            // so updateUIView never sees a stale, one-behind value to snap the caret to.
+            if parent.text != tv.text { parent.text = tv.text }
+            updateQuery()
+        }
 
         private func caretOffset(_ tv: UITextView) -> Int? {
             guard let range = tv.selectedTextRange else { return nil }
