@@ -30,6 +30,7 @@ struct ComposeView: View {
     @State private var confirmed: [LinkSuggestion] = []   // auto-linked (blue) — applied on save
     @State private var pending: [LinkSuggestion] = []     // proposed new notes (orange) — awaiting a decision
     @State private var editSheetFor: LinkSuggestion?
+    @State private var actionFor: LinkSuggestion?          // a highlighted span the user tapped
     @State private var editName = ""
     @State private var editFolder = "notes"
     @StateObject private var locator = LocationService()
@@ -151,6 +152,8 @@ struct ComposeView: View {
                 Text(reviewText())
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 10)
+                    .tint(.blue)
+                    .environment(\.openURL, OpenURLAction { url in handleSpanTap(url); return .handled })
 
                 if !pending.isEmpty {
                     Divider()
@@ -158,13 +161,32 @@ struct ComposeView: View {
                     ForEach(pending) { s in pendingRow(s) }
                 }
 
-                Label("Blue = linked to notes you already have. Orange = suggested new notes.",
-                      systemImage: "info.circle")
+                Label("Tap any highlight to add or edit it. Blue = linked to notes you already have; orange = suggested new notes.",
+                      systemImage: "hand.tap")
                     .font(.caption2).foregroundStyle(.secondary)
                     .padding(.top, 4)
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 20)
+        }
+        .confirmationDialog(actionFor?.name ?? "Link",
+                            isPresented: Binding(get: { actionFor != nil }, set: { if !$0 { actionFor = nil } }),
+                            titleVisibility: .visible,
+                            presenting: actionFor) { s in
+            if pending.contains(where: { $0.id == s.id }) {
+                Button("Add to \(s.folderLabel.isEmpty ? "notes" : s.folderLabel)") { confirm(s); actionFor = nil }
+                Button("Edit folder…") { actionFor = nil; beginEdit(s) }
+                Button("Skip", role: .destructive) {
+                    model.recordLinkSkipped(name: s.name, surface: s.surface)
+                    pending.removeAll { $0.id == s.id }; actionFor = nil
+                }
+            } else {
+                Button("Remove link", role: .destructive) { confirmed.removeAll { $0.id == s.id }; actionFor = nil }
+            }
+        } message: { s in
+            Text(pending.contains(where: { $0.id == s.id })
+                 ? "New note in “\(s.folderLabel.isEmpty ? "notes" : s.folderLabel)”."
+                 : "Linked to \(s.target).")
         }
     }
 
@@ -331,16 +353,16 @@ struct ComposeView: View {
     /// The note text with confident links (blue) and proposed new ones (orange) marked,
     /// for the review preview. The note text itself is untouched.
     private func reviewText() -> AttributedString {
-        struct Mark { let range: Range<String.Index>; let pending: Bool }
+        struct Mark { let range: Range<String.Index>; let pending: Bool; let id: UUID }
         var marks: [Mark] = []
         for s in confirmed {
             if let r = AutoLinker.flexibleRange(of: s.surface.isEmpty ? s.name : s.surface, in: text) {
-                marks.append(Mark(range: r, pending: false))
+                marks.append(Mark(range: r, pending: false, id: s.id))
             }
         }
         for s in pending {
             if let r = AutoLinker.flexibleRange(of: s.surface.isEmpty ? s.name : s.surface, in: text) {
-                marks.append(Mark(range: r, pending: true))
+                marks.append(Mark(range: r, pending: true, id: s.id))
             }
         }
         marks.sort { $0.range.lowerBound < $1.range.lowerBound }
@@ -352,17 +374,27 @@ struct ComposeView: View {
                 out += AttributedString(String(text[cursor..<m.range.lowerBound]))
             }
             var chip = AttributedString(String(text[m.range]))
+            // Tapping the highlight itself opens edit/add — intercepted via openURL below.
+            chip.link = URL(string: "\(Self.linkScheme)\(m.id.uuidString)")
+            chip.underlineStyle = .single
             if m.pending {
                 chip.backgroundColor = Color.orange.opacity(0.30)
             } else {
                 chip.foregroundColor = .blue
-                chip.underlineStyle = .single
             }
             out += chip
             cursor = m.range.upperBound
         }
         if cursor < text.endIndex { out += AttributedString(String(text[cursor...])) }
         return out
+    }
+
+    private static let linkScheme = "numinous-suggest:"
+
+    /// A tap on a highlighted span → open contextual add/edit for that suggestion.
+    private func handleSpanTap(_ url: URL) {
+        let all = pending + confirmed
+        actionFor = all.first { "\(Self.linkScheme)\($0.id.uuidString)" == url.absoluteString }
     }
 
     private func insert(_ s: LinkSuggestion, into body: String) -> String {

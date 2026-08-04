@@ -86,9 +86,9 @@ struct Avatar3DView: UIViewRepresentable {
             view.scene?.rootNode.enumerateChildNodes { node, _ in
                 guard let name = node.name else { return }
                 if name == "textlabel" {
-                    node.isHidden = !showLabels
-                    let s = 0.005 * f
-                    node.scale = SCNVector3(s, s, s)
+                    node.isHidden = !showLabels   // size & offset inherited from its parent node
+                } else if name.hasPrefix("link:") {
+                    node.scale = SCNVector3(f, 1, f)   // thin the thread, keep its length
                 } else if name == "halo" || UUID(uuidString: name) != nil {
                     node.scale = SCNVector3(f, f, f)
                 }
@@ -655,11 +655,13 @@ struct Avatar3DView: UIViewRepresentable {
                     label.scale = SCNVector3(0.005, 0.005, 0.005)
                     let (minB, maxB) = txt.boundingBox
                     label.pivot = SCNMatrix4MakeTranslation((minB.x + maxB.x) / 2, minB.y, 0)
-                    label.position = v(Double(p.x), Double(p.y) + Double(r) + 0.03, Double(p.z))
+                    // Child of the node (local offset), so it inherits the node's zoom
+                    // scaling and stays pinned a constant gap right above its dot.
+                    label.position = SCNVector3(0, Float(r) + 0.03, 0)
                     label.constraints = [SCNBillboardConstraint()]
                     label.renderingOrder = 20
                     label.isHidden = zoom <= 7   // only when zoomed in
-                    connectomeFloat.addChildNode(label)
+                    node.addChildNode(label)
                 }
                 // Soft glow halo so a node reads as a living orb, not a pinprick.
                 let halo = ball(r * 2.7); halo.segmentCount = 12
@@ -711,7 +713,7 @@ struct Avatar3DView: UIViewRepresentable {
             mat.emission.intensity = (e.cross ? 0.5 : 0.32) * linksAppear
             mat.transparency = CGFloat((e.cross ? 0.6 : 0.42) * linksAppear)
             mat.writesToDepthBuffer = false
-            thread(a, b, e.cross ? 0.004 : 0.0026, mat, name: "link:\(e.a.uuidString):\(e.b.uuidString)")
+            thread(a, b, e.cross ? 0.0032 : 0.0022, mat, name: "link:\(e.a.uuidString):\(e.b.uuidString)")
         }
 
         // Cross-axis threads carry a small travelling signal along the strand.
