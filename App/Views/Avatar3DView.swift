@@ -228,12 +228,17 @@ struct Avatar3DView: UIViewRepresentable {
         // Translucent body: overlapping forms, grey→axis color with growth. It
         // doesn't write depth, so the connectome inside stays fully visible.
         func part(_ geo: SCNGeometry, _ axis: String, _ pos: SCNVector3, scale: SCNVector3 = SCNVector3(1, 1, 1), euler: SCNVector3 = SCNVector3(0, 0, 0)) {
+            // Only solidify in the upper maturity range — invisible (stardust) below.
+            let mr = max(0, min(1, regionMaturity(axis)))
+            let form = mr <= 0.4 ? 0.0 : (mr - 0.4) / 0.6
+            guard form > 0.01 else { return }
             let g = min(1, max(0, growth(axis)))
             let m = SCNMaterial()
             m.lightingModel = .physicallyBased
-            m.diffuse.contents = blend(greyBase, color(axis), g * 0.85).withAlphaComponent(0.34)
+            m.diffuse.contents = blend(greyBase, color(axis), g * 0.85).withAlphaComponent(CGFloat(0.5 * form))
             m.roughness.contents = 0.5
             m.emission.contents = color(axis); m.emission.intensity = 0.03 + 0.3 * g
+            m.transparency = CGFloat(form)
             m.writesToDepthBuffer = false
             m.isDoubleSided = true
             geo.materials = [m]
@@ -260,9 +265,11 @@ struct Avatar3DView: UIViewRepresentable {
         func smoothstep(_ a: Double, _ b: Double, _ x: Double) -> Double {
             let t = max(0, min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t)
         }
-        let nodesAppear = smoothstep(0.05, 0.22, matur)
-        let linksAppear = smoothstep(0.22, 0.46, matur)
-        let bodyAppear  = smoothstep(0.42, 0.90, matur)
+        // The graph (nodes + links) is ALWAYS visible — it's the avatar's everyday
+        // form, an Obsidian-like web. Only the solid human body is gated by maturity.
+        let nodesAppear = 1.0
+        let linksAppear = 1.0
+        let bodyAppear  = smoothstep(0.42, 0.90, matur)   // organs only
 
         // The real sculpted body, re-skinned grey→color; primitives if it can't load.
         // Each region fades in on its OWN axis maturity, so parts form at different
@@ -534,7 +541,7 @@ struct Avatar3DView: UIViewRepresentable {
                 let anatomical = v(c.0 + rx * rad * cos(ga),
                                    c.1 + (t - 0.5) * 2 * ry,
                                    c.2 + rz * rad * sin(ga))
-                let converge = smoothstep(0.08, 0.55, matur)
+                let converge = 1.0   // nodes sit in their region positions — a readable graph
                 let p = lerpV(diffusePoint(abs(gn.id.hashValue % 90000) + 3), anatomical, converge)
                 pos[gn.id] = p
                 guard nodesAppear > 0.02 else { continue }
