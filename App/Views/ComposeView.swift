@@ -60,6 +60,12 @@ struct ComposeView: View {
     /// read-only with the findings highlighted, so nothing gets rewritten under you.
     private var reviewing: Bool { didScan && (!confirmed.isEmpty || !pending.isEmpty) }
 
+    /// The category shown on the chip — just the leaf, so "notes/diary" reads as "diary".
+    private var categoryLabel: String {
+        guard let slash = category.lastIndex(of: "/") else { return category }
+        return String(category[category.index(after: slash)...])
+    }
+
     private var categoryOptions: [String] {
         var seen = Set<String>(); var out: [String] = []
         for c in [category, "notes", "diary"] + model.folders.map(\.name) where seen.insert(c.lowercased()).inserted {
@@ -148,7 +154,7 @@ struct ComposeView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "folder")
-                Text(category).fontWeight(.medium)
+                Text(categoryLabel).fontWeight(.medium)
                 Image(systemName: "chevron.down").font(.caption2)
                 Spacer()
                 if !location.isEmpty { Label(location, systemImage: "mappin.and.ellipse").font(.caption).foregroundStyle(.secondary).lineLimit(1) }
