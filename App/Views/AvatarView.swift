@@ -19,7 +19,7 @@ struct AvatarView: View {
         let balance = model.score.axisBalance(over: model.axes)
         let graphNodes: [GraphNode] = model.notes.compactMap { note in
             guard !note.isStub, let axis = model.axis(for: note) else { return nil }
-            return GraphNode(id: note.id, axis: axis.id)
+            return GraphNode(id: note.id, axis: axis.id, label: note.displayName)
         }
         let graphLinks: [GraphEdge] = model.score.links
             .filter(\.isCounted)

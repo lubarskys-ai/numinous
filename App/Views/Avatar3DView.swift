@@ -2,7 +2,7 @@ import SwiftUI
 import SceneKit
 
 /// A note placed in the 3D body (id + which axis region it belongs to).
-struct GraphNode { let id: UUID; let axis: String }
+struct GraphNode { let id: UUID; let axis: String; var label: String = "" }
 /// A scored connection between two placed notes.
 struct GraphEdge { let a: UUID; let b: UUID; let cross: Bool }
 
@@ -71,8 +71,17 @@ struct Avatar3DView: UIViewRepresentable {
             view.scene = buildScene()
             view.pointOfView = view.scene?.rootNode.childNode(withName: "camera", recursively: false)
             context.coordinator.builtMaturity = maturity
+            context.coordinator.labelsShown = !(zoom > 3)   // force re-apply below
         }
         view.pointOfView?.position.z = Self.baseDistance / Float(max(0.1, zoom))
+        // Node name labels appear only when zoomed in.
+        let showLabels = zoom > 3
+        if showLabels != context.coordinator.labelsShown {
+            context.coordinator.labelsShown = showLabels
+            view.scene?.rootNode.enumerateChildNodes { node, _ in
+                if node.name == "textlabel" { node.isHidden = !showLabels }
+            }
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -83,6 +92,7 @@ struct Avatar3DView: UIViewRepresentable {
         var onTapNode: ((UUID) -> Void)?
         var onZoomChange: ((Double) -> Void)?
         var zoom: Double = 1
+        var labelsShown = false
         private var pinchStartZoom: Double = 1
 
         func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
@@ -113,20 +123,52 @@ struct Avatar3DView: UIViewRepresentable {
             view?.pointOfView?.position.z = Avatar3DView.baseDistance / Float(max(0.1, z))
             onZoomChange?(z)
         }
-        /// Open the note whose node is nearest the tap (projected to the screen),
-        /// which is far more forgiving than hit-testing tiny spheres.
+        /// Open the note nearest the tap (projected to screen) — checking both the
+        /// nodes AND the link threads, so tapping anywhere on any connection (even a
+        /// faint one) opens the nearer note.
         @objc func tap(_ g: UITapGestureRecognizer) {
             guard let view, let scene = view.scene else { return }
             let p = g.location(in: view)
+            var nodePt: [UUID: CGPoint] = [:]
+            var links: [(UUID, UUID)] = []
             var best: (id: UUID, dist: CGFloat)?
             scene.rootNode.enumerateChildNodes { node, _ in
-                guard let name = node.name, let id = UUID(uuidString: name) else { return }
-                let s = view.projectPoint(node.worldPosition)
-                guard s.z > 0, s.z < 1 else { return }
-                let d = hypot(CGFloat(s.x) - p.x, CGFloat(s.y) - p.y)
-                if d < 44, best == nil || d < best!.dist { best = (id, d) }
+                guard let name = node.name else { return }
+                if let id = UUID(uuidString: name) {
+                    let s = view.projectPoint(node.worldPosition)
+                    guard s.z > 0, s.z < 1 else { return }
+                    let pt = CGPoint(x: CGFloat(s.x), y: CGFloat(s.y))
+                    nodePt[id] = pt
+                    let d = hypot(pt.x - p.x, pt.y - p.y)
+                    if d < 44, best == nil || d < best!.dist { best = (id, d) }
+                } else if name.hasPrefix("link:") {
+                    let parts = name.dropFirst(5).split(separator: ":")
+                    if parts.count == 2, let a = UUID(uuidString: String(parts[0])), let b = UUID(uuidString: String(parts[1])) {
+                        links.append((a, b))
+                    }
+                }
             }
-            if let best { onTapNode?(best.id) }
+            if let best { onTapNode?(best.id); return }
+            // No node hit — see if the tap landed on a link thread.
+            var bestLink: (id: UUID, dist: CGFloat)?
+            for (a, b) in links {
+                guard let pa = nodePt[a], let pb = nodePt[b] else { continue }
+                let d = Self.distanceToSegment(p, pa, pb)
+                guard d < 24 else { continue }
+                let id = hypot(pa.x - p.x, pa.y - p.y) < hypot(pb.x - p.x, pb.y - p.y) ? a : b
+                if bestLink == nil || d < bestLink!.dist { bestLink = (id, d) }
+            }
+            if let bestLink { onTapNode?(bestLink.id) }
+        }
+
+        /// Shortest distance from a point to a line segment, in screen space.
+        private static func distanceToSegment(_ p: CGPoint, _ a: CGPoint, _ b: CGPoint) -> CGFloat {
+            let dx = b.x - a.x, dy = b.y - a.y
+            let len2 = dx * dx + dy * dy
+            guard len2 > 1e-6 else { return hypot(p.x - a.x, p.y - a.y) }
+            var t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2
+            t = max(0, min(1, t))
+            return hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
         }
     }
 
@@ -508,6 +550,27 @@ struct Avatar3DView: UIViewRepresentable {
                 let node = SCNNode(geometry: s); node.position = p; node.renderingOrder = 12
                 node.name = gn.id.uuidString    // tap target → opens this note
                 connectomeFloat.addChildNode(node)
+                // A small name label that only shows when you zoom in (toggled in
+                // updateUIView). Billboarded so it always faces you.
+                if !gn.label.isEmpty {
+                    let txt = SCNText(string: gn.label, extrusionDepth: 0)
+                    txt.font = UIFont.systemFont(ofSize: 6, weight: .semibold)
+                    txt.flatness = 0.4
+                    let tm = SCNMaterial(); tm.lightingModel = .constant
+                    tm.diffuse.contents = UIColor.white; tm.emission.contents = UIColor.white
+                    tm.writesToDepthBuffer = false
+                    txt.materials = [tm]
+                    let label = SCNNode(geometry: txt)
+                    label.name = "textlabel"
+                    label.scale = SCNVector3(0.006, 0.006, 0.006)
+                    let (minB, maxB) = txt.boundingBox
+                    label.pivot = SCNMatrix4MakeTranslation((minB.x + maxB.x) / 2, minB.y, 0)
+                    label.position = v(Double(p.x), Double(p.y) + Double(r) + 0.03, Double(p.z))
+                    label.constraints = [SCNBillboardConstraint()]
+                    label.renderingOrder = 20
+                    label.isHidden = true
+                    connectomeFloat.addChildNode(label)
+                }
                 // Soft glow halo so a node reads as a living orb, not a pinprick.
                 let halo = ball(r * 2.7); halo.segmentCount = 12
                 let hm = SCNMaterial(); hm.lightingModel = .constant
@@ -536,13 +599,14 @@ struct Avatar3DView: UIViewRepresentable {
         }
         // Faint web threads: thin straight cylinders between connected nodes (line
         // primitives didn't render reliably). Same-axis dim, cross-axis bright.
-        func thread(_ p0: SCNVector3, _ p1: SCNVector3, _ radius: CGFloat, _ mat: SCNMaterial) {
+        func thread(_ p0: SCNVector3, _ p1: SCNVector3, _ radius: CGFloat, _ mat: SCNMaterial, name: String? = nil) {
             let dx = Double(p1.x - p0.x), dy = Double(p1.y - p0.y), dz = Double(p1.z - p0.z)
             let d = (dx * dx + dy * dy + dz * dz).squareRoot()
             guard d > 1e-6 else { return }
             let cyl = SCNCylinder(radius: radius, height: CGFloat(d)); cyl.radialSegmentCount = 4
             cyl.materials = [mat]
             let node = SCNNode(geometry: cyl)
+            node.name = name
             node.position = v((Double(p0.x) + Double(p1.x)) / 2, (Double(p0.y) + Double(p1.y)) / 2, (Double(p0.z) + Double(p1.z)) / 2)
             node.look(at: p1, up: v(0, 1, 0), localFront: v(0, 1, 0))
             node.renderingOrder = 11
@@ -556,7 +620,7 @@ struct Avatar3DView: UIViewRepresentable {
             mat.emission.intensity = (e.cross ? 0.5 : 0.32) * linksAppear
             mat.transparency = CGFloat((e.cross ? 0.6 : 0.42) * linksAppear)
             mat.writesToDepthBuffer = false
-            thread(a, b, e.cross ? 0.0016 : 0.0011, mat)
+            thread(a, b, e.cross ? 0.0016 : 0.0011, mat, name: "link:\(e.a.uuidString):\(e.b.uuidString)")
         }
 
         // Cross-axis threads carry a small travelling signal along the strand.
