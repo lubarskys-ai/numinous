@@ -205,16 +205,20 @@ enum GLTFBody {
         mat.diffuse.contents = UIColor.white
         mat.roughness.contents = 0.45
         mat.emission.contents = UIColor(white: 0.06, alpha: 1)
-        mat.transparency = CGFloat(0.63 * eased)
+        mat.transparency = 1
         mat.isDoubleSided = true
         mat.writesToDepthBuffer = false
+        // Drive the final alpha DIRECTLY from maturity (+ a fresnel rim), rather than
+        // max()-ing with the opaque base alpha — that max was keeping the body solid
+        // even at transparency 0. At eased 0 the region is fully invisible (stardust).
+        let base = String(format: "%.4f", 0.63 * eased)
         let rim = String(format: "%.4f", 0.6 * eased)
         mat.shaderModifiers = [.fragment: """
         #pragma transparent
         float _f = 1.0 - abs(dot(normalize(_surface.normal), normalize(_surface.view)));
         _f = pow(_f, 2.0) * \(rim);
         _output.color.rgb += float3(0.72, 0.83, 1.0) * _f;
-        _output.color.a = max(_output.color.a, _f * 0.9);
+        _output.color.a = min(1.0, \(base) + _f * 0.9);
         """]
         return mat
     }
