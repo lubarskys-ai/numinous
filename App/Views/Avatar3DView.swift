@@ -534,42 +534,51 @@ struct Avatar3DView: UIViewRepresentable {
             }
             return pts
         }
-        func thread(_ p0: SCNVector3, _ p1: SCNVector3, _ radius: CGFloat, _ mat: SCNMaterial) {
-            let dx = Double(p1.x - p0.x), dy = Double(p1.y - p0.y), dz = Double(p1.z - p0.z)
-            let d = (dx * dx + dy * dy + dz * dz).squareRoot()
-            guard d > 1e-6 else { return }
-            let cyl = SCNCylinder(radius: radius, height: CGFloat(d)); cyl.radialSegmentCount = 5
-            cyl.materials = [mat]
-            let node = SCNNode(geometry: cyl)
-            node.position = v((Double(p0.x) + Double(p1.x)) / 2, (Double(p0.y) + Double(p1.y)) / 2, (Double(p0.z) + Double(p1.z)) / 2)
-            node.look(at: p1, up: v(0, 1, 0), localFront: v(0, 1, 0))
-            node.renderingOrder = 11
-            connectomeFloat.addChildNode(node)
+        // Fine spider-web threads: thin straight lines between connected nodes,
+        // batched into two geometries (same-axis dim, cross-axis bright).
+        func web(_ verts: [SCNVector3], _ col: UIColor, _ intensity: CGFloat) {
+            guard verts.count >= 2 else { return }
+            let src = SCNGeometrySource(vertices: verts)
+            let elem = SCNGeometryElement(indices: Array(UInt32(0)..<UInt32(verts.count)), primitiveType: .line)
+            let g = SCNGeometry(sources: [src], elements: [elem])
+            let m = SCNMaterial(); m.lightingModel = .constant
+            m.diffuse.contents = col; m.emission.contents = col; m.emission.intensity = intensity
+            m.transparency = CGFloat(0.55 * linksAppear); m.writesToDepthBuffer = false
+            g.materials = [m]
+            let n = SCNNode(geometry: g); n.renderingOrder = 11
+            connectomeFloat.addChildNode(n)
         }
+        var webSame: [SCNVector3] = [], webCross: [SCNVector3] = []
         for e in links where linksAppear > 0.05 {
             guard let a = pos[e.a], let b = pos[e.b] else { continue }
-            let col = e.cross ? UIColor(red: 0.6, green: 0.85, blue: 1.0, alpha: 1) : UIColor(white: 0.8, alpha: 1)
-            let mat = SCNMaterial(); mat.lightingModel = .constant
-            mat.diffuse.contents = col; mat.emission.contents = col
-            mat.emission.intensity = (e.cross ? 0.38 : 0.2) * linksAppear; mat.transparency = CGFloat(0.4 * linksAppear)
-            let pts = curve(a, b, 12)
-            let r: CGFloat = e.cross ? 0.0017 : 0.0011
-            for i in 0..<(pts.count - 1) { thread(pts[i], pts[i + 1], r, mat) }
+            if e.cross { webCross.append(a); webCross.append(b) } else { webSame.append(a); webSame.append(b) }
+        }
+        web(webSame, UIColor(white: 0.82, alpha: 1), CGFloat(0.3 * linksAppear))
+        web(webCross, UIColor(red: 0.6, green: 0.85, blue: 1.0, alpha: 1), CGFloat(0.6 * linksAppear))
 
-            if e.cross {
-                let signal = ball(0.009); signal.segmentCount = 10
-                let sm = SCNMaterial(); sm.lightingModel = .constant
-                sm.diffuse.contents = col; sm.emission.contents = col; sm.emission.intensity = 0.9
-                signal.materials = [sm]
-                let pulse = SCNNode(geometry: signal); pulse.position = pts[0]; pulse.renderingOrder = 13
-                pulse.opacity = 0.7
-                let dur = Double.random(in: 3.0...5.5)
-                let seg = dur / Double(pts.count - 1)
-                var moves: [SCNAction] = pts.dropFirst().map { .move(to: $0, duration: seg) }
-                moves.append(.move(to: pts[0], duration: 0))
-                pulse.runAction(.sequence([.wait(duration: Double.random(in: 0...5)), .repeatForever(.sequence(moves))]))
-                connectomeFloat.addChildNode(pulse)
+        // Cross-axis threads carry a small travelling signal along the strand.
+        for e in links where linksAppear > 0.05 && e.cross {
+            guard let a = pos[e.a], let b = pos[e.b] else { continue }
+            let steps = 8
+            let pts = (0...steps).map { i -> SCNVector3 in
+                let t = Double(i) / Double(steps)
+                return v(Double(a.x) + (Double(b.x) - Double(a.x)) * t,
+                         Double(a.y) + (Double(b.y) - Double(a.y)) * t,
+                         Double(a.z) + (Double(b.z) - Double(a.z)) * t)
             }
+            let col = UIColor(red: 0.6, green: 0.85, blue: 1.0, alpha: 1)
+            let signal = ball(0.008); signal.segmentCount = 10
+            let sm = SCNMaterial(); sm.lightingModel = .constant
+            sm.diffuse.contents = col; sm.emission.contents = col; sm.emission.intensity = 0.9
+            signal.materials = [sm]
+            let pulse = SCNNode(geometry: signal); pulse.position = pts[0]; pulse.renderingOrder = 13
+            pulse.opacity = 0.7
+            let dur = Double.random(in: 3.0...5.5)
+            let seg = dur / Double(pts.count - 1)
+            var moves: [SCNAction] = pts.dropFirst().map { .move(to: $0, duration: seg) }
+            moves.append(.move(to: pts[0], duration: 0))
+            pulse.runAction(.sequence([.wait(duration: Double.random(in: 0...5)), .repeatForever(.sequence(moves))]))
+            connectomeFloat.addChildNode(pulse)
         }
 
         // The body and the connectome each gently float and tumble in space — a
