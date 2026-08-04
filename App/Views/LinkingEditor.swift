@@ -120,6 +120,14 @@ private struct LinkTextView: UIViewRepresentable {
         tv.backgroundColor = .clear
         tv.textContainerInset = UIEdgeInsets(top: 8, left: 2, bottom: 8, right: 2)
         tv.text = text
+        // A keyboard toolbar with Done, so you can dismiss the keyboard and reach the
+        // buttons it covers (Find links, Save).
+        let bar = UIToolbar(); bar.sizeToFit()
+        bar.items = [
+            UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil),
+            UIBarButtonItem(barButtonSystemItem: .done, target: tv, action: #selector(UIResponder.resignFirstResponder)),
+        ]
+        tv.inputAccessoryView = bar
         context.coordinator.textView = tv
         controller.insertClosure = { [weak c = context.coordinator] value in c?.insertLink(value) }
         return tv

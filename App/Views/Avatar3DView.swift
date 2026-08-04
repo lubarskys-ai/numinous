@@ -71,11 +71,11 @@ struct Avatar3DView: UIViewRepresentable {
             view.scene = buildScene()
             view.pointOfView = view.scene?.rootNode.childNode(withName: "camera", recursively: false)
             context.coordinator.builtMaturity = maturity
-            context.coordinator.labelsShown = !(zoom > 3)   // force re-apply below
+            context.coordinator.labelsShown = !(zoom > 1.8)   // force re-apply below
         }
         view.pointOfView?.position.z = Self.baseDistance / Float(max(0.1, zoom))
-        // Node name labels appear only when zoomed in.
-        let showLabels = zoom > 3
+        // Node name labels appear once you zoom in a bit.
+        let showLabels = zoom > 1.8
         if showLabels != context.coordinator.labelsShown {
             context.coordinator.labelsShown = showLabels
             view.scene?.rootNode.enumerateChildNodes { node, _ in
@@ -554,15 +554,15 @@ struct Avatar3DView: UIViewRepresentable {
                 // updateUIView). Billboarded so it always faces you.
                 if !gn.label.isEmpty {
                     let txt = SCNText(string: gn.label, extrusionDepth: 0)
-                    txt.font = UIFont.systemFont(ofSize: 6, weight: .semibold)
-                    txt.flatness = 0.4
+                    txt.font = UIFont.systemFont(ofSize: 10, weight: .semibold)
+                    txt.flatness = 0.3
                     let tm = SCNMaterial(); tm.lightingModel = .constant
                     tm.diffuse.contents = UIColor.white; tm.emission.contents = UIColor.white
                     tm.writesToDepthBuffer = false
                     txt.materials = [tm]
                     let label = SCNNode(geometry: txt)
                     label.name = "textlabel"
-                    label.scale = SCNVector3(0.006, 0.006, 0.006)
+                    label.scale = SCNVector3(0.011, 0.011, 0.011)
                     let (minB, maxB) = txt.boundingBox
                     label.pivot = SCNMatrix4MakeTranslation((minB.x + maxB.x) / 2, minB.y, 0)
                     label.position = v(Double(p.x), Double(p.y) + Double(r) + 0.03, Double(p.z))
