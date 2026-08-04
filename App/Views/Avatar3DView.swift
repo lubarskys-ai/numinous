@@ -74,12 +74,24 @@ struct Avatar3DView: UIViewRepresentable {
             context.coordinator.labelsShown = !(zoom > 7)   // force re-apply below
         }
         view.pointOfView?.position.z = Self.baseDistance / Float(max(0.1, zoom))
-        // Node name labels appear once you zoom in a bit.
+        // Keep nodes & labels a roughly CONSTANT on-screen size as you zoom in, so a
+        // deep zoom spreads them apart to reveal structure instead of magnifying them
+        // into an overlapping mess (Obsidian-style). Only re-scale when zoom moved.
         let showLabels = zoom > 7
-        if showLabels != context.coordinator.labelsShown {
+        let f = Float(1.0 / max(1.0, zoom))
+        let labelsChanged = showLabels != context.coordinator.labelsShown
+        if labelsChanged || abs(f - context.coordinator.lastNodeScale) > 0.002 {
             context.coordinator.labelsShown = showLabels
+            context.coordinator.lastNodeScale = f
             view.scene?.rootNode.enumerateChildNodes { node, _ in
-                if node.name == "textlabel" { node.isHidden = !showLabels }
+                guard let name = node.name else { return }
+                if name == "textlabel" {
+                    node.isHidden = !showLabels
+                    let s = 0.005 * f
+                    node.scale = SCNVector3(s, s, s)
+                } else if name == "halo" || UUID(uuidString: name) != nil {
+                    node.scale = SCNVector3(f, f, f)
+                }
             }
         }
     }
@@ -93,6 +105,7 @@ struct Avatar3DView: UIViewRepresentable {
         var onZoomChange: ((Double) -> Void)?
         var zoom: Double = 1
         var labelsShown = false
+        var lastNodeScale: Float = -1
         private var pinchStartZoom: Double = 1
 
         func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
@@ -655,6 +668,7 @@ struct Avatar3DView: UIViewRepresentable {
                 hm.transparency = CGFloat(0.2 * nodesAppear); hm.blendMode = .add; hm.writesToDepthBuffer = false
                 halo.materials = [hm]
                 let haloNode = SCNNode(geometry: halo); haloNode.position = p; haloNode.renderingOrder = 11
+                haloNode.name = "halo"
                 connectomeFloat.addChildNode(haloNode)
             }
         }
