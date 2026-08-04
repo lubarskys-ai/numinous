@@ -25,7 +25,12 @@ struct ComposeView: View {
     @State private var linkedNames: [String] = []
     @StateObject private var locator = LocationService()
 
-    init(prefillTitle: String?) {
+    /// Optional: notified with the new note's id after Save (used by quick-capture /
+    /// Folders to switch tabs or push the note). The editor still dismisses itself.
+    var onSaved: ((UUID) -> Void)? = nil
+
+    init(prefillTitle: String?, onSaved: ((UUID) -> Void)? = nil) {
+        self.onSaved = onSaved
         let folder: String? = prefillTitle.flatMap { t in
             guard let slash = t.lastIndex(of: "/") else { return t.isEmpty ? nil : t }
             return String(t[..<slash])
@@ -176,7 +181,7 @@ struct ComposeView: View {
         locating = false
     }
 
-    private func save() { _ = createNote(); dismiss() }
+    private func save() { let id = createNote(); onSaved?(id); dismiss() }
 
     @discardableResult
     private func createNote() -> UUID {

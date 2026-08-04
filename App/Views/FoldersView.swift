@@ -31,7 +31,6 @@ struct FoldersView: View {
     @EnvironmentObject var model: AppModel
     @State private var showSettings = false
     @State private var showCompose = false
-    @State private var showCapture = false
     @State private var axisPickerFolder: FolderRef?
     @State private var renameFolderPath: String?
     @State private var folderNameDraft = ""
@@ -84,7 +83,6 @@ struct FoldersView: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
-                        Button { showCapture = true } label: { Label("Quick capture (voice)", systemImage: "mic") }
                         Button { composePrefill = nil; showCompose = true } label: { Label("New note", systemImage: "square.and.pencil") }
                         Button { path.append(model.createDiaryEntry()) } label: { Label("Diary entry", systemImage: "calendar.badge.plus") }
                         Divider()
@@ -115,8 +113,7 @@ struct FoldersView: View {
                 let n = model.notes.filter { $0.folderName.lowercased() == folder.lowercased() || $0.folderName.lowercased().hasPrefix(folder.lowercased() + "/") }.count
                 Text("Permanently removes this folder and \(n) note\(n == 1 ? "" : "s") inside it.")
             }
-            .sheet(isPresented: $showCapture) { CaptureView(onSaved: { path.append($0) }) }
-            .fullScreenCover(isPresented: $showCompose) { ComposeView(prefillTitle: composePrefill) }
+            .fullScreenCover(isPresented: $showCompose) { ComposeView(prefillTitle: composePrefill, onSaved: { path.append($0) }) }
             .sheet(isPresented: $showReadwise) { ReadwiseConnectView() }
             .sheet(isPresented: $showSettings) { AxisSettingsView() }
             .alert("Import", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {

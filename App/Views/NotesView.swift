@@ -10,7 +10,6 @@ struct NotesView: View {
     @State private var searchText = ""
     @State private var categoryFilter: String?
     @State private var showCompose = false
-    @State private var showCapture = false
     @State private var composePrefill: String?
     @State private var importMessage: String?
     @State private var path: [UUID] = []
@@ -34,25 +33,20 @@ struct NotesView: View {
                                     if categoryFilter == cat { Label(cat, systemImage: "checkmark") } else { Text(cat) }
                                 }
                             }
+                            Divider()
+                            Button { importContacts() } label: { Label("Sync contacts", systemImage: "person.crop.circle.badge.plus") }
                         } label: {
                             Label(categoryFilter ?? "All", systemImage: "line.3.horizontal.decrease.circle")
                         }
                     }
                     ToolbarItem(placement: .primaryAction) {
-                        Menu {
-                            Button { showCapture = true } label: { Label("Dictate a note", systemImage: "mic") }
-                            Button { composePrefill = nil; showCompose = true } label: { Label("New note", systemImage: "square.and.pencil") }
-                            Button { composePrefill = "notes/diary/" + Self.stamp(); showCompose = true } label: { Label("New diary entry", systemImage: "calendar.badge.plus") }
-                            Divider()
-                            Button { importContacts() } label: { Label("Sync contacts", systemImage: "person.crop.circle.badge.plus") }
-                        } label: {
+                        Button { composePrefill = nil; showCompose = true } label: {
                             Image(systemName: "square.and.pencil")
                         }
                         .accessibilityLabel("Add note")
                     }
                 }
                 .fullScreenCover(isPresented: $showCompose) { ComposeView(prefillTitle: composePrefill) }
-                .sheet(isPresented: $showCapture) { CaptureView(onSaved: { path.append($0) }) }
                 .alert("Contacts", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
                     Button("OK", role: .cancel) {}
                 } message: { Text(importMessage ?? "") }

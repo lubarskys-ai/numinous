@@ -46,7 +46,7 @@ struct RootView: View {
         .overlay { ConnectionSparkOverlay() }
         .fullScreenCover(isPresented: $showAvatar) { AvatarExpandedView() }
         // Quick-capture (from the Action Button / Siri / Shortcuts) opens here.
-        .sheet(isPresented: $showCapture) { CaptureView(onSaved: { _ in selection = "notes" }) }
+        .fullScreenCover(isPresented: $showCapture) { ComposeView(prefillTitle: nil, onSaved: { _ in selection = "notes" }) }
         // The companion strolls when you change pages…
         .onChange(of: selection) { _ in trigger(.walk) }
         // …and does a joyful, heart-popping cheer when a new connection forms.
