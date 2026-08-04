@@ -179,7 +179,10 @@ struct ComposeView: View {
             Button("Add") { confirm(s) }.buttonStyle(.borderless)
             Menu {
                 Button { beginEdit(s) } label: { Label("Edit folder…", systemImage: "folder") }
-                Button(role: .destructive) { pending.removeAll { $0.id == s.id } } label: {
+                Button(role: .destructive) {
+                    model.recordLinkSkipped(name: s.name, surface: s.surface)
+                    pending.removeAll { $0.id == s.id }
+                } label: {
                     Label("Skip", systemImage: "xmark")
                 }
             } label: {
@@ -244,6 +247,7 @@ struct ComposeView: View {
     private func confirm(_ s: LinkSuggestion) {
         pending.removeAll { $0.id == s.id }
         if !confirmed.contains(where: { $0.id == s.id }) { confirmed.append(s) }
+        model.recordLinkConfirmed(name: s.name, surface: s.surface, target: s.target)
     }
 
     private func beginEdit(_ s: LinkSuggestion) {
@@ -260,6 +264,7 @@ struct ComposeView: View {
         pending.removeAll { $0.id == s.id }
         confirmed.removeAll { $0.id == s.id }
         confirmed.append(edited)
+        model.recordLinkConfirmed(name: edited.name, surface: edited.surface, target: edited.target)
         editSheetFor = nil
     }
 

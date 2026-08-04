@@ -12,6 +12,23 @@ struct StoredData: Codable {
     var reflections: [ReflectionRecord]? = nil
     /// Follow-up reminders set from notes, tracked so completing one rewards you.
     var followUps: [FollowUp]? = nil
+    /// What Find-links has learned from your Add/Edit/Skip decisions. Optional =
+    /// backward-compatible with stores written before learning existed.
+    var linkLearning: LinkLearning? = nil
+}
+
+/// What the app has learned from your Find-links decisions, so suggestions get
+/// better with use:
+/// - `aliases`: a surface you confirmed (e.g. "shawna") → the target you linked it
+///   to ("contacts/Shawna Flanagan"). Next time that surface appears it auto-links
+///   silently — deterministically, so it works even without the on-device model.
+/// - `skips`: names you rejected — never re-proposed as new notes.
+/// - `folderForName`: the folder you tend to file a given name under, so a re-mention
+///   is proposed there instead of the model's guess.
+struct LinkLearning: Codable {
+    var aliases: [String: String] = [:]
+    var skips: [String] = []
+    var folderForName: [String: String] = [:]
 }
 
 /// A reminder set from a note ("call Sam in two weeks"). When the user completes

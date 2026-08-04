@@ -113,12 +113,14 @@ final class AppModel: ObservableObject {
         self.axes = a
         self.reflectionLog = loaded?.reflections ?? []
         self.followUps = loaded?.followUps ?? []
+        self.linkLearning = loaded?.linkLearning ?? LinkLearning()
         self.readwiseToken = UserDefaults.standard.string(forKey: Self.readwiseTokenKey)
         self.score = ScoreEngine().score(notes: n, folders: f, axes: a)
         recomputeLastTended()
         if loaded == nil || didMigrate || version < Self.schemaVersion {
             storage.save(StoredData(notes: n, folders: f, axes: a, schemaVersion: Self.schemaVersion,
-                                    reflections: reflectionLog, followUps: followUps))
+                                    reflections: reflectionLog, followUps: followUps,
+                                    linkLearning: linkLearning))
         }
         // Reward any follow-ups you've since completed in iOS Reminders.
         Task { await checkFollowUps() }
@@ -826,7 +828,52 @@ final class AppModel: ObservableObject {
         recomputeLastTended()
         storage.save(StoredData(notes: notes, folders: folders, axes: axes,
                                 schemaVersion: Self.schemaVersion, reflections: reflectionLog,
-                                followUps: followUps))
+                                followUps: followUps, linkLearning: linkLearning))
+    }
+
+    // MARK: - Find-links learning (suggestions get better with your decisions)
+
+    /// What Find-links has learned. Persisted; consulted on every scan.
+    @Published private(set) var linkLearning = LinkLearning()
+
+    private static func learnKey(_ s: String) -> String {
+        s.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func folderOf(_ target: String) -> String {
+        guard let slash = target.lastIndex(of: "/") else { return "" }
+        return String(target[..<slash])
+    }
+
+    /// You added (or edited-then-added) a suggested link. Remember the alias so this
+    /// surface auto-links next time, and the folder you chose for this name. Clears any
+    /// earlier skip of the same thing (you changed your mind).
+    func recordLinkConfirmed(name: String, surface: String, target: String) {
+        let aliasKey = Self.learnKey(surface.isEmpty ? name : surface)
+        if aliasKey.count >= 2 { linkLearning.aliases[aliasKey] = target }
+        let nameKey = Self.learnKey(name)
+        let folder = Self.folderOf(target)
+        if nameKey.count >= 2, !folder.isEmpty { linkLearning.folderForName[nameKey] = folder }
+        linkLearning.skips.removeAll { $0 == aliasKey || $0 == nameKey }
+        persistLearning()
+    }
+
+    /// You skipped a proposed new note — don't offer it again.
+    func recordLinkSkipped(name: String, surface: String) {
+        for key in [Self.learnKey(name), Self.learnKey(surface)] where key.count >= 2 {
+            if !linkLearning.skips.contains(key) { linkLearning.skips.append(key) }
+        }
+        persistLearning()
+    }
+
+    /// Forget everything Find-links has learned (a fresh start).
+    func resetLinkLearning() { linkLearning = LinkLearning(); persistLearning() }
+
+    /// Save just the learning without recomputing the whole score.
+    private func persistLearning() {
+        storage.save(StoredData(notes: notes, folders: folders, axes: axes,
+                                schemaVersion: Self.schemaVersion, reflections: reflectionLog,
+                                followUps: followUps, linkLearning: linkLearning))
     }
 
     // MARK: - Vitality (gentle decay of untended areas — never subtracts real growth)
@@ -1083,6 +1130,16 @@ final class AppModel: ObservableObject {
         var out: [LinkSuggestion] = []
         var seen = Set<String>()   // lowercased targets already offered
 
+        // 0. Learned aliases — surfaces you've confirmed before auto-link silently, and
+        // deterministically (no model needed). This is how Find-links gets better with use.
+        for (surface, target) in linkLearning.aliases {
+            guard let r = AutoLinker.flexibleRange(of: surface, in: text) else { continue }
+            guard seen.insert(target.lowercased()).inserted else { continue }
+            let exists = notes.contains { Self.norm($0.title) == Self.norm(target) }
+            out.append(LinkSuggestion(name: Self.leafName(target), target: target,
+                                      surface: String(text[r]), isNew: !exists))
+        }
+
         // 1. Deterministic exact matches to existing notes.
         for s in autolinkSuggestions(in: text) where seen.insert(s.target.lowercased()).inserted {
             out.append(LinkSuggestion(name: s.name, target: s.target, surface: s.name, isNew: false))
@@ -1101,7 +1158,13 @@ final class AppModel: ObservableObject {
                 } else {
                     let name = e.name.trimmingCharacters(in: .whitespaces)
                     guard name.count >= 2 else { continue }
-                    let target = SmartLinker.cleanFolder(e.folder, existing: folderNames) + "/" + name
+                    let nameKey = Self.learnKey(name)
+                    // Respect an earlier "Skip" — don't re-propose what you rejected.
+                    if linkLearning.skips.contains(nameKey) { continue }
+                    // Prefer the folder you've filed this name under before.
+                    let folder = linkLearning.folderForName[nameKey]
+                        ?? SmartLinker.cleanFolder(e.folder, existing: folderNames)
+                    let target = folder + "/" + name
                     if seen.insert(target.lowercased()).inserted {
                         out.append(LinkSuggestion(name: name, target: target, surface: e.surface, isNew: true))
                     }

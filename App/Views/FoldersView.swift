@@ -442,6 +442,24 @@ struct AxisSettingsView: View {
                 }
 
                 Section {
+                    let learned = model.linkLearning.aliases.count + model.linkLearning.skips.count
+                    if learned == 0 {
+                        Text("Find links will learn from your Add / Skip / Edit-folder choices as you review.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Label("Learned \(model.linkLearning.aliases.count) auto-link\(model.linkLearning.aliases.count == 1 ? "" : "s") and \(model.linkLearning.skips.count) skip\(model.linkLearning.skips.count == 1 ? "" : "s").", systemImage: "sparkles")
+                            .font(.callout)
+                        Button(role: .destructive) { model.resetLinkLearning() } label: {
+                            Label("Forget what Find links learned", systemImage: "arrow.counterclockwise")
+                        }
+                    }
+                } header: {
+                    Text("Find links learning")
+                } footer: {
+                    Text("Surfaces you confirm auto-link next time (even offline); names you skip aren't offered again; folders you choose become the default for that name.")
+                }
+
+                Section {
                     Link(destination: URL(string: "https://sketchfab.com/3d-models/sculpting-a-human-body-a24baf3514834527972bffdad882258e")!) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("3D body: “sculpting a human body”")
