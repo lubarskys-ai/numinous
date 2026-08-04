@@ -131,10 +131,12 @@ private struct LinkTextView: UIViewRepresentable {
         // writing keystrokes through the ORIGINAL (now stale) `text` binding, so the
         // text view and the @State drift apart and the caret jumps around wildly.
         context.coordinator.parent = self
-        // Push external changes (e.g. a programmatically inserted link) into the
-        // view — but never disturb the user mid-keystroke. Bail when the text
-        // already matches, skip during marked-text composition (autocorrect/IME),
-        // and otherwise preserve the caret across the swap.
+        // NEVER reassign the text view while the user is typing in it. A re-render
+        // mid-keystroke (e.g. the [[ autocomplete appearing) would otherwise push a
+        // stale, one-bracket-behind value and snap the caret back. The binding catches
+        // up via the delegate; programmatic inserts resign first responder first.
+        guard !uiView.isFirstResponder else { return }
+        // Otherwise sync external changes, preserving the caret across the swap.
         guard uiView.markedTextRange == nil, uiView.text != text else { return }
         let caretOffset = uiView.selectedTextRange.map {
             uiView.offset(from: uiView.beginningOfDocument, to: $0.start)

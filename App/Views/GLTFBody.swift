@@ -196,7 +196,10 @@ enum GLTFBody {
     /// maturity: young → invisible/ethereal, grown → solid.
     static func bodyMaterial(_ maturity: Double) -> SCNMaterial {
         let m = max(0, min(1, maturity))
-        let eased = m * m * (3 - 2 * m)
+        // The solid body only emerges in the UPPER range — below ~0.4 it's pure
+        // stardust (fully transparent), so the human form is earned, not given.
+        let form = m <= 0.4 ? 0 : (m - 0.4) / 0.6
+        let eased = form * form * (3 - 2 * form)
         let mat = SCNMaterial()
         mat.lightingModel = .physicallyBased
         mat.diffuse.contents = UIColor.white

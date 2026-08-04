@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import NuminousCore
 
 /// A full-screen note editor: the writing area is the hero (a big text view, NOT a
@@ -155,6 +156,9 @@ struct ComposeView: View {
     // MARK: - Actions
 
     private func findLinks() {
+        // Dismiss the keyboard so found links actually render (the editor ignores
+        // programmatic text while it's first responder — which keeps the caret stable).
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         scanning = true
         Task {
             let found = await model.smartLinkSuggestions(in: text)
