@@ -40,7 +40,14 @@ struct NotesView: View {
                         }
                     }
                     ToolbarItem(placement: .primaryAction) {
-                        Button { composePrefill = nil; showCompose = true } label: {
+                        Menu {
+                            Button { composePrefill = nil; showCompose = true } label: {
+                                Label("New note", systemImage: "square.and.pencil")
+                            }
+                            Button { path.append(model.openTodayDiary()) } label: {
+                                Label("Add to today's diary", systemImage: "calendar.badge.plus")
+                            }
+                        } label: {
                             Image(systemName: "square.and.pencil")
                         }
                         .accessibilityLabel("Add note")
