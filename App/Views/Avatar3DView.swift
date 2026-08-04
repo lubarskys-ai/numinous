@@ -123,8 +123,10 @@ struct Avatar3DView: UIViewRepresentable {
         @objc func pan(_ g: UIPanGestureRecognizer) {
             guard let figure = view?.scene?.rootNode.childNode(withName: "figure", recursively: true) else { return }
             let t = g.translation(in: view)
-            figure.eulerAngles.y += Float(t.x) * 0.01
-            figure.eulerAngles.x = max(-1.2, min(1.2, figure.eulerAngles.x + Float(t.y) * 0.01))
+            // Gentle rotation — a drag turns the scene about half as fast as the
+            // finger travels, so it's easy to inspect without whipping around.
+            figure.eulerAngles.y += Float(t.x) * 0.005
+            figure.eulerAngles.x = max(-1.2, min(1.2, figure.eulerAngles.x + Float(t.y) * 0.005))
             g.setTranslation(.zero, in: view)
         }
         /// Pinch to zoom: scale the committed zoom, move the camera for instant
