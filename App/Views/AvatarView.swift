@@ -42,21 +42,6 @@ struct AvatarView: View {
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .overlay(alignment: .bottomTrailing) { zoomControls.padding(14) }
-                    // Temporary calibration readout (we'll remove it) — so we can see
-                    // the real per-axis maturity instead of guessing.
-                    .overlay(alignment: .topLeading) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            ForEach(model.axes) { ax in
-                                Text("\(ax.name)  \(String(format: "%.2f", model.axisMaturity(ax.id)))")
-                                    .foregroundStyle(ax.color)
-                            }
-                            Text("overall  \(String(format: "%.2f", model.maturity))").foregroundStyle(.yellow)
-                        }
-                        .font(.footnote.monospaced().weight(.semibold))
-                        .padding(10)
-                        .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
-                        .padding(.leading, 12).padding(.top, 60)
-                    }
 
                     if let reflection {
                         reflectionCard(reflection, tint: dominantColor(balance))
