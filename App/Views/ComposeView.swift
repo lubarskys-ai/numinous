@@ -1,9 +1,9 @@
 import SwiftUI
 import NuminousCore
 
-/// Write a note by hand. Like capture, it's titled by date and filed under a
-/// category you choose (an existing folder or a new one); pick intensity, an
-/// optional location, and write freely with inline `[[` linking.
+/// A full-screen note editor: the writing area is the hero (a big text view, NOT a
+/// Form row — which is what bounced the cursor), with category, details, and links
+/// tucked into compact bars. Titled by date, filed under a chosen category.
 struct ComposeView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -25,7 +25,6 @@ struct ComposeView: View {
     @StateObject private var locator = LocationService()
 
     init(prefillTitle: String?) {
-        // Historically callers passed a "folder/…"; use its folder as the category.
         let folder: String? = prefillTitle.flatMap { t in
             guard let slash = t.lastIndex(of: "/") else { return t.isEmpty ? nil : t }
             return String(t[..<slash])
@@ -33,7 +32,6 @@ struct ComposeView: View {
         _category = State(initialValue: (folder?.isEmpty == false) ? folder! : "notes")
     }
 
-    /// Categories to file under: sensible defaults plus your existing folders.
     private var categoryOptions: [String] {
         var seen = Set<String>(); var out: [String] = []
         for c in [category, "notes", "diary"] + model.folders.map(\.name) where seen.insert(c.lowercased()).inserted {
@@ -44,116 +42,34 @@ struct ComposeView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    Menu {
-                        ForEach(categoryOptions, id: \.self) { cat in
-                            Button { category = cat } label: {
-                                if cat == category { Label(cat, systemImage: "checkmark") } else { Text(cat) }
-                            }
-                        }
-                        Divider()
-                        Button { newCategoryDraft = ""; showNewCategory = true } label: {
-                            Label("New category…", systemImage: "plus")
-                        }
-                    } label: {
-                        HStack {
-                            Label("Category", systemImage: "folder")
-                            Spacer()
-                            Text(category).foregroundStyle(.secondary)
-                            Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.secondary)
-                        }
-                    }
-                } footer: {
-                    if let axis = model.axis(id: model.folder(named: category)?.axisID) {
-                        Text("Titled by date, filed in \(category) — grows \(axis.name).")
-                    } else {
-                        Text("Titled with today's date and filed in \(category).")
-                    }
-                }
-
-                Section("Details") {
-                    Picker("Intensity", selection: $intensity) {
-                        Text("1 · faint (×0.5)").tag(1)
-                        Text("2 · light (×0.75)").tag(2)
-                        Text("3 · present (×1)").tag(3)
-                        Text("4 · vivid (×1.5)").tag(4)
-                        Text("5 · profound (×2)").tag(5)
-                    }
-                    if location.isEmpty {
-                        Button { Task { await useCurrentLocation() } } label: {
-                            HStack {
-                                Label(locating ? "Locating…" : "Use current location", systemImage: "location.fill")
-                                Spacer()
-                                if locating { ProgressView() }
-                            }
-                        }
-                        .disabled(locating)
-                        Button("Enter manually") { locationDraft = ""; showLocationPrompt = true }
-                            .font(.callout)
-                    } else {
-                        Button { locationDraft = location; showLocationPrompt = true } label: {
-                            HStack {
-                                Label(location, systemImage: "mappin.and.ellipse").foregroundStyle(.primary)
-                                Spacer()
-                                Text("Edit").font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-
-                Section("Note") {
-                    LinkingEditor(text: $text)
-                    Text("Type [[ to link an existing note, or create a new one.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-
-                Section {
-                    Button {
-                        scanning = true
-                        Task {
-                            let found = await model.smartLinkSuggestions(in: text)
-                            for s in found { applyLink(s) }
-                            linkedNames = found.map(\.name)
-                            didScan = true
-                            scanning = false
-                        }
-                    } label: {
-                        if scanning {
-                            HStack { ProgressView(); Text("Finding links…") }
-                        } else {
-                            Label("Find & add links", systemImage: "link.badge.plus")
-                        }
-                    }
-                    .disabled(scanning || text.trimmingCharacters(in: .whitespaces).count < 3)
-                    if didScan {
-                        if linkedNames.isEmpty {
-                            Text("Nothing to link yet — try naming a person, place, or thing.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        } else {
-                            Label("Linked \(linkedNames.joined(separator: " · "))", systemImage: "checkmark.circle.fill")
-                                .font(.caption).foregroundStyle(.green)
-                        }
-                    }
-                } footer: {
-                    Text("Finds the people, places, and things you mention and links them right in.")
-                }
-
-                Section {
-                    Button {
-                        let id = createNote()
-                        reminderNoteTitle = model.note(id: id)?.title ?? category
-                        showFollowUp = true
-                    } label: {
-                        Label("Remind me to follow up…", systemImage: "bell.badge")
-                    }
-                }
+            VStack(spacing: 0) {
+                categoryBar
+                Divider()
+                LinkingEditor(text: $text)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 6)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if didScan { linkStatus }
             }
             .navigationTitle("New Note")
             .navigationBarTitleDisplayMode(.inline)
-            .task {
-                if location.isEmpty, locator.isAuthorized { await useCurrentLocation() }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { save() }
+                        .disabled(category.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                ToolbarItemGroup(placement: .bottomBar) {
+                    Button { findLinks() } label: {
+                        if scanning { HStack { ProgressView(); Text("Finding…") } }
+                        else { Label("Find links", systemImage: "link.badge.plus") }
+                    }
+                    .disabled(scanning || text.trimmingCharacters(in: .whitespaces).count < 3)
+                    Spacer()
+                    detailsMenu
+                }
             }
+            .task { if location.isEmpty, locator.isAuthorized { await useCurrentLocation() } }
             .alert("New category", isPresented: $showNewCategory) {
                 TextField("e.g. golf clubs", text: $newCategoryDraft).autocorrectionDisabled()
                 Button("Cancel", role: .cancel) {}
@@ -161,35 +77,98 @@ struct ComposeView: View {
                     let c = newCategoryDraft.trimmingCharacters(in: CharacterSet(charactersIn: " /"))
                     if !c.isEmpty { category = c }
                 }
-            } message: {
-                Text("Notes here are titled by date. The folder is created for you.")
-            }
+            } message: { Text("Notes here are titled by date. The folder is created for you.") }
             .alert("Location", isPresented: $showLocationPrompt) {
                 TextField("Where were you?", text: $locationDraft)
                 Button("Cancel", role: .cancel) {}
                 Button("Save") { location = locationDraft.trimmingCharacters(in: .whitespaces) }
-            } message: {
-                Text("Add a place to this note.")
-            }
+            } message: { Text("Add a place to this note.") }
             .sheet(isPresented: $showFollowUp, onDismiss: { dismiss() }) {
                 FollowUpSheet(noteTitle: reminderNoteTitle, defaultTitle: followUpDefault) { _ in }
             }
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { save() }.disabled(category.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+    }
+
+    // MARK: - Bars
+
+    private var categoryBar: some View {
+        Menu {
+            ForEach(categoryOptions, id: \.self) { cat in
+                Button { category = cat } label: {
+                    if cat == category { Label(cat, systemImage: "checkmark") } else { Text(cat) }
                 }
             }
+            Divider()
+            Button { newCategoryDraft = ""; showNewCategory = true } label: { Label("New category…", systemImage: "plus") }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "folder")
+                Text(category).fontWeight(.medium)
+                Image(systemName: "chevron.down").font(.caption2)
+                Spacer()
+                if !location.isEmpty { Label(location, systemImage: "mappin.and.ellipse").font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                Text("⚡\(intensity)").font(.caption).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .foregroundStyle(.primary)
+    }
+
+    @ViewBuilder
+    private var linkStatus: some View {
+        Group {
+            if linkedNames.isEmpty {
+                Text("Nothing to link yet — name a person, place, or thing.").foregroundStyle(.secondary)
+            } else {
+                Label("Linked \(linkedNames.joined(separator: " · "))", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+            }
+        }
+        .font(.caption)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .background(.ultraThinMaterial)
+    }
+
+    private var detailsMenu: some View {
+        Menu {
+            Picker("Intensity", selection: $intensity) {
+                Text("1 · faint").tag(1); Text("2 · light").tag(2); Text("3 · present").tag(3)
+                Text("4 · vivid").tag(4); Text("5 · profound").tag(5)
+            }
+            if location.isEmpty {
+                Button { Task { await useCurrentLocation() } } label: { Label("Use current location", systemImage: "location.fill") }
+                Button { locationDraft = ""; showLocationPrompt = true } label: { Label("Enter location", systemImage: "mappin") }
+            } else {
+                Button { locationDraft = location; showLocationPrompt = true } label: { Label("Edit location", systemImage: "mappin.and.ellipse") }
+                Button(role: .destructive) { location = "" } label: { Label("Clear location", systemImage: "xmark") }
+            }
+            Divider()
+            Button { let id = createNote(); reminderNoteTitle = model.note(id: id)?.title ?? category; showFollowUp = true } label: {
+                Label("Save & remind me…", systemImage: "bell.badge")
+            }
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+        }
+    }
+
+    // MARK: - Actions
+
+    private func findLinks() {
+        scanning = true
+        Task {
+            let found = await model.smartLinkSuggestions(in: text)
+            for s in found { applyLink(s) }
+            linkedNames = found.map(\.name)
+            didScan = true
+            scanning = false
         }
     }
 
     private func useCurrentLocation() async {
         locating = true
-        if let place = await locator.currentPlace() {
-            location = place
-        } else if !locator.isAuthorized {
-            locationDraft = ""; showLocationPrompt = true
-        }
+        if let place = await locator.currentPlace() { location = place }
+        else if !locator.isAuthorized { locationDraft = ""; showLocationPrompt = true }
         locating = false
     }
 
@@ -201,8 +180,6 @@ struct ComposeView: View {
                                  location: location.isEmpty ? nil : location)
     }
 
-    /// Wire a found link into the note text — replace the words in place (punctuation/
-    /// case-tolerant), or append if the cleaned name isn't found verbatim.
     private func applyLink(_ s: LinkSuggestion) {
         let wikilink = "[[\(s.target)]]"
         if !s.surface.isEmpty, let r = AutoLinker.flexibleRange(of: s.surface, in: text) {
@@ -214,7 +191,6 @@ struct ComposeView: View {
         }
     }
 
-    /// A sensible reminder title seeded from the note's opening words.
     private var followUpDefault: String {
         let firstLine = text.split(separator: "\n").first.map(String.init) ?? ""
         let words = firstLine.split(separator: " ").prefix(4).joined(separator: " ")

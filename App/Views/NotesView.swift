@@ -51,7 +51,7 @@ struct NotesView: View {
                         .accessibilityLabel("Add note")
                     }
                 }
-                .sheet(isPresented: $showCompose) { ComposeView(prefillTitle: composePrefill) }
+                .fullScreenCover(isPresented: $showCompose) { ComposeView(prefillTitle: composePrefill) }
                 .sheet(isPresented: $showCapture) { CaptureView(onSaved: { path.append($0) }) }
                 .alert("Contacts", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
                     Button("OK", role: .cancel) {}

@@ -116,7 +116,7 @@ struct FoldersView: View {
                 Text("Permanently removes this folder and \(n) note\(n == 1 ? "" : "s") inside it.")
             }
             .sheet(isPresented: $showCapture) { CaptureView(onSaved: { path.append($0) }) }
-            .sheet(isPresented: $showCompose) { ComposeView(prefillTitle: composePrefill) }
+            .fullScreenCover(isPresented: $showCompose) { ComposeView(prefillTitle: composePrefill) }
             .sheet(isPresented: $showReadwise) { ReadwiseConnectView() }
             .sheet(isPresented: $showSettings) { AxisSettingsView() }
             .alert("Import", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {

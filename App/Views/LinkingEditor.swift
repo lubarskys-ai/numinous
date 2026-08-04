@@ -29,7 +29,7 @@ struct LinkingEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             LinkTextView(text: $text, controller: controller, onCommit: onCommit)
-                .frame(minHeight: minHeight)
+                .frame(minHeight: minHeight, maxHeight: .infinity)
 
             if let query = controller.query {
                 suggestions(for: query)
