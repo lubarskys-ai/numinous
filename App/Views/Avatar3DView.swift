@@ -71,11 +71,11 @@ struct Avatar3DView: UIViewRepresentable {
             view.scene = buildScene()
             view.pointOfView = view.scene?.rootNode.childNode(withName: "camera", recursively: false)
             context.coordinator.builtMaturity = maturity
-            context.coordinator.labelsShown = !(zoom > 1.8)   // force re-apply below
+            context.coordinator.labelsShown = !(zoom > 7)   // force re-apply below
         }
         view.pointOfView?.position.z = Self.baseDistance / Float(max(0.1, zoom))
         // Node name labels appear once you zoom in a bit.
-        let showLabels = zoom > 1.8
+        let showLabels = zoom > 7
         if showLabels != context.coordinator.labelsShown {
             context.coordinator.labelsShown = showLabels
             view.scene?.rootNode.enumerateChildNodes { node, _ in
@@ -635,7 +635,7 @@ struct Avatar3DView: UIViewRepresentable {
                     label.position = v(Double(p.x), Double(p.y) + Double(r) + 0.03, Double(p.z))
                     label.constraints = [SCNBillboardConstraint()]
                     label.renderingOrder = 20
-                    label.isHidden = zoom <= 1.8   // only when zoomed in
+                    label.isHidden = zoom <= 7   // only when zoomed in
                     connectomeFloat.addChildNode(label)
                 }
                 // Soft glow halo so a node reads as a living orb, not a pinprick.
@@ -687,7 +687,7 @@ struct Avatar3DView: UIViewRepresentable {
             mat.emission.intensity = (e.cross ? 0.5 : 0.32) * linksAppear
             mat.transparency = CGFloat((e.cross ? 0.6 : 0.42) * linksAppear)
             mat.writesToDepthBuffer = false
-            thread(a, b, e.cross ? 0.0016 : 0.0011, mat, name: "link:\(e.a.uuidString):\(e.b.uuidString)")
+            thread(a, b, e.cross ? 0.006 : 0.004, mat, name: "link:\(e.a.uuidString):\(e.b.uuidString)")
         }
 
         // Cross-axis threads carry a small travelling signal along the strand.
