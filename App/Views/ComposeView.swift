@@ -27,6 +27,7 @@ struct ComposeView: View {
     @State private var reminderNoteTitle = ""
     @State private var scanning = false
     @State private var didScan = false
+    @State private var manualEdit = false                 // editing text while a scan's results are held
     @State private var confirmed: [LinkSuggestion] = []   // auto-linked (blue) — applied on save
     @State private var pending: [LinkSuggestion] = []     // proposed new notes (orange) — awaiting a decision
     @State private var editSheetFor: LinkSuggestion?
@@ -65,17 +66,21 @@ struct ComposeView: View {
             VStack(spacing: 0) {
                 categoryBar
                 Divider()
-                if reviewing {
+                if reviewing && !manualEdit {
                     reviewArea
                 } else {
                     LinkingEditor(text: $text)
                         .padding(.horizontal, 14)
                         .padding(.top, 6)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    if didScan { linkStatus }
+                    if reviewing {
+                        reviewWhileEditing   // keep suggestions reachable while you edit
+                    } else if didScan {
+                        linkStatus
+                    }
                 }
             }
-            .navigationTitle(reviewing ? "Review links" : "New Note")
+            .navigationTitle(reviewing && !manualEdit ? "Review links" : "New Note")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -84,14 +89,17 @@ struct ComposeView: View {
                         .disabled(category.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
                 ToolbarItemGroup(placement: .bottomBar) {
-                    if reviewing {
-                        Button { exitReview() } label: { Label("Edit text", systemImage: "pencil") }
+                    if reviewing && !manualEdit {
+                        Button { manualEdit = true } label: { Label("Edit text", systemImage: "pencil") }
                     } else {
                         Button { findLinks() } label: {
                             if scanning { HStack { ProgressView(); Text("Finding…") } }
-                            else { Label("Find links", systemImage: "link.badge.plus") }
+                            else { Label(didScan ? "Re-scan" : "Find links", systemImage: "link.badge.plus") }
                         }
                         .disabled(scanning || text.trimmingCharacters(in: .whitespaces).count < 3)
+                        if reviewing && manualEdit {
+                            Button { manualEdit = false } label: { Label("Highlights", systemImage: "highlighter") }
+                        }
                     }
                     Spacer()
                     detailsMenu
@@ -262,6 +270,7 @@ struct ComposeView: View {
             confirmed = found.filter { !$0.isNew }
             pending = found.filter { $0.isNew }
             didScan = true
+            manualEdit = false      // show the highlighted review for the fresh results
             scanning = false
         }
     }
@@ -290,10 +299,28 @@ struct ComposeView: View {
         editSheetFor = nil
     }
 
-    /// Leave review and return to editing; discards the scan so the highlights don't
-    /// linger over text you're changing.
-    private func exitReview() {
-        confirmed = []; pending = []; didScan = false
+    /// A compact strip shown under the editor while you edit text with a scan's
+    /// results still held — so links stay reachable (Add/Skip) without leaving edit mode.
+    @ViewBuilder
+    private var reviewWhileEditing: some View {
+        if !confirmed.isEmpty || !pending.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                if !confirmed.isEmpty {
+                    Label("\(confirmed.count) link\(confirmed.count == 1 ? "" : "s") ready to save", systemImage: "checkmark.circle.fill")
+                        .font(.caption).foregroundStyle(.green)
+                }
+                if !pending.isEmpty {
+                    ScrollView {
+                        VStack(spacing: 4) { ForEach(pending) { s in pendingRow(s) } }
+                    }
+                    .frame(maxHeight: 150)
+                    Text("Tap “Highlights” to see these marked in your note.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .background(.ultraThinMaterial)
+        }
     }
 
     private func editSheet(_ s: LinkSuggestion) -> some View {

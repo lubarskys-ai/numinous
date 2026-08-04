@@ -1146,6 +1146,7 @@ final class AppModel: ObservableObject {
         }
 
         // 2. On-device LLM: resolve fuzzy references and surface new entities.
+        var llmSurfacedNew = false
         #if canImport(FoundationModels)
         if #available(iOS 26.0, *), SmartLinker.isAvailable {
             let candidates = notes.map { (name: $0.displayName, target: $0.title) }
@@ -1167,11 +1168,80 @@ final class AppModel: ObservableObject {
                     let target = folder + "/" + name
                     if seen.insert(target.lowercased()).inserted {
                         out.append(LinkSuggestion(name: name, target: target, surface: e.surface, isNew: true))
+                        llmSurfacedNew = true
                     }
                 }
             }
         }
         #endif
+
+        // 3. Fallback: when the on-device model didn't surface any new entities (it's
+        // unavailable, or found nothing), infer proposals from sentence patterns —
+        // "with <person>", "at <place>", "in <city>". Works on lowercase dictation too.
+        if !llmSurfacedNew {
+            for s in heuristicNewEntities(in: text) where seen.insert(s.target.lowercased()).inserted {
+                out.append(s)
+            }
+        }
+        return out
+    }
+
+    /// Words that end a name phrase (prepositions, conjunctions, pronouns, articles,
+    /// auxiliaries) — used to know where a "with <name>" phrase stops.
+    private static let nameBoundary: Set<String> = [
+        "at","in","on","to","for","and","but","then","with","near","by","from","of","about",
+        "we","i","the","a","an","was","were","is","are","am","be","been","had","have","has",
+        "that","this","these","those","today","yesterday","tomorrow","last","next","who","which",
+        "my","our","your","their","his","her","its","it","he","she","they","them","us","me",
+        "when","while","after","before","during","because","so","or","nor","yet"
+    ]
+
+    /// Sentence-pattern triggers → the folder a following name likely belongs in.
+    private static let nameTriggers: [String: String] = [
+        "with": "people", "met": "people", "meet": "people", "meeting": "people",
+        "saw": "people", "see": "people", "seeing": "people", "call": "people",
+        "called": "people", "calling": "people", "texted": "people", "texting": "people",
+        "emailed": "people", "from": "people",
+        "at": "notes", "visited": "location", "visiting": "location", "in": "location",
+    ]
+
+    /// A lightweight, model-free entity guesser for when Apple's on-device model isn't
+    /// available (or finds nothing). It reads simple patterns — "with <person>", "at
+    /// <place>", "in <city>" — and proposes a new note for each, folder guessed from
+    /// the trigger word. Deliberately shallow: the user reviews (Add/Edit/Skip) every
+    /// one, and their choices are remembered by the learning layer.
+    func heuristicNewEntities(in text: String) -> [LinkSuggestion] {
+        let ns = text as NSString
+        var tokens: [(word: String, range: NSRange)] = []
+        ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length), options: .byWords) { sub, r, _, _ in
+            if let sub { tokens.append((sub, r)) }
+        }
+        var out: [LinkSuggestion] = []
+        var seenLocal = Set<String>()
+        var i = 0
+        while i < tokens.count {
+            let w = tokens[i].word.lowercased()
+            guard let folder0 = Self.nameTriggers[w] else { i += 1; continue }
+            var nameTokens: [(String, NSRange)] = []
+            var j = i + 1
+            while j < tokens.count, nameTokens.count < 3 {
+                let t = tokens[j].word, tl = t.lowercased()
+                if t.count < 2 || Self.nameBoundary.contains(tl) || Self.nameTriggers[tl] != nil { break }
+                nameTokens.append((t, tokens[j].range)); j += 1
+            }
+            defer { i = max(i + 1, j) }
+            guard !nameTokens.isEmpty else { continue }
+            let startLoc = nameTokens.first!.1.location
+            let endLoc = nameTokens.last!.1.location + nameTokens.last!.1.length
+            let surface = ns.substring(with: NSRange(location: startLoc, length: endLoc - startLoc))
+            let name = nameTokens.map { $0.0.prefix(1).uppercased() + $0.0.dropFirst() }.joined(separator: " ")
+            let key = name.lowercased()
+            guard key.count >= 3, !linkLearning.skips.contains(key), seenLocal.insert(key).inserted else { continue }
+            // Don't propose something you already have a note for.
+            if notes.contains(where: { $0.displayName.lowercased() == key }) { continue }
+            let folder = linkLearning.folderForName[key] ?? folder0
+            out.append(LinkSuggestion(name: name, target: folder + "/" + name, surface: surface, isNew: true))
+        }
         return out
     }
 
