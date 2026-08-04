@@ -716,31 +716,6 @@ struct Avatar3DView: UIViewRepresentable {
             thread(a, b, e.cross ? 0.0032 : 0.0022, mat, name: "link:\(e.a.uuidString):\(e.b.uuidString)")
         }
 
-        // Cross-axis threads carry a small travelling signal along the strand.
-        for e in links where linksAppear > 0.05 && e.cross {
-            guard let a = pos[e.a], let b = pos[e.b] else { continue }
-            let steps = 8
-            let pts = (0...steps).map { i -> SCNVector3 in
-                let t = Double(i) / Double(steps)
-                return v(Double(a.x) + (Double(b.x) - Double(a.x)) * t,
-                         Double(a.y) + (Double(b.y) - Double(a.y)) * t,
-                         Double(a.z) + (Double(b.z) - Double(a.z)) * t)
-            }
-            let col = UIColor(red: 0.6, green: 0.85, blue: 1.0, alpha: 1)
-            let signal = ball(0.008); signal.segmentCount = 10
-            let sm = SCNMaterial(); sm.lightingModel = .constant
-            sm.diffuse.contents = col; sm.emission.contents = col; sm.emission.intensity = 0.9
-            signal.materials = [sm]
-            let pulse = SCNNode(geometry: signal); pulse.position = pts[0]; pulse.renderingOrder = 13
-            pulse.opacity = 0.7
-            let dur = Double.random(in: 3.0...5.5)
-            let seg = dur / Double(pts.count - 1)
-            var moves: [SCNAction] = pts.dropFirst().map { .move(to: $0, duration: seg) }
-            moves.append(.move(to: pts[0], duration: 0))
-            pulse.runAction(.sequence([.wait(duration: Double.random(in: 0...5)), .repeatForever(.sequence(moves))]))
-            connectomeFloat.addChildNode(pulse)
-        }
-
         // The body and the connectome each gently float and tumble in space — a
         // weightless bob, sway, and slow turn — independent of each other and of
         // the fixed stars/galaxies. User drag-rotation still turns the whole scene.
