@@ -1073,18 +1073,19 @@ final class AppModel: ObservableObject {
         return note.id
     }
 
-    /// The diary note to keep writing in today: the most recent one dated today, or a
-    /// fresh one if there isn't one yet. Lets "Add to today's diary" always land you in
-    /// the same running entry.
-    func openTodayDiary() -> UUID {
+    /// Today's most recent diary note, if one exists yet (does NOT create one). Lets the
+    /// composer pull today's entry forward for continued writing.
+    func todaysDiaryID() -> UUID? {
         let cal = Calendar.current
-        if let i = notes.indices
+        guard let i = notes.indices
             .filter({ Folder.normalize(notes[$0].folderName).contains("diary") && cal.isDateInToday(notes[$0].date) })
-            .max(by: { notes[$0].date < notes[$1].date }) {
-            return notes[i].id
-        }
-        return createDiaryEntry()
+            .max(by: { notes[$0].date < notes[$1].date }) else { return nil }
+        return notes[i].id
     }
+
+    /// The diary note to keep writing in today: the most recent one dated today, or a
+    /// fresh one if there isn't one yet.
+    func openTodayDiary() -> UUID { todaysDiaryID() ?? createDiaryEntry() }
 
     /// Append a line to today's most recent diary entry (creating one if there isn't
     /// one yet). Any `[[links]]` in the line become real connections, as usual.

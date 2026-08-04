@@ -34,19 +34,26 @@ struct ComposeView: View {
     @State private var actionFor: LinkSuggestion?          // a highlighted span the user tapped
     @State private var editName = ""
     @State private var editFolder = "notes"
+    @State private var existingNoteID: UUID?               // set in diary mode → save updates in place
+    @State private var diaryResolved = false
     @StateObject private var locator = LocationService()
+
+    /// When true, this is "Add to today's diary": on appear it pulls today's diary entry
+    /// forward (if one exists) and saves back into it instead of creating a new note.
+    let diaryMode: Bool
 
     /// Optional: notified with the new note's id after Save (used by quick-capture /
     /// Folders to switch tabs or push the note). The editor still dismisses itself.
     var onSaved: ((UUID) -> Void)? = nil
 
-    init(prefillTitle: String?, onSaved: ((UUID) -> Void)? = nil) {
+    init(prefillTitle: String? = nil, diary: Bool = false, onSaved: ((UUID) -> Void)? = nil) {
         self.onSaved = onSaved
+        self.diaryMode = diary
         let folder: String? = prefillTitle.flatMap { t in
             guard let slash = t.lastIndex(of: "/") else { return t.isEmpty ? nil : t }
             return String(t[..<slash])
         }
-        _category = State(initialValue: (folder?.isEmpty == false) ? folder! : "notes")
+        _category = State(initialValue: diary ? "notes/diary" : ((folder?.isEmpty == false) ? folder! : "notes"))
     }
 
     /// True once a scan found something to review. In this mode the note text is shown
@@ -80,7 +87,7 @@ struct ComposeView: View {
                     }
                 }
             }
-            .navigationTitle(reviewing && !manualEdit ? "Review links" : "New Note")
+            .navigationTitle(reviewing && !manualEdit ? "Review links" : (diaryMode ? "Today's Diary" : "New Note"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -106,6 +113,7 @@ struct ComposeView: View {
                 }
             }
             .task { if location.isEmpty, locator.isAuthorized { await useCurrentLocation() } }
+            .onAppear { resolveDiary() }
             .alert("New category", isPresented: $showNewCategory) {
                 TextField("e.g. golf clubs", text: $newCategoryDraft).autocorrectionDisabled()
                 Button("Cancel", role: .cancel) {}
@@ -363,14 +371,29 @@ struct ComposeView: View {
         locating = false
     }
 
+    /// In diary mode, pull today's entry forward so you continue writing in it.
+    private func resolveDiary() {
+        guard diaryMode, !diaryResolved else { return }
+        diaryResolved = true
+        if let id = model.todaysDiaryID() {
+            existingNoteID = id
+            text = model.note(id: id)?.body ?? ""
+        }
+    }
+
     private func save() { let id = createNote(); onSaved?(id); dismiss() }
 
-    /// Build the note body with the confirmed/kept links woven in, then create it.
-    /// This is the ONLY place the note text gains wikilinks from a scan.
+    /// Build the note body with the confirmed/kept links woven in, then persist —
+    /// updating today's diary in place when we pulled one forward, otherwise creating a
+    /// new note. This is the ONLY place the note text gains wikilinks from a scan.
     @discardableResult
     private func createNote() -> UUID {
         var body = text
         for s in confirmed { body = insert(s, into: body) }
+        if let id = existingNoteID {
+            model.updateBody(id, body: body)
+            return id
+        }
         return model.createCapturedNote(body: body, folder: category, intensity: intensity,
                                         location: location.isEmpty ? nil : location)
     }

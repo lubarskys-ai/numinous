@@ -31,6 +31,7 @@ struct FoldersView: View {
     @EnvironmentObject var model: AppModel
     @State private var showSettings = false
     @State private var showCompose = false
+    @State private var composeDiary = false
     @State private var axisPickerFolder: FolderRef?
     @State private var renameFolderPath: String?
     @State private var folderNameDraft = ""
@@ -83,8 +84,8 @@ struct FoldersView: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
-                        Button { composePrefill = nil; showCompose = true } label: { Label("New note", systemImage: "square.and.pencil") }
-                        Button { path.append(model.openTodayDiary()) } label: { Label("Add to today's diary", systemImage: "calendar.badge.plus") }
+                        Button { composePrefill = nil; composeDiary = false; showCompose = true } label: { Label("New note", systemImage: "square.and.pencil") }
+                        Button { composeDiary = true; showCompose = true } label: { Label("Add to today's diary", systemImage: "calendar.badge.plus") }
                         Divider()
                         Button { importContacts() } label: { Label("Sync contacts", systemImage: "person.crop.circle.badge.plus") }
                         Button { showReadwise = true } label: { Label("Import from Readwise", systemImage: "books.vertical") }
@@ -113,7 +114,7 @@ struct FoldersView: View {
                 let n = model.notes.filter { $0.folderName.lowercased() == folder.lowercased() || $0.folderName.lowercased().hasPrefix(folder.lowercased() + "/") }.count
                 Text("Permanently removes this folder and \(n) note\(n == 1 ? "" : "s") inside it.")
             }
-            .fullScreenCover(isPresented: $showCompose) { ComposeView(prefillTitle: composePrefill, onSaved: { path.append($0) }) }
+            .fullScreenCover(isPresented: $showCompose) { ComposeView(prefillTitle: composePrefill, diary: composeDiary, onSaved: { path.append($0) }) }
             .sheet(isPresented: $showReadwise) { ReadwiseConnectView() }
             .sheet(isPresented: $showSettings) { AxisSettingsView() }
             .alert("Import", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
