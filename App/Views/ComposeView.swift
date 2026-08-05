@@ -2,6 +2,14 @@ import SwiftUI
 import UIKit
 import NuminousCore
 
+/// What to open the composer for. Carried as one value through `.fullScreenCover(item:)`
+/// so the diary flag can never arrive stale (which a separate boolean + isPresented can).
+struct ComposeRequest: Identifiable {
+    let id = UUID()
+    var prefillTitle: String? = nil
+    var diary: Bool = false
+}
+
 /// A full-screen note editor: the writing area is the hero (a big text view, NOT a
 /// Form row — which is what bounced the cursor), with category, details, and links
 /// tucked into compact bars. Titled by date, filed under a chosen category.

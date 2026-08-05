@@ -9,9 +9,7 @@ struct NotesView: View {
     @EnvironmentObject var model: AppModel
     @State private var searchText = ""
     @State private var categoryFilter: String?
-    @State private var showCompose = false
-    @State private var composeDiary = false
-    @State private var composePrefill: String?
+    @State private var compose: ComposeRequest?
     @State private var importMessage: String?
     @State private var path: [UUID] = []
 
@@ -42,10 +40,10 @@ struct NotesView: View {
                     }
                     ToolbarItem(placement: .primaryAction) {
                         Menu {
-                            Button { composePrefill = nil; composeDiary = false; showCompose = true } label: {
+                            Button { compose = ComposeRequest() } label: {
                                 Label("New note", systemImage: "square.and.pencil")
                             }
-                            Button { composeDiary = true; showCompose = true } label: {
+                            Button { compose = ComposeRequest(diary: true) } label: {
                                 Label("Add to today's diary", systemImage: "calendar.badge.plus")
                             }
                         } label: {
@@ -54,7 +52,7 @@ struct NotesView: View {
                         .accessibilityLabel("Add note")
                     }
                 }
-                .fullScreenCover(isPresented: $showCompose) { ComposeView(prefillTitle: composePrefill, diary: composeDiary) }
+                .fullScreenCover(item: $compose) { req in ComposeView(prefillTitle: req.prefillTitle, diary: req.diary) }
                 .alert("Contacts", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
                     Button("OK", role: .cancel) {}
                 } message: { Text(importMessage ?? "") }
