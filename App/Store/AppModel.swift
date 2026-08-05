@@ -625,22 +625,50 @@ final class AppModel: ObservableObject {
         case .nutrition: (folder, category, axis) = ("health/nutrition", "Nutrition", "gut")
         }
 
+        // Longer effort grows you more: a workout's / mindful session's intensity scales
+        // with its duration (nutrition has no meaningful duration → stays neutral).
+        let intensity = item.kind == .nutrition ? 3 : Self.intensityForDuration(item.duration)
+
         let df = DateFormatter(); df.dateStyle = .medium; df.timeStyle = .short
         let name = "\(item.title) · \(Self.shortDate(item.start))"
         let body: String
         if item.kind == .nutrition {
             body = "\(Self.shortDate(item.start))\n🍽 \(item.detail ?? "")"
         } else {
-            body = "\(df.string(from: item.start))\n⏱ \(max(1, Int(item.duration / 60))) min"
+            let mins = max(1, Int(item.duration / 60))
+            body = "\(df.string(from: item.start))\n⏱ \(mins) min · \(Self.intensityLabel(intensity)) effort"
         }
 
         let imported = ImportedItem(
-            folder: folder, name: name, body: body, date: item.start,
+            folder: folder, name: name, body: body, date: item.start, intensity: intensity,
             origin: NoteOrigin(source: "healthkit", externalID: item.id),
             folderCategory: category, folderAxisID: axis, isDormant: false
         )
         ingest([imported])
         return notes.first { $0.origin?.source == "healthkit" && $0.origin?.externalID == item.id }?.id
+    }
+
+    /// Map an activity's duration to a 2…5 growth intensity — the longer you were at it,
+    /// the more it counts. Tunable thresholds (minutes): <10 light · 10–29 present ·
+    /// 30–59 vivid · 60+ profound. A short token effort still grows you, just gently.
+    static func intensityForDuration(_ seconds: TimeInterval) -> Int {
+        switch seconds / 60 {
+        case ..<10:  return 2
+        case ..<30:  return 3
+        case ..<60:  return 4
+        default:     return 5
+        }
+    }
+
+    /// Human word for an intensity level (matches the composer's scale).
+    static func intensityLabel(_ i: Int) -> String {
+        switch i {
+        case ...1: return "faint"
+        case 2:    return "light"
+        case 3:    return "present"
+        case 4:    return "vivid"
+        default:   return "profound"
+        }
     }
 
     private static func shortDate(_ date: Date) -> String {
