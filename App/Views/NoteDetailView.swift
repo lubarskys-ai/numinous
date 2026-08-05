@@ -9,10 +9,14 @@ struct NoteDetailView: View {
 
     @State private var editedBody = ""
     @State private var loadedBodyFor: UUID?
+    @State private var editingBody = false           // reading (rendered links) vs raw editing
+    @State private var openLinkTarget: LinkTarget?   // a tapped rendered link to open
     @State private var photoItem: PhotosPickerItem?
     @State private var showFollowUp = false
     @State private var followUpMessage: String?
     @State private var titleDraft = ""
+
+    private struct LinkTarget: Identifiable { let id: UUID }
 
     var body: some View {
         if let note = model.note(id: noteID) {
@@ -43,7 +47,11 @@ struct NoteDetailView: View {
             .onAppear {
                 if loadedBodyFor != note.id {
                     editedBody = note.body; titleDraft = note.title; loadedBodyFor = note.id
+                    editingBody = note.body.isEmpty   // start reading unless there's nothing yet
                 }
+            }
+            .sheet(item: $openLinkTarget) { t in
+                NavigationStack { NoteDetailView(noteID: t.id) }
             }
             .onDisappear {
                 // Autosave on leave so edits (and links) persist without a manual Save.
@@ -187,12 +195,89 @@ struct NoteDetailView: View {
 
     @ViewBuilder
     private func bodySection(_ note: Note, label: String, minHeight: CGFloat) -> some View {
-        Section(label) {
-            LinkingEditor(text: $editedBody, minHeight: minHeight,
-                          onCommit: { model.updateBody(note.id, body: $0) })
-            Text("Type [[ to link — pick an existing note, or create a new one.")
-                .font(.caption).foregroundStyle(.secondary)
+        Section {
+            if editingBody {
+                LinkingEditor(text: $editedBody, minHeight: minHeight,
+                              onCommit: { model.updateBody(note.id, body: $0) })
+                HStack {
+                    Text("Type [[ or tap Link to connect a note.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Done") {
+                        model.updateBody(note.id, body: editedBody)
+                        editingBody = false
+                    }.font(.callout.weight(.medium))
+                }
+            } else {
+                Text(renderedBody(editedBody))
+                    .frame(maxWidth: .infinity, minHeight: minHeight * 0.5, alignment: .topLeading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .environment(\.openURL, OpenURLAction { url in openBodyLink(url); return .handled })
+                    .contentShape(Rectangle())
+                    .onTapGesture { editingBody = true }   // tap the text to edit (cursor)
+            }
+        } header: {
+            HStack {
+                Text(label)
+                Spacer()
+                if !editingBody {
+                    Button { editingBody = true } label: { Label("Edit", systemImage: "pencil").font(.caption) }
+                }
+            }
         }
+    }
+
+    /// The body with `[[folder/Name]]` rendered as bracket-less, axis-colored, underlined
+    /// tappable links; a tap opens that note. Plain text passes through unchanged.
+    private func renderedBody(_ body: String) -> AttributedString {
+        if body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            var empty = AttributedString("Empty — tap to write.")
+            empty.foregroundColor = .secondary
+            return empty
+        }
+        let ns = body as NSString
+        guard let re = try? NSRegularExpression(pattern: #"\[\[([^\]]+)\]\]"#) else { return AttributedString(body) }
+        var out = AttributedString()
+        var last = 0
+        for m in re.matches(in: body, range: NSRange(location: 0, length: ns.length)) {
+            if m.range.location > last {
+                out += AttributedString(ns.substring(with: NSRange(location: last, length: m.range.location - last)))
+            }
+            let raw = ns.substring(with: m.range(at: 1))
+            let parts = raw.split(separator: "|", maxSplits: 1).map(String.init)
+            let target = parts.first?.trimmingCharacters(in: .whitespaces) ?? raw
+            let display = parts.count > 1 ? parts[1] : leafName(target)
+            var chip = AttributedString(display)
+            chip.foregroundColor = axisColor(forTarget: target)
+            chip.underlineStyle = .single
+            if let enc = target.addingPercentEncoding(withAllowedCharacters: .alphanumerics) {
+                chip.link = URL(string: "numinous-open:\(enc)")
+            }
+            out += chip
+            last = m.range.location + m.range.length
+        }
+        if last < ns.length { out += AttributedString(ns.substring(from: last)) }
+        return out
+    }
+
+    private func openBodyLink(_ url: URL) {
+        guard url.scheme == "numinous-open" else { return }
+        let encoded = String(url.absoluteString.dropFirst("numinous-open:".count))
+        let target = (encoded.removingPercentEncoding ?? encoded).lowercased()
+        if let hit = model.notes.first(where: { $0.title.lowercased() == target }) {
+            openLinkTarget = LinkTarget(id: hit.id)
+        }
+    }
+
+    private func axisColor(forTarget target: String) -> Color {
+        guard let slash = target.lastIndex(of: "/") else { return .accentColor }
+        let folder = String(target[..<slash])
+        return model.axis(id: model.folder(named: folder)?.axisID ?? "")?.color ?? .accentColor
+    }
+
+    private func leafName(_ target: String) -> String {
+        guard let slash = target.lastIndex(of: "/") else { return target }
+        return String(target[target.index(after: slash)...])
     }
 
     @ViewBuilder
