@@ -120,10 +120,16 @@ private struct LinkTextView: UIViewRepresentable {
         tv.backgroundColor = .clear
         tv.textContainerInset = UIEdgeInsets(top: 8, left: 2, bottom: 8, right: 2)
         tv.text = text
-        // A keyboard toolbar with Done, so you can dismiss the keyboard and reach the
-        // buttons it covers (Find links, Save).
+        // A keyboard toolbar: a one-tap "Link" that inserts a `[[` token and pops the
+        // file autocomplete (so linking needs no knowledge of the `[[` shortcut), plus
+        // Done to dismiss the keyboard and reach the buttons it covers.
         let bar = UIToolbar(); bar.sizeToFit()
+        let linkItem = UIBarButtonItem(image: UIImage(systemName: "link.badge.plus"),
+                                       style: .plain, target: context.coordinator,
+                                       action: #selector(Coordinator.insertLinkToken))
+        linkItem.title = " Link"
         bar.items = [
+            linkItem,
             UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil),
             UIBarButtonItem(barButtonSystemItem: .done, target: tv, action: #selector(UIResponder.resignFirstResponder)),
         ]
@@ -161,6 +167,22 @@ private struct LinkTextView: UIViewRepresentable {
         var parent: LinkTextView
         weak var textView: UITextView?
         init(_ parent: LinkTextView) { self.parent = parent }
+
+        /// Toolbar "Link": insert a `[[` token at the caret and show the file picker.
+        @objc func insertLinkToken() {
+            guard let tv = textView else { return }
+            if !tv.isFirstResponder { tv.becomeFirstResponder() }
+            let range = tv.selectedRange
+            let ns = tv.text as NSString
+            // A leading space keeps the token clean when inserted mid-word.
+            let needsSpace = range.location > 0 && !ns.substring(with: NSRange(location: range.location - 1, length: 1)).allSatisfy({ $0 == " " || $0 == "\n" })
+            let insert = (needsSpace ? " [[" : "[[")
+            tv.text = ns.replacingCharacters(in: range, with: insert)
+            let loc = range.location + (insert as NSString).length
+            tv.selectedRange = NSRange(location: loc, length: 0)
+            parent.text = tv.text
+            updateQuery()
+        }
 
         func textViewDidChange(_ tv: UITextView) { parent.text = tv.text; updateQuery() }
         func textViewDidChangeSelection(_ tv: UITextView) {

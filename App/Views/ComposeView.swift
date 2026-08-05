@@ -18,8 +18,7 @@ struct ComposeView: View {
     @State private var intensity = 3
     @State private var location = ""
     @State private var category: String
-    @State private var showNewCategory = false
-    @State private var newCategoryDraft = ""
+    @State private var showCategoryPicker = false
     @State private var showLocationPrompt = false
     @State private var locationDraft = ""
     @State private var locating = false
@@ -120,14 +119,6 @@ struct ComposeView: View {
             }
             .task { if location.isEmpty, locator.isAuthorized { await useCurrentLocation() } }
             .onAppear { resolveDiary() }
-            .alert("New category", isPresented: $showNewCategory) {
-                TextField("e.g. golf clubs", text: $newCategoryDraft).autocorrectionDisabled()
-                Button("Cancel", role: .cancel) {}
-                Button("Use") {
-                    let c = newCategoryDraft.trimmingCharacters(in: CharacterSet(charactersIn: " /"))
-                    if !c.isEmpty { category = c }
-                }
-            } message: { Text("Notes here are titled by date. The folder is created for you.") }
             .alert("Location", isPresented: $showLocationPrompt) {
                 TextField("Where were you?", text: $locationDraft)
                 Button("Cancel", role: .cancel) {}
@@ -143,15 +134,7 @@ struct ComposeView: View {
     // MARK: - Bars
 
     private var categoryBar: some View {
-        Menu {
-            ForEach(categoryOptions, id: \.self) { cat in
-                Button { category = cat } label: {
-                    if cat == category { Label(cat, systemImage: "checkmark") } else { Text(cat) }
-                }
-            }
-            Divider()
-            Button { newCategoryDraft = ""; showNewCategory = true } label: { Label("New category…", systemImage: "plus") }
-        } label: {
+        Button { showCategoryPicker = true } label: {
             HStack(spacing: 8) {
                 Image(systemName: "folder")
                 Text(categoryLabel).fontWeight(.medium)
@@ -164,6 +147,7 @@ struct ComposeView: View {
             .contentShape(Rectangle())
         }
         .foregroundStyle(.primary)
+        .sheet(isPresented: $showCategoryPicker) { CategoryPickerView(category: $category) }
     }
 
     // MARK: - Review (highlighted preview — the note text is never rewritten here)
