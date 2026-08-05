@@ -25,7 +25,11 @@ struct Avatar3DView: UIViewRepresentable {
     var onTapNode: ((UUID) -> Void)? = nil
     var onZoomChange: ((Double) -> Void)? = nil
 
-    static let baseDistance: Float = 8.5
+    // A long "telephoto" rig: the camera sits far back with a narrow field of view, which
+    // flattens perspective so foreground and background nodes zoom at nearly the same rate
+    // (near-Obsidian consistency) and the camera stops flying past near nodes so soon.
+    // Kept just inside the star shell (radius 26) so the cosmos still surrounds you.
+    static let baseDistance: Float = 23
     static let minZoom: Double = 0.12
     static let maxZoom: Double = 120
 
@@ -115,7 +119,7 @@ struct Avatar3DView: UIViewRepresentable {
         @objc func camPan(_ g: UIPanGestureRecognizer) {
             guard let cam = view?.pointOfView else { return }
             let t = g.translation(in: view)
-            let s = cam.position.z * 0.0016   // scale by distance so it feels 1:1
+            let s = cam.position.z * 0.0006   // scale by distance so it feels 1:1 (telephoto rig)
             cam.position.x -= Float(t.x) * s
             cam.position.y += Float(t.y) * s
             g.setTranslation(.zero, in: view)
@@ -210,10 +214,10 @@ struct Avatar3DView: UIViewRepresentable {
 
         let cam = SCNNode()
         cam.name = "camera"
-        cam.camera = SCNCamera(); cam.camera?.fieldOfView = 42
+        cam.camera = SCNCamera(); cam.camera?.fieldOfView = 16   // telephoto: flat perspective
         cam.camera?.zNear = 0.01           // allow zooming in close without clipping
         cam.camera?.zFar = 250
-        cam.position = v(0, 0.05, 4.2)
+        cam.position = v(0, 0.05, Double(Self.baseDistance))
         scene.rootNode.addChildNode(cam)
         let ambient = SCNNode(); ambient.light = SCNLight(); ambient.light?.type = .ambient; ambient.light?.intensity = 720
         scene.rootNode.addChildNode(ambient)
