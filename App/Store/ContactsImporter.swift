@@ -8,6 +8,9 @@ struct ImportedContact {
     let name: String
     let phones: [String]
     let emails: [String]
+    /// A readable "City, State" from the contact's postal address, if any — the seed for
+    /// location-based reconnection ("you're near Sam").
+    let place: String?
 }
 
 /// Reads the device's contacts (with permission). Seeds the People folder so
@@ -35,6 +38,7 @@ enum ContactsImporter {
         let keys = [
             CNContactGivenNameKey, CNContactFamilyNameKey,
             CNContactPhoneNumbersKey, CNContactEmailAddressesKey,
+            CNContactPostalAddressesKey,
         ] as [CNKeyDescriptor]
         let request = CNContactFetchRequest(keysToFetch: keys)
 
@@ -47,7 +51,11 @@ enum ContactsImporter {
             guard !name.isEmpty else { return }
             let phones = contact.phoneNumbers.map { $0.value.stringValue }
             let emails = contact.emailAddresses.map { $0.value as String }
-            out.append(ImportedContact(id: contact.identifier, name: name, phones: phones, emails: emails))
+            let place = contact.postalAddresses.first.map { pa -> String in
+                let a = pa.value
+                return [a.city, a.state].filter { !$0.isEmpty }.joined(separator: ", ")
+            }.flatMap { $0.isEmpty ? nil : $0 }
+            out.append(ImportedContact(id: contact.identifier, name: name, phones: phones, emails: emails, place: place))
         }
         return out
     }

@@ -45,6 +45,9 @@ struct ImportedItem {
     var origin: NoteOrigin
     var folderCategory: String
     var folderAxisID: String?
+    /// A readable place for this item (e.g. a contact's "City, State") — used for
+    /// location-based reconnection.
+    var location: String? = nil
     /// Imported-but-not-yet-engaged (e.g. a bare contact). Dormant notes are
     /// linkable/searchable but grant *zero* growth until you actually engage —
     /// so importing your whole address book can't inflate an axis. Growth comes
@@ -440,6 +443,7 @@ final class AppModel: ObservableObject {
             if let i = notes.firstIndex(where: { $0.origin == item.origin }) {
                 notes[i].title = title
                 notes[i].details = Self.mergeDetails(notes[i].details, item.details)
+                if let loc = item.location, notes[i].location?.isEmpty != false { notes[i].location = loc }
                 if notes[i].body.isEmpty {
                     notes[i].body = item.body
                     // Still un-engaged (no body of its own) → keep it dormant.
@@ -458,7 +462,7 @@ final class AppModel: ObservableObject {
                     uniqueTitle = "\(title) (\(n))"; n += 1
                 }
                 notes.append(Note(title: uniqueTitle, date: item.date, body: item.body,
-                                  intensity: item.intensity, details: item.details,
+                                  intensity: item.intensity, location: item.location, details: item.details,
                                   origin: item.origin, isStub: item.isDormant))
                 added += 1
             }
@@ -488,12 +492,82 @@ final class AppModel: ObservableObject {
             var lines: [String] = []
             if let phone = contact.phones.first { lines.append("Phone: \(phone)") }
             if let email = contact.emails.first { lines.append("Email: \(email)") }
+            if let place = contact.place { lines.append("📍 \(place)") }
             return ImportedItem(folder: "contacts", name: name, body: lines.joined(separator: "\n"),
                                 origin: NoteOrigin(source: "contacts", externalID: contact.id),
                                 folderCategory: "Contacts", folderAxisID: "heart",
+                                location: contact.place,
                                 isDormant: true)
         }
         return ingest(items)
+    }
+
+    // MARK: - Reconnect (location-based reconnection)
+
+    /// A nudge to reach out to someone because you're near them (now or on a trip).
+    struct ReconnectPrompt: Identifiable, Equatable {
+        let id: UUID       // the person's note id
+        let name: String
+        let place: String  // the place that matched
+        let reason: String // "You're here now" / "Trip · Sep 3"
+    }
+
+    /// Places associated with a person: their note's own location plus the location of
+    /// every note that links them (e.g. "dinner with [[people/Sam]] in Austin").
+    func placesForPerson(_ note: Note) -> [String] {
+        var out: [String] = []
+        if let l = note.location, !l.trimmingCharacters(in: .whitespaces).isEmpty { out.append(l) }
+        let target = Self.norm(note.title)
+        for n in notes where n.id != note.id {
+            guard let loc = n.location, !loc.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
+            if n.linkTargets.contains(where: { Self.norm($0) == target }) { out.append(loc) }
+        }
+        return out
+    }
+
+    /// People (in `people/` or `contacts/`) whose known places match `place`.
+    func peopleAt(place: String, reason: String) -> [ReconnectPrompt] {
+        let q = place.trimmingCharacters(in: .whitespaces)
+        guard q.count >= 3 else { return [] }
+        var out: [ReconnectPrompt] = []
+        var seen = Set<UUID>()
+        for note in notes {
+            let folder = Folder.normalize(note.folderName)
+            guard folder == "people" || folder == "contacts" else { continue }
+            for p in placesForPerson(note) where Self.placesMatch(p, q) {
+                if seen.insert(note.id).inserted {
+                    out.append(ReconnectPrompt(id: note.id, name: note.displayName, place: p, reason: reason))
+                }
+                break
+            }
+        }
+        return out.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// From upcoming calendar events with a location, who you know there.
+    func tripPrompts(from events: [CalendarEvent]) -> [ReconnectPrompt] {
+        let now = Date()
+        var out: [ReconnectPrompt] = []
+        var seen = Set<String>()
+        for e in events.filter({ $0.start > now }).sorted(by: { $0.start < $1.start }) {
+            guard let loc = e.location, loc.count >= 3 else { continue }
+            for p in peopleAt(place: loc, reason: "Trip · \(Self.shortDate(e.start))") {
+                if seen.insert("\(p.id)").inserted { out.append(p) }
+            }
+        }
+        return out
+    }
+
+    /// Do two place strings refer to the same city or state? Tolerant of "City, State"
+    /// vs a bare "State", and of a venue address that contains the city/state.
+    static func placesMatch(_ a: String, _ b: String) -> Bool {
+        let na = a.lowercased().trimmingCharacters(in: .whitespaces)
+        let nb = b.lowercased().trimmingCharacters(in: .whitespaces)
+        guard na.count >= 3, nb.count >= 3 else { return false }
+        if na == nb || na.contains(nb) || nb.contains(na) { return true }
+        func state(_ s: String) -> String { (s.split(separator: ",").last.map { String($0) } ?? s).trimmingCharacters(in: .whitespaces) }
+        let sa = state(na), sb = state(nb)
+        return sa == sb && sa.count >= 3
     }
 
     /// Import Readwise books (Kindle + others) into type folders under Mind,

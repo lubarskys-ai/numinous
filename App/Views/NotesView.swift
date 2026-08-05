@@ -10,6 +10,7 @@ struct NotesView: View {
     @State private var searchText = ""
     @State private var categoryFilter: String?
     @State private var compose: ComposeRequest?
+    @State private var showReconnect = false
     @State private var importMessage: String?
     @State private var path: [UUID] = []
 
@@ -38,6 +39,10 @@ struct NotesView: View {
                             Label(categoryFilter ?? "All", systemImage: "line.3.horizontal.decrease.circle")
                         }
                     }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { showReconnect = true } label: { Image(systemName: "location.magnifyingglass") }
+                            .accessibilityLabel("Reconnect near you")
+                    }
                     ToolbarItem(placement: .primaryAction) {
                         Menu {
                             Button { compose = ComposeRequest() } label: {
@@ -53,6 +58,7 @@ struct NotesView: View {
                     }
                 }
                 .fullScreenCover(item: $compose) { req in ComposeView(prefillTitle: req.prefillTitle, diary: req.diary) }
+                .sheet(isPresented: $showReconnect) { ReconnectView() }
                 .alert("Contacts", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
                     Button("OK", role: .cancel) {}
                 } message: { Text(importMessage ?? "") }
@@ -237,5 +243,92 @@ struct NoteRow: View {
         let t = note.body.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return nil }
         return t.replacingOccurrences(of: "\n", with: " ")
+    }
+}
+
+/// Reconnect: who you know where you are — or where you're headed. Matches your current
+/// location and upcoming trips (and a place you type) against the places on your people &
+/// contacts, so you can reach out. Pull-based and gentle — no notifications.
+struct ReconnectView: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var locator = LocationService()
+
+    @State private var nearby: [AppModel.ReconnectPrompt] = []
+    @State private var trips: [AppModel.ReconnectPrompt] = []
+    @State private var query = ""
+    @State private var loading = true
+    @State private var openNote: Wrapped?
+
+    private struct Wrapped: Identifiable { let id: UUID }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    if loading {
+                        HStack { ProgressView(); Text("Checking where you are…").foregroundStyle(.secondary) }
+                    } else if !locator.isAuthorized {
+                        Text("Allow location to see who from your contacts is near you now.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    } else if nearby.isEmpty {
+                        Text("No one on file is near you right now.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(nearby) { promptRow($0) }
+                    }
+                } header: { Label("Near you now", systemImage: "location.fill") }
+
+                Section {
+                    TextField("A city or state — e.g. Charleston, SC", text: $query)
+                        .textInputAutocapitalization(.words).autocorrectionDisabled()
+                    ForEach(model.peopleAt(place: query, reason: "In \(query.trimmingCharacters(in: .whitespaces))")) { promptRow($0) }
+                    if query.trimmingCharacters(in: .whitespaces).count >= 3
+                        && model.peopleAt(place: query, reason: "").isEmpty {
+                        Text("No one on file there yet.").font(.caption).foregroundStyle(.secondary)
+                    }
+                } header: { Label("Planning a trip?", systemImage: "airplane") }
+                  footer: { Text("Type where you're headed to see who you know there.") }
+
+                if !trips.isEmpty {
+                    Section {
+                        ForEach(trips) { promptRow($0) }
+                    } header: { Label("On your calendar", systemImage: "calendar") }
+                }
+            }
+            .navigationTitle("Reconnect")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .task { await refresh() }
+            .sheet(item: $openNote) { w in NavigationStack { NoteDetailView(noteID: w.id) } }
+        }
+    }
+
+    private func promptRow(_ p: AppModel.ReconnectPrompt) -> some View {
+        Button { openNote = Wrapped(id: p.id) } label: {
+            HStack(spacing: 11) {
+                Circle().fill(Color.pink.opacity(0.8)).frame(width: 9, height: 9)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(p.name).foregroundStyle(.primary)
+                    Text("\(p.reason)\(p.reason.isEmpty ? "" : " · ")\(p.place)")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func refresh() async {
+        loading = true
+        if locator.isAuthorized, let place = await locator.currentPlace() {
+            nearby = model.peopleAt(place: place, reason: "You're here now")
+        }
+        if let events = try? await CalendarService.fetchEvents(daysBack: 0, daysForward: 120) {
+            trips = model.tripPrompts(from: events)
+        }
+        loading = false
     }
 }
