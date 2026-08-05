@@ -335,34 +335,78 @@ struct ComposeView: View {
     private func editSheet(_ s: LinkSuggestion) -> some View {
         NavigationStack {
             Form {
-                Section("Name") { TextField("Name", text: $editName) }
-                Section("Folder") {
+                Section {
+                    TextField("Name", text: $editName).autocorrectionDisabled()
+                    // Type to link to a note you already have (fills name + folder).
+                    ForEach(noteNameMatches(editName), id: \.id) { n in
+                        Button {
+                            editName = n.displayName
+                            editFolder = folderPart(n.title)
+                        } label: {
+                            HStack(spacing: 9) {
+                                Circle().fill(model.axis(for: n)?.color ?? .gray).frame(width: 8, height: 8)
+                                Text(n.displayName).foregroundStyle(.primary)
+                                Spacer(minLength: 0)
+                                Text(folderPart(n.title)).font(.caption2).foregroundStyle(.secondary)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                } header: { Text("Note") } footer: { Text("Pick an existing note, or type a new name.") }
+
+                Section {
                     TextField("folder path", text: $editFolder)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
-                            ForEach(categoryOptions, id: \.self) { cat in
+                            ForEach(folderMatches(editFolder), id: \.self) { cat in
                                 Button { editFolder = cat } label: {
                                     Text(cat).font(.caption.weight(.medium))
                                         .padding(.horizontal, 11).padding(.vertical, 6)
-                                        .background((editFolder == cat ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.12)), in: Capsule())
+                                        .background((editFolder.lowercased() == cat.lowercased() ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.12)), in: Capsule())
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
                     }
-                }
+                } header: { Text("Category (folder)") } footer: { Text("Type to filter your folders, or enter a new one.") }
             }
             .navigationTitle("Edit link")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editSheetFor = nil } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add") { commitEdit(s) }
+                    Button("Save") { commitEdit(s) }
                         .disabled(editName.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
         }
+    }
+
+    /// Existing notes whose name matches what's typed — so an edited link can point at a
+    /// note you already have instead of creating a new one.
+    private func noteNameMatches(_ q: String) -> [Note] {
+        let query = q.lowercased().trimmingCharacters(in: .whitespaces)
+        guard query.count >= 1 else { return [] }
+        var seen = Set<String>(); var out: [Note] = []
+        for n in model.notes where !n.title.isEmpty && !n.isStub {
+            if n.displayName.lowercased().contains(query), seen.insert(n.title.lowercased()).inserted {
+                out.append(n)
+                if out.count == 6 { break }
+            }
+        }
+        return out
+    }
+
+    /// Existing folders matching the typed folder text.
+    private func folderMatches(_ q: String) -> [String] {
+        let query = q.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: " /"))
+        var seen = Set<String>(); var out: [String] = []
+        for f in (categoryOptions + model.folders.map(\.name)) where seen.insert(f.lowercased()).inserted {
+            if query.isEmpty || f.lowercased().contains(query) { out.append(f) }
+        }
+        return Array(out.prefix(12))
     }
 
     private func useCurrentLocation() async {
@@ -449,6 +493,10 @@ struct ComposeView: View {
     }
 
     private func insert(_ s: LinkSuggestion, into body: String) -> String {
+        // Already linked → leave it. Stops repeated Find links from duplicating/wrapping.
+        if WikilinkParser.extract(from: body).contains(where: { $0.lowercased() == s.target.lowercased() }) {
+            return body
+        }
         var body = body
         let wikilink = "[[\(s.target)]]"
         if !s.surface.isEmpty, let r = AutoLinker.flexibleRange(of: s.surface, in: body) {

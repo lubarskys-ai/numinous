@@ -1183,6 +1183,9 @@ final class AppModel: ObservableObject {
     func smartLinkSuggestions(in text: String) async -> [LinkSuggestion] {
         var out: [LinkSuggestion] = []
         var seen = Set<String>()   // lowercased targets already offered
+        // Never re-offer something the note already links. Without this, pressing "Find
+        // links" again kept re-wrapping/duplicating text that was already a link.
+        for t in WikilinkParser.extract(from: text) { seen.insert(t.lowercased()) }
 
         // 0. Learned aliases — surfaces you've confirmed before auto-link silently, and
         // deterministically (no model needed). This is how Find-links gets better with use.
