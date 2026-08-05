@@ -31,6 +31,45 @@ public enum WikilinkParser {
         return result
     }
 
+    /// Repairs malformed links so the graph never ingests garbage: collapses nested
+    /// `[[a/[[b]]` (the innermost link wins → `[[b]]`), drops stray single brackets
+    /// inside a link, and turns an unterminated `[[foo` into plain text rather than a
+    /// bogus link. Run on save — never mid-keystroke, or an in-progress `[[` breaks.
+    public static func sanitize(_ text: String) -> String {
+        var out = ""
+        var link: String? = nil     // non-nil while inside a [[ … ]]
+        let chars = Array(text)
+        var i = 0
+        while i < chars.count {
+            if chars[i] == "[", i + 1 < chars.count, chars[i + 1] == "[" {
+                // Opening (or a nested opening): the inner link is the intended one,
+                // so discard whatever we'd accumulated for an outer, unclosed link.
+                link = ""
+                i += 2; continue
+            }
+            if chars[i] == "]", i + 1 < chars.count, chars[i + 1] == "]" {
+                if let buf = link {
+                    let t = buf.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !t.isEmpty { out += "[[\(t)]]" }
+                    link = nil
+                }
+                i += 2; continue
+            }
+            if link != nil {
+                if chars[i] != "[" && chars[i] != "]" { link!.append(chars[i]) }  // drop stray brackets
+            } else {
+                out.append(chars[i])
+            }
+            i += 1
+        }
+        // Unterminated link at the end → keep the words as plain text, not a bogus link.
+        if let buf = link {
+            let t = buf.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty { out += t }
+        }
+        return out
+    }
+
     /// Rewrites every `[[target]]` by passing its (trimmed) target through
     /// `transform` and substituting the result. Any `|alias` is preserved, and links
     /// whose target is unchanged are left byte-for-byte identical. Used to keep all

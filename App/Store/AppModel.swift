@@ -107,6 +107,7 @@ final class AppModel: ObservableObject {
         if version < 4, Self.migrateAddGutAxis(&a) { didMigrate = true }
         if version < 5, Self.backfillLinkStubs(&n) { didMigrate = true }
         if version < 6, Self.backfillFolderAxes(n, &f) { didMigrate = true }
+        if version < 7, Self.sanitizeAllLinks(&n) { didMigrate = true }
 
         self.folders = f
         self.notes = n
@@ -140,7 +141,17 @@ final class AppModel: ObservableObject {
         }
     }
 
-    static let schemaVersion = 6
+    static let schemaVersion = 7
+
+    /// One-time (v7): repair any malformed/nested `[[links]]` already in the store.
+    private static func sanitizeAllLinks(_ notes: inout [Note]) -> Bool {
+        var changed = false
+        for i in notes.indices {
+            let clean = WikilinkParser.sanitize(notes[i].body)
+            if clean != notes[i].body { notes[i].body = clean; changed = true }
+        }
+        return changed
+    }
 
     /// One-time repair: give existing axis-less folders a sensible default axis, and
     /// create a Folder (with an axis) for any note-folder path that never had one —
@@ -1039,6 +1050,7 @@ final class AppModel: ObservableObject {
     /// about it, adding [[links]]) activates it so it starts growing you.
     func updateBody(_ id: UUID, body: String) {
         guard let i = notes.firstIndex(where: { $0.id == id }) else { return }
+        let body = WikilinkParser.sanitize(body)   // repair any malformed/nested links
         let oldTargetsList = notes[i].linkTargets
         let oldTargets = Set(oldTargetsList.map { Self.norm($0) })
         notes[i].body = body
@@ -1200,7 +1212,7 @@ final class AppModel: ObservableObject {
                     }
                 } else {
                     let name = e.name.trimmingCharacters(in: .whitespaces)
-                    guard name.count >= 2 else { continue }
+                    guard name.count >= 2, !Self.isGenericEntity(name) else { continue }
                     let nameKey = Self.learnKey(name)
                     // Respect an earlier "Skip" — don't re-propose what you rejected.
                     if linkLearning.skips.contains(nameKey) { continue }
@@ -1278,13 +1290,30 @@ final class AppModel: ObservableObject {
             let surface = ns.substring(with: NSRange(location: startLoc, length: endLoc - startLoc))
             let name = nameTokens.map { $0.0.prefix(1).uppercased() + $0.0.dropFirst() }.joined(separator: " ")
             let key = name.lowercased()
-            guard key.count >= 3, !linkLearning.skips.contains(key), seenLocal.insert(key).inserted else { continue }
+            guard key.count >= 3, !Self.isGenericEntity(name),
+                  !linkLearning.skips.contains(key), seenLocal.insert(key).inserted else { continue }
             // Don't propose something you already have a note for.
             if notes.contains(where: { $0.displayName.lowercased() == key }) { continue }
             let folder = linkLearning.folderForName[key] ?? folder0
             out.append(LinkSuggestion(name: name, target: folder + "/" + name, surface: surface, isNew: true))
         }
         return out
+    }
+
+    /// Common activity / filler words that shouldn't become their own linked notes
+    /// (so "golf", "dinner", "gym" don't spawn `[[notes/golf]]`). Only single generic
+    /// words are blocked — a named place like "Golf Club of Austin" still proposes.
+    private static let genericEntityWords: Set<String> = [
+        "golf", "tennis", "dinner", "lunch", "breakfast", "brunch", "coffee", "drinks",
+        "gym", "run", "running", "walk", "walking", "hike", "hiking", "swim", "swimming",
+        "yoga", "meeting", "call", "game", "party", "class", "practice", "workout", "ride",
+        "bike", "biking", "work", "office", "home", "today", "tomorrow", "yesterday",
+        "stuff", "thing", "things", "everyone", "everything", "someone",
+    ]
+
+    static func isGenericEntity(_ name: String) -> Bool {
+        let n = name.lowercased().trimmingCharacters(in: .whitespaces)
+        return !n.contains(" ") && genericEntityWords.contains(n)
     }
 
     /// Loose match of an LLM-extracted name to an existing note (either contains the
@@ -1295,7 +1324,13 @@ final class AppModel: ObservableObject {
         guard n.count >= 3 else { return nil }
         return candidates.first { c in
             let cn = c.name.lowercased()
-            return cn == n || cn.contains(n) || n.contains(cn)
+            // Confident matches only: an exact name, or the text names the FULL contact
+            // (multi-word). A bare first name / city token must NOT grab a longer contact
+            // (so "Austin" the city won't link to "Austin Shaver"). Fuzzy first-name
+            // resolution is left to the learning layer, which remembers what you confirm.
+            if cn == n { return true }
+            if cn.contains(" "), n.contains(cn) { return true }
+            return false
         }
     }
 
@@ -1311,7 +1346,7 @@ final class AppModel: ObservableObject {
         var title = base, n = 2
         while notes.contains(where: { Self.norm($0.title) == Self.norm(title) }) { title = "\(base) (\(n))"; n += 1 }
         let loc = location?.trimmingCharacters(in: .whitespaces)
-        let note = Note(title: title, date: Date(), body: body,
+        let note = Note(title: title, date: Date(), body: WikilinkParser.sanitize(body),
                         intensity: intensity ?? defaultIntensity(forFolderNamed: category),
                         location: (loc?.isEmpty == false) ? loc : nil)
         save(note)   // also creates stubs for any [[links]]

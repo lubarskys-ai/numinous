@@ -326,4 +326,18 @@ h.group("Wikilink rewrite (rename/move propagation)") {
     h.eq(WikilinkParser.rewrite(in: same) { $0 }, same, "unchanged links untouched")
 }
 
+h.group("Wikilink sanitize (link quality control)") {
+    // The exact malformed case reported: a nested link collapses to the inner one.
+    h.eq(WikilinkParser.sanitize("[[contacts/[[contacts/Ken]]"), "[[contacts/Ken]]", "nested link → innermost wins")
+    // A clean body is left byte-for-byte.
+    let clean = "dinner with [[people/Sam]] at [[food/Lazy Bear]]"
+    h.eq(WikilinkParser.sanitize(clean), clean, "clean links untouched")
+    // Stray brackets inside a link are dropped.
+    h.eq(WikilinkParser.sanitize("[[peo[ple/Sam]]"), "[[people/Sam]]", "stray bracket inside a link dropped")
+    // An unterminated link becomes plain text, not a bogus link.
+    h.eq(WikilinkParser.sanitize("meeting [[people/Sam"), "meeting people/Sam", "unterminated link → plain text")
+    // Nesting doesn't corrupt following text.
+    h.eq(WikilinkParser.sanitize("[[a/[[b/C]] then more"), "[[b/C]] then more", "text after a repaired link survives")
+}
+
 exit(Int32(h.summarize()))
