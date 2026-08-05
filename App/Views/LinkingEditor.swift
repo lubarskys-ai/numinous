@@ -124,10 +124,10 @@ private struct LinkTextView: UIViewRepresentable {
         // file autocomplete (so linking needs no knowledge of the `[[` shortcut), plus
         // Done to dismiss the keyboard and reach the buttons it covers.
         let bar = UIToolbar(); bar.sizeToFit()
-        let linkItem = UIBarButtonItem(image: UIImage(systemName: "link.badge.plus"),
+        let linkItem = UIBarButtonItem(image: UIImage(systemName: "link"),
                                        style: .plain, target: context.coordinator,
                                        action: #selector(Coordinator.insertLinkToken))
-        linkItem.title = " Link"
+        linkItem.title = " Insert link"
         bar.items = [
             linkItem,
             UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil),
@@ -174,6 +174,14 @@ private struct LinkTextView: UIViewRepresentable {
             if !tv.isFirstResponder { tv.becomeFirstResponder() }
             let range = tv.selectedRange
             let ns = tv.text as NSString
+            // If we're already inside an open, unclosed `[[`, don't stack another — just
+            // re-show the picker. (This is what made repeated taps pile up "[[".)
+            let before = ns.substring(to: min(range.location, ns.length)) as NSString
+            let open = before.range(of: "[[", options: .backwards)
+            if open.location != NSNotFound,
+               !before.substring(from: open.location + 2).contains("]]") {
+                updateQuery(); return
+            }
             // A leading space keeps the token clean when inserted mid-word.
             let needsSpace = range.location > 0 && !ns.substring(with: NSRange(location: range.location - 1, length: 1)).allSatisfy({ $0 == " " || $0 == "\n" })
             let insert = (needsSpace ? " [[" : "[[")

@@ -114,7 +114,7 @@ struct ComposeView: View {
                     } else {
                         Button { findLinks() } label: {
                             if scanning { HStack { ProgressView(); Text("Finding…") } }
-                            else { Label(didScan ? "Re-scan" : "Find links", systemImage: "link.badge.plus") }
+                            else { Label(didScan ? "Re-scan" : "Find links", systemImage: "sparkles") }
                         }
                         .disabled(scanning || text.trimmingCharacters(in: .whitespaces).count < 3)
                         if reviewing && manualEdit {
