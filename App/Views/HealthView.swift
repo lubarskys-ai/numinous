@@ -9,6 +9,7 @@ struct HealthView: View {
     enum LoadState { case loading, denied, loaded([HealthItem]), failed(String) }
     @State private var state: LoadState = .loading
     @State private var path: [UUID] = []
+    @State private var actionItem: HealthItem?
     #if DEBUG
     @AppStorage("health_sample_seeded") private var sampleSeeded = false
     @State private var seeding = false
@@ -80,10 +81,30 @@ struct HealthView: View {
             ForEach(days, id: \.self) { day in
                 Section(Self.dayLabel(day)) {
                     ForEach(byDay[day] ?? []) { item in
-                        Button { open(item) } label: { row(item) }.buttonStyle(.plain)
+                        Button { actionItem = item } label: { row(item) }.buttonStyle(.plain)
                     }
                 }
             }
+        }
+        .confirmationDialog(actionItem?.title ?? "Activity",
+                            isPresented: Binding(get: { actionItem != nil }, set: { if !$0 { actionItem = nil } }),
+                            titleVisibility: .visible,
+                            presenting: actionItem) { item in
+            Button("Add to today's diary") { addToDiary(item); actionItem = nil }
+            Button("Open activity") { open(item); actionItem = nil }
+        } message: { item in
+            Text(item.kind == .nutrition ? (item.detail ?? "") : "\(max(1, Int(item.duration / 60))) min")
+        }
+    }
+
+    /// Create the activity's note (so it's tracked & grows the right axis) and drop a
+    /// link to it into today's diary — connecting the workout into your day.
+    private func addToDiary(_ item: HealthItem) {
+        guard let id = model.createNote(from: item), let note = model.note(id: id) else { return }
+        let diaryID = model.openTodayDiary()
+        if let diary = model.note(id: diaryID) {
+            let sep = diary.body.isEmpty ? "" : "\n"
+            model.updateBody(diaryID, body: diary.body + sep + "[[\(note.title)]]")
         }
     }
 
