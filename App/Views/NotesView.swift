@@ -208,6 +208,35 @@ struct NotesView: View {
     }
 }
 
+/// A note-row photo thumbnail that decodes a downsampled image off the main thread and
+/// caches it, so the Notes list never blocks (the sync full-image load froze it).
+enum ThumbCache { static let images = NSCache<NSString, UIImage>() }
+
+struct NoteThumbnail: View {
+    let name: String
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.12))
+            }
+        }
+        .frame(width: 38, height: 38)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .task(id: name) {
+            if let cached = ThumbCache.images.object(forKey: name as NSString) { image = cached; return }
+            let img = await Task.detached(priority: .utility) { ImageStore.thumbnail(name, maxPixel: 120) }.value
+            if let img {
+                ThumbCache.images.setObject(img, forKey: name as NSString)
+                image = img
+            }
+        }
+    }
+}
+
 struct NoteRow: View {
     @EnvironmentObject var model: AppModel
     let note: Note
@@ -215,10 +244,8 @@ struct NoteRow: View {
     var body: some View {
         let color = model.axis(for: note)?.color ?? Color.secondary
         return HStack(spacing: 12) {
-            if let name = note.photos?.first, let img = ImageStore.load(name) {
-                Image(uiImage: img).resizable().scaledToFill()
-                    .frame(width: 38, height: 38)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            if let name = note.photos?.first {
+                NoteThumbnail(name: name)
             } else {
                 Image(systemName: note.isStub ? "circle.dashed" : "doc.text.fill")
                     .font(.callout)

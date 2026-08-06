@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import ImageIO
 
 /// Saves note photos as files on disk (referenced by filename from the note).
 /// Kept out of the JSON store so image bytes never bloat it.
@@ -28,6 +29,20 @@ enum ImageStore {
 
     static func load(_ name: String) -> UIImage? {
         UIImage(contentsOfFile: dir.appendingPathComponent(name).path)
+    }
+
+    /// A downsampled thumbnail decoded via ImageIO (never loads the full image into
+    /// memory) — cheap enough to build off the main thread for list rows.
+    static func thumbnail(_ name: String, maxPixel: CGFloat) -> UIImage? {
+        let url = dir.appendingPathComponent(name)
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let opts: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+        return UIImage(cgImage: cg)
     }
 
     static func delete(_ name: String) {
