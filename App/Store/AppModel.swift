@@ -512,47 +512,64 @@ final class AppModel: ObservableObject {
         let reason: String // "You're here now" / "Trip · Sep 3"
     }
 
-    /// Places associated with a person: their note's own location plus the location of
-    /// every note that links them (e.g. "dinner with [[people/Sam]] in Austin").
-    func placesForPerson(_ note: Note) -> [String] {
-        var out: [String] = []
-        if let l = note.location, !l.trimmingCharacters(in: .whitespaces).isEmpty { out.append(l) }
-        let target = Self.norm(note.title)
-        for n in notes where n.id != note.id {
-            guard let loc = n.location, !loc.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
-            if n.linkTargets.contains(where: { Self.norm($0) == target }) { out.append(loc) }
+    /// A person and the places associated with them.
+    struct PersonPlaces: Identifiable { let id: UUID; let name: String; let places: [String] }
+
+    /// Build the person→places index ONCE in a single pass (O(notes + links)): each
+    /// person's own note location, plus the location of every note that links them
+    /// ("dinner with [[people/Sam]] in Austin" tags Sam with Austin). Call once, then
+    /// match many times against the result — never per keystroke over all notes.
+    func peopleWithPlaces() -> [PersonPlaces] {
+        var nameByTitle: [String: (id: UUID, name: String)] = [:]
+        for n in notes {
+            let f = Folder.normalize(n.folderName)
+            if f == "people" || f == "contacts" { nameByTitle[Self.norm(n.title)] = (n.id, n.displayName) }
         }
-        return out
+        var places: [UUID: [String]] = [:]
+        var nameById: [UUID: String] = [:]
+        for n in notes {
+            guard let loc = n.location, !loc.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
+            let f = Folder.normalize(n.folderName)
+            if f == "people" || f == "contacts" {   // a person's own address
+                places[n.id, default: []].append(loc); nameById[n.id] = n.displayName
+            }
+            for t in n.linkTargets {                 // a note's location tags people it links
+                if let p = nameByTitle[Self.norm(t)] {
+                    places[p.id, default: []].append(loc); nameById[p.id] = p.name
+                }
+            }
+        }
+        return places.map { PersonPlaces(id: $0.key, name: nameById[$0.key] ?? "", places: $0.value) }
     }
 
-    /// People (in `people/` or `contacts/`) whose known places match `place`.
-    func peopleAt(place: String, reason: String) -> [ReconnectPrompt] {
+    /// Match a place against a prebuilt index — fast enough to run on every keystroke.
+    static func matchPeople(_ index: [PersonPlaces], place: String, reason: String) -> [ReconnectPrompt] {
         let q = place.trimmingCharacters(in: .whitespaces)
         guard q.count >= 3 else { return [] }
         var out: [ReconnectPrompt] = []
-        var seen = Set<UUID>()
-        for note in notes {
-            let folder = Folder.normalize(note.folderName)
-            guard folder == "people" || folder == "contacts" else { continue }
-            for p in placesForPerson(note) where Self.placesMatch(p, q) {
-                if seen.insert(note.id).inserted {
-                    out.append(ReconnectPrompt(id: note.id, name: note.displayName, place: p, reason: reason))
-                }
-                break
+        for person in index {
+            if let hit = person.places.first(where: { placesMatch($0, q) }) {
+                out.append(ReconnectPrompt(id: person.id, name: person.name, place: hit, reason: reason))
             }
         }
         return out.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
+    /// People (in `people/` or `contacts/`) whose known places match `place` (one-off).
+    func peopleAt(place: String, reason: String) -> [ReconnectPrompt] {
+        Self.matchPeople(peopleWithPlaces(), place: place, reason: reason)
+    }
+
     /// From upcoming calendar events with a location, who you know there.
     func tripPrompts(from events: [CalendarEvent]) -> [ReconnectPrompt] {
+        let index = peopleWithPlaces()
         let now = Date()
         var out: [ReconnectPrompt] = []
-        var seen = Set<String>()
+        var seen = Set<UUID>()
         for e in events.filter({ $0.start > now }).sorted(by: { $0.start < $1.start }) {
             guard let loc = e.location, loc.count >= 3 else { continue }
-            for p in peopleAt(place: loc, reason: "Trip · \(Self.shortDate(e.start))") {
-                if seen.insert("\(p.id)").inserted { out.append(p) }
+            for p in Self.matchPeople(index, place: loc, reason: "Trip · \(Self.shortDate(e.start))") {
+                if seen.insert(p.id).inserted { out.append(p) }
             }
         }
         return out

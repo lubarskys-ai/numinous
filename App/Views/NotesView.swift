@@ -259,6 +259,8 @@ struct ReconnectView: View {
     @State private var query = ""
     @State private var loading = true
     @State private var noFix = false
+    @State private var placeIndex: [AppModel.PersonPlaces] = []
+    @State private var placeResults: [AppModel.ReconnectPrompt] = []
     @State private var openNote: Wrapped?
 
     private struct Wrapped: Identifiable { let id: UUID }
@@ -286,9 +288,12 @@ struct ReconnectView: View {
                 Section {
                     TextField("A city or state — e.g. Charleston, SC", text: $query)
                         .textInputAutocapitalization(.words).autocorrectionDisabled()
-                    ForEach(model.peopleAt(place: query, reason: "In \(query.trimmingCharacters(in: .whitespaces))")) { promptRow($0) }
-                    if query.trimmingCharacters(in: .whitespaces).count >= 3
-                        && model.peopleAt(place: query, reason: "").isEmpty {
+                        .onChange(of: query) { q in
+                            let place = q.trimmingCharacters(in: .whitespaces)
+                            placeResults = AppModel.matchPeople(placeIndex, place: place, reason: "In \(place)")
+                        }
+                    ForEach(placeResults) { promptRow($0) }
+                    if query.trimmingCharacters(in: .whitespaces).count >= 3 && placeResults.isEmpty {
                         Text("No one on file there yet.").font(.caption).foregroundStyle(.secondary)
                     }
                 } header: { Label("Planning a trip?", systemImage: "airplane") }
@@ -327,6 +332,7 @@ struct ReconnectView: View {
 
     private func refresh() async {
         loading = true
+        placeIndex = model.peopleWithPlaces()   // build the match index once
         if locator.isAuthorized {
             let place = await locator.currentPlace()   // has an internal timeout
             if let place { nearby = model.peopleAt(place: place, reason: "You're here now") }
