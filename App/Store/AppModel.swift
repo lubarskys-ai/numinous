@@ -512,60 +512,58 @@ final class AppModel: ObservableObject {
         let reason: String // "You're here now" / "Trip · Sep 3"
     }
 
-    /// A person and the places associated with them.
-    struct PersonPlaces: Identifiable { let id: UUID; let name: String; let places: [String] }
+    /// A person and the lowercased text to match places against (their note's location +
+    /// body, plus the location of any note that links them).
+    struct PersonPlaces: Identifiable { let id: UUID; let name: String; let text: String }
 
-    /// Build the person→places index ONCE in a single pass (O(notes + links)): each
-    /// person's own note location, plus the location of every note that links them
-    /// ("dinner with [[people/Sam]] in Austin" tags Sam with Austin). Call once, then
-    /// match many times against the result — never per keystroke over all notes.
+    /// Build the person→place-text index ONCE (O(notes + links)). Reads the same places a
+    /// notes search would — the person's note body and location, plus the location of every
+    /// note that links them — so "South Carolina" written anywhere in Jay's note is found.
     func peopleWithPlaces() -> [PersonPlaces] {
-        var nameByTitle: [String: (id: UUID, name: String)] = [:]
+        var personByTitle: [String: (id: UUID, name: String)] = [:]
         for n in notes {
             let f = Folder.normalize(n.folderName)
-            if f == "people" || f == "contacts" { nameByTitle[Self.norm(n.title)] = (n.id, n.displayName) }
+            if f == "people" || f == "contacts" { personByTitle[Self.norm(n.title)] = (n.id, n.displayName) }
         }
-        var places: [UUID: [String]] = [:]
+        var text: [UUID: String] = [:]
         var nameById: [UUID: String] = [:]
         for n in notes {
-            guard let loc = n.location, !loc.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
             let f = Folder.normalize(n.folderName)
-            if f == "people" || f == "contacts" {   // a person's own address
-                places[n.id, default: []].append(loc); nameById[n.id] = n.displayName
+            if f == "people" || f == "contacts" {
+                nameById[n.id] = n.displayName
+                text[n.id, default: ""] += " " + (n.body + " " + (n.location ?? "")).lowercased()
             }
-            for t in n.linkTargets {                 // a note's location tags people it links
-                if let p = nameByTitle[Self.norm(t)] {
-                    places[p.id, default: []].append(loc); nameById[p.id] = p.name
+            if let loc = n.location, !loc.trimmingCharacters(in: .whitespaces).isEmpty {
+                for t in n.linkTargets {
+                    if let p = personByTitle[Self.norm(t)] {
+                        text[p.id, default: ""] += " " + loc.lowercased(); nameById[p.id] = p.name
+                    }
                 }
             }
         }
-        return places.map { PersonPlaces(id: $0.key, name: nameById[$0.key] ?? "", places: $0.value) }
+        return nameById.keys.map { PersonPlaces(id: $0, name: nameById[$0] ?? "", text: text[$0] ?? "") }
     }
 
-    enum PlaceMatch { case city, state, none }
-
     /// Match a place against a prebuilt index — fast enough to run on every keystroke.
-    /// City matches come first (precise); same-state matches follow as a looser fallback,
-    /// each labeled with its own reason.
+    /// A same-city hit ranks above a same-state hit (each labeled with its own reason).
     static func matchPeople(_ index: [PersonPlaces], place: String,
                             cityReason: String, stateReason: String) -> [ReconnectPrompt] {
-        let q = place.trimmingCharacters(in: .whitespaces)
+        let q = place.trimmingCharacters(in: .whitespaces).lowercased()
         guard q.count >= 3 else { return [] }
+        let (city, code) = splitPlace(place)
+        let cityNeedle = city.count >= 3 ? city : nil
+        let stateFull = codeToName[code]
+        let codeRe = code.count == 2 ? try? NSRegularExpression(pattern: "\\b\(code)\\b") : nil
+        let rawNeedle = (q.count >= 4 && q != city) ? q : nil
         var cityHits: [ReconnectPrompt] = [], stateHits: [ReconnectPrompt] = []
         for person in index {
-            var best: PlaceMatch = .none, bestPlace = ""
-            for p in person.places {
-                switch placeMatch(p, q) {
-                case .city:  best = .city; bestPlace = p
-                case .state: if best == .none { best = .state; bestPlace = p }
-                case .none:  break
-                }
-                if best == .city { break }
-            }
-            switch best {
-            case .city:  cityHits.append(ReconnectPrompt(id: person.id, name: person.name, place: bestPlace, reason: cityReason))
-            case .state: stateHits.append(ReconnectPrompt(id: person.id, name: person.name, place: bestPlace, reason: stateReason))
-            case .none:  break
+            let t = person.text
+            if let cityNeedle, t.contains(cityNeedle) {
+                cityHits.append(ReconnectPrompt(id: person.id, name: person.name, place: place, reason: cityReason))
+            } else if (stateFull != nil && t.contains(stateFull!)) || (codeRe?.firstMatch(in: t, range: NSRange(t.startIndex..., in: t)) != nil) {
+                stateHits.append(ReconnectPrompt(id: person.id, name: person.name, place: place, reason: stateReason))
+            } else if let rawNeedle, t.contains(rawNeedle) {
+                cityHits.append(ReconnectPrompt(id: person.id, name: person.name, place: place, reason: cityReason))
             }
         }
         let byName: (ReconnectPrompt, ReconnectPrompt) -> Bool = { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -586,14 +584,6 @@ final class AppModel: ObservableObject {
             }
         }
         return out
-    }
-
-    /// How two place strings relate: same city (precise), same state (loose), or neither.
-    static func placeMatch(_ a: String, _ b: String) -> PlaceMatch {
-        let (cityA, stateA) = splitPlace(a), (cityB, stateB) = splitPlace(b)
-        if !cityA.isEmpty, cityA == cityB { return .city }
-        if !stateA.isEmpty, stateA == stateB { return .state }
-        return .none
     }
 
     /// Split a place string into (city, normalized-state). Handles "City, State", a bare
@@ -625,6 +615,7 @@ final class AppModel: ObservableObject {
         "west virginia":"wv","wisconsin":"wi","wyoming":"wy","district of columbia":"dc",
     ]
     private static let stateCodes = Set(stateNameToCode.values)
+    private static let codeToName: [String: String] = Dictionary(uniqueKeysWithValues: stateNameToCode.map { ($1, $0) })
 
     /// Import Readwise books (Kindle + others) into type folders under Mind,
     /// idempotent by `user_book_id`. Highlights — and any `[[link]]` inside them —
