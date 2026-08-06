@@ -30,6 +30,8 @@ struct Avatar3DView: UIViewRepresentable {
     // (near-Obsidian consistency) and the camera stops flying past near nodes so soon.
     // Kept just inside the star shell (radius 26) so the cosmos still surrounds you.
     static let baseDistance: Float = 23
+    /// Orthographic half-height (world units) at zoom 1 — matches the old telephoto framing.
+    static let baseOrtho: Double = 3.2
     static let minZoom: Double = 0.12
     static let maxZoom: Double = 120
 
@@ -77,7 +79,10 @@ struct Avatar3DView: UIViewRepresentable {
             context.coordinator.builtMaturity = maturity
             context.coordinator.labelsShown = !(zoom > 7)   // force re-apply below
         }
-        view.pointOfView?.position.z = Self.baseDistance / Float(max(0.1, zoom))
+        // Orthographic zoom: scale the viewport, never dolly the camera — so foreground and
+        // background nodes zoom identically (no parallax) and the camera never flies past
+        // near nodes. This is what makes it behave like Obsidian's flat graph.
+        view.pointOfView?.camera?.orthographicScale = Self.baseOrtho / max(0.1, zoom)
         // Keep nodes & labels a roughly CONSTANT on-screen size as you zoom in, so a
         // deep zoom spreads them apart to reveal structure instead of magnifying them
         // into an overlapping mess (Obsidian-style). Only re-scale when zoom moved.
@@ -119,7 +124,8 @@ struct Avatar3DView: UIViewRepresentable {
         @objc func camPan(_ g: UIPanGestureRecognizer) {
             guard let cam = view?.pointOfView else { return }
             let t = g.translation(in: view)
-            let s = cam.position.z * 0.0006   // scale by distance so it feels 1:1 (telephoto rig)
+            // Orthographic: on-screen size tracks orthographicScale, so pan by that to feel 1:1.
+            let s = Float(cam.camera?.orthographicScale ?? Avatar3DView.baseOrtho) * 0.0043
             cam.position.x -= Float(t.x) * s
             cam.position.y += Float(t.y) * s
             g.setTranslation(.zero, in: view)
@@ -139,7 +145,7 @@ struct Avatar3DView: UIViewRepresentable {
             if g.state == .began { pinchStartZoom = zoom }
             let z = min(Avatar3DView.maxZoom, max(Avatar3DView.minZoom, pinchStartZoom * Double(g.scale)))
             zoom = z
-            view?.pointOfView?.position.z = Avatar3DView.baseDistance / Float(max(0.1, z))
+            view?.pointOfView?.camera?.orthographicScale = Avatar3DView.baseOrtho / max(0.1, z)
             onZoomChange?(z)
         }
         /// Open the note nearest the tap (projected to screen) — checking both the
@@ -214,8 +220,10 @@ struct Avatar3DView: UIViewRepresentable {
 
         let cam = SCNNode()
         cam.name = "camera"
-        cam.camera = SCNCamera(); cam.camera?.fieldOfView = 16   // telephoto: flat perspective
-        cam.camera?.zNear = 0.01           // allow zooming in close without clipping
+        cam.camera = SCNCamera()
+        cam.camera?.usesOrthographicProjection = true      // flat: no parallax, no fly-past
+        cam.camera?.orthographicScale = Self.baseOrtho
+        cam.camera?.zNear = 0.01
         cam.camera?.zFar = 250
         cam.position = v(0, 0.05, Double(Self.baseDistance))
         scene.rootNode.addChildNode(cam)
