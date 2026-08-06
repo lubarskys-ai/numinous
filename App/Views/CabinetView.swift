@@ -76,6 +76,29 @@ private struct DrawerView: View {
     /// Above this many files a grid is unwieldy — show a peek + "Browse all".
     private let gridLimit = 18
 
+    /// Immediate subfolder paths under this drawer's top category.
+    private var subfolders: [String] {
+        var seen = Set<String>(); var out: [String] = []
+        let base = cabinet.id.lowercased() + "/"
+        for n in cabinet.notes where n.folderName.lowercased().hasPrefix(base) {
+            let rest = n.folderName.dropFirst(cabinet.id.count + 1)
+            guard let seg = rest.split(separator: "/").first.map(String.init), !seg.isEmpty else { continue }
+            let path = cabinet.id + "/" + seg
+            if seen.insert(path.lowercased()).inserted { out.append(path) }
+        }
+        return out.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    /// Notes filed directly in this drawer (not in a subfolder).
+    private var directNotes: [Note] {
+        cabinet.notes.filter { $0.folderName.lowercased() == cabinet.id.lowercased() }
+    }
+
+    private func descendantCount(_ path: String) -> Int {
+        let p = path.lowercased()
+        return cabinet.notes.filter { let fn = $0.folderName.lowercased(); return fn == p || fn.hasPrefix(p + "/") }.count
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
@@ -116,17 +139,41 @@ private struct DrawerView: View {
                     Text("No files yet").font(.callout).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity).padding(.vertical, 20)
                 } else {
-                    let shown = cabinet.notes.count > gridLimit ? Array(cabinet.notes.prefix(6)) : cabinet.notes
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
-                                        GridItem(.flexible(), spacing: 10)], spacing: 10) {
-                        ForEach(shown) { note in
-                            MiniFileCard(note: note, color: cabinet.color)
-                                .onTapGesture { onOpenNote(note.id) }
+                    // Subfolders first (tap to drill into the hierarchical browser)…
+                    if !subfolders.isEmpty {
+                        VStack(spacing: 2) {
+                            ForEach(subfolders, id: \.self) { path in
+                                Button { onBrowseFolder(path) } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "folder.fill").foregroundStyle(cabinet.color)
+                                        Text(path.split(separator: "/").last.map(String.init) ?? path)
+                                            .foregroundStyle(.primary)
+                                        Spacer()
+                                        Text("\(descendantCount(path))").font(.caption).foregroundStyle(.tertiary)
+                                        Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                                    }
+                                    .padding(.vertical, 9).padding(.horizontal, 4).contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
+                        .padding(.top, 10)
+                        .transition(.opacity)
                     }
-                    .padding(.top, 12)
-                    .transition(.opacity)
-                    if cabinet.notes.count > gridLimit {
+                    // …then the notes filed directly here.
+                    let shown = directNotes.count > gridLimit ? Array(directNotes.prefix(6)) : directNotes
+                    if !shown.isEmpty {
+                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
+                                            GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                            ForEach(shown) { note in
+                                MiniFileCard(note: note, color: cabinet.color)
+                                    .onTapGesture { onOpenNote(note.id) }
+                            }
+                        }
+                        .padding(.top, 12)
+                        .transition(.opacity)
+                    }
+                    if directNotes.count > gridLimit || !subfolders.isEmpty {
                         Button { onBrowseFolder(cabinet.id) } label: {
                             Label("Browse all \(cabinet.notes.count), A–Z", systemImage: "list.bullet.indent")
                                 .font(.callout.weight(.medium))
