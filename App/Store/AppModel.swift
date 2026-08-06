@@ -48,6 +48,10 @@ struct ImportedItem {
     /// A readable place for this item (e.g. a contact's "City, State") — used for
     /// location-based reconnection.
     var location: String? = nil
+    /// On re-import of an existing note, append incoming body lines that aren't already
+    /// there (new Readwise highlights) instead of leaving the body untouched — without
+    /// clobbering edits/links you've added. Off = keep the old body-if-non-empty behavior.
+    var mergeBody: Bool = false
     /// Imported-but-not-yet-engaged (e.g. a bare contact). Dormant notes are
     /// linkable/searchable but grant *zero* growth until you actually engage —
     /// so importing your whole address book can't inflate an axis. Growth comes
@@ -448,6 +452,9 @@ final class AppModel: ObservableObject {
                     notes[i].body = item.body
                     // Still un-engaged (no body of its own) → keep it dormant.
                     if item.isDormant { notes[i].isStub = true }
+                } else if item.mergeBody {
+                    // Bring in new highlights without discarding your edits/links.
+                    notes[i].body = Self.mergeBodies(existing: notes[i].body, incoming: item.body)
                 }
                 updated += 1
             } else if let i = notes.firstIndex(where: { Self.norm($0.title) == Self.norm(title) && $0.origin == nil }) {
@@ -644,6 +651,7 @@ final class AppModel: ObservableObject {
                 intensity: ReadwiseService.intensity(for: book),
                 origin: NoteOrigin(source: "readwise", externalID: String(book.userBookId)),
                 folderCategory: "Ideas", folderAxisID: "mind",
+                mergeBody: true,   // re-sync brings in newly-added highlights
                 // A book grows you only once you've *finished* it — import dormant
                 // (zero growth) and let the reader mark it finished. Volume of an
                 // unread library must not inflate Mind.
@@ -806,6 +814,20 @@ final class AppModel: ObservableObject {
     private static func shortDate(_ date: Date) -> String {
         let f = DateFormatter(); f.dateFormat = "MMM d"
         return f.string(from: date)
+    }
+
+    /// Append incoming lines that aren't already in `existing` (case/space-insensitive),
+    /// preserving the existing body verbatim — so a Readwise re-sync adds new highlights
+    /// without touching the ones you've annotated or linked.
+    static func mergeBodies(existing: String, incoming: String) -> String {
+        let have = Set(existing.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces).lowercased() })
+        var out = existing
+        for raw in incoming.split(separator: "\n", omittingEmptySubsequences: false) {
+            let key = raw.trimmingCharacters(in: .whitespaces).lowercased()
+            guard !key.isEmpty, !have.contains(key) else { continue }
+            out += (out.hasSuffix("\n") || out.isEmpty ? "" : "\n") + raw
+        }
+        return out
     }
 
     private static func mergeDetails(_ existing: [NoteDetail], _ incoming: [NoteDetail]) -> [NoteDetail] {
