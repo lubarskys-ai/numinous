@@ -104,17 +104,31 @@ struct NotesView: View {
         }
     }
 
+    /// Entity/import folders — these hold *files* (people, contacts, health records,
+    /// books), which live in the Folders tab. The Notes stream shows only actual notes.
+    static let entityFolders: Set<String> = [
+        "people", "contacts", "health", "books", "articles", "podcasts", "tweets",
+        "location", "locations", "places", "restaurants", "entertainment",
+    ]
+
+    /// A written note (diary/journal/freeform) as opposed to an entity file.
+    static func isJournalNote(_ note: Note) -> Bool {
+        let top = note.folderName.split(separator: "/").first.map(String.init)?.lowercased() ?? note.folderName.lowercased()
+        return !entityFolders.contains(top)
+    }
+
     /// Top-level categories among your written notes (e.g. "notes", "diary",
-    /// "golf clubs") — not the full nested folder/file structure.
+    /// "golf clubs") — entity folders are excluded.
     private var categories: [String] {
         var seen = Set<String>()
-        for note in model.notes where !note.isStub && !note.folderName.isEmpty {
+        for note in model.notes where !note.isStub && !note.folderName.isEmpty && Self.isJournalNote(note) {
             seen.insert(note.folderName.split(separator: "/").first.map(String.init) ?? note.folderName)
         }
         return seen.sorted()
     }
 
     private func matchesFilter(_ note: Note) -> Bool {
+        guard Self.isJournalNote(note) else { return false }   // Notes tab = actual notes only
         guard let f = categoryFilter?.lowercased() else { return true }
         let top = note.folderName.split(separator: "/").first.map(String.init)?.lowercased() ?? note.folderName.lowercased()
         return top == f
