@@ -143,8 +143,34 @@ final class AppModel: ObservableObject {
         if ContactsImporter.isAuthorized, let contacts = try? await ContactsImporter.fetchContacts() {
             importContacts(contacts)
         }
-        if let token = readwiseToken, let books = try? await ReadwiseService.fetch(token: token) {
-            importReadwise(books)
+        guard let token = readwiseToken else { return }
+        do {
+            let books = try await ReadwiseService.fetch(token: token)
+            let (a, u) = importReadwise(books)
+            readwiseStatus = "Last sync: \(a) new, \(u) updated."
+        } catch {
+            // Don't hide it — a silent failure is exactly why it "wasn't updating".
+            readwiseStatus = "Last sync failed — \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
+        }
+    }
+
+    /// Last Readwise sync outcome (or error) — surfaced so a failure isn't invisible.
+    @Published private(set) var readwiseStatus: String?
+
+    /// Manually pull Readwise now and return a human-readable result or the real error.
+    func syncReadwiseNow() async -> String {
+        guard let token = readwiseToken, !token.isEmpty else {
+            return "Connect Readwise first — paste your token via Import from Readwise."
+        }
+        do {
+            let books = try await ReadwiseService.fetch(token: token)
+            let (a, u) = importReadwise(books)
+            readwiseStatus = "Last sync: \(a) new, \(u) updated."
+            return "Readwise: \(a) new, \(u) updated — \(books.count) item\(books.count == 1 ? "" : "s") pulled."
+        } catch {
+            let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            readwiseStatus = "Last sync failed — \(msg)"
+            return "Readwise sync failed: \(msg)"
         }
     }
 

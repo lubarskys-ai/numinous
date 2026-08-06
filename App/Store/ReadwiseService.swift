@@ -75,9 +75,10 @@ enum ReadwiseService {
         }
     }
 
-    /// Pull every book + its highlights, following cursor pagination. Filtered to
-    /// `categories` (defaults to real books). Throws `.badToken` on 401.
-    static func fetch(token: String, categories: Set<String> = ["books"]) async throws -> [ReadwiseBook] {
+    /// Pull every highlight source + its highlights, following cursor pagination.
+    /// Includes Kindle **books**, plus **articles** (Readwise Reader documents) and
+    /// **podcasts** by default — tweets are excluded as noise. Throws `.badToken` on 401.
+    static func fetch(token: String, categories: Set<String> = ["books", "articles", "podcasts"]) async throws -> [ReadwiseBook] {
         var all: [ReadwiseBook] = []
         var cursor: String? = nil
         repeat {

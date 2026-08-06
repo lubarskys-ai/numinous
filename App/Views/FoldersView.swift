@@ -86,7 +86,10 @@ struct FoldersView: View {
                         Button { compose = ComposeRequest(diary: true) } label: { Label("Add to today's diary", systemImage: "calendar.badge.plus") }
                         Divider()
                         Button { importContacts() } label: { Label("Sync contacts", systemImage: "person.crop.circle.badge.plus") }
-                        Button { showReadwise = true } label: { Label("Import from Readwise", systemImage: "books.vertical") }
+                        if model.isReadwiseConnected {
+                            Button { Task { importMessage = await model.syncReadwiseNow() } } label: { Label("Sync Readwise now", systemImage: "arrow.triangle.2.circlepath") }
+                        }
+                        Button { showReadwise = true } label: { Label(model.isReadwiseConnected ? "Readwise settings" : "Import from Readwise", systemImage: "books.vertical") }
                         #if DEBUG
                         Button { let (a, u) = model.importReadwise(ReadwiseService.sampleBooks); importMessage = "Readwise (sample): \(a) new, \(u) updated." } label: { Label("Readwise sample (debug)", systemImage: "ladybug") }
                         #endif
