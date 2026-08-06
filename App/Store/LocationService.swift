@@ -45,6 +45,11 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
         await withCheckedContinuation { cont in
             locationContinuation = cont
             manager.requestLocation()
+            // Safety net: if no fix (or error) arrives, don't hang the caller forever.
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                if let c = locationContinuation { locationContinuation = nil; c.resume(returning: nil) }
+            }
         }
     }
 

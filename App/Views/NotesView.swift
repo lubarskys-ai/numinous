@@ -258,6 +258,7 @@ struct ReconnectView: View {
     @State private var trips: [AppModel.ReconnectPrompt] = []
     @State private var query = ""
     @State private var loading = true
+    @State private var noFix = false
     @State private var openNote: Wrapped?
 
     private struct Wrapped: Identifiable { let id: UUID }
@@ -269,7 +270,10 @@ struct ReconnectView: View {
                     if loading {
                         HStack { ProgressView(); Text("Checking where you are…").foregroundStyle(.secondary) }
                     } else if !locator.isAuthorized {
-                        Text("Allow location to see who from your contacts is near you now.")
+                        Text("Allow location (used elsewhere in the app) to see who's near you now.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    } else if noFix {
+                        Text("Couldn't get your location just now. Try again, or check a place below.")
                             .font(.callout).foregroundStyle(.secondary)
                     } else if nearby.isEmpty {
                         Text("No one on file is near you right now.")
@@ -323,12 +327,14 @@ struct ReconnectView: View {
 
     private func refresh() async {
         loading = true
-        if locator.isAuthorized, let place = await locator.currentPlace() {
-            nearby = model.peopleAt(place: place, reason: "You're here now")
+        if locator.isAuthorized {
+            let place = await locator.currentPlace()   // has an internal timeout
+            if let place { nearby = model.peopleAt(place: place, reason: "You're here now") }
+            noFix = (place == nil)
         }
+        loading = false   // stop the spinner after the location step — calendar loads on its own
         if let events = try? await CalendarService.fetchEvents(daysBack: 0, daysForward: 120) {
             trips = model.tripPrompts(from: events)
         }
-        loading = false
     }
 }
