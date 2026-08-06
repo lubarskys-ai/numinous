@@ -215,10 +215,16 @@ struct NoteRow: View {
     var body: some View {
         let color = model.axis(for: note)?.color ?? Color.secondary
         return HStack(spacing: 12) {
-            Image(systemName: note.isStub ? "circle.dashed" : "doc.text.fill")
-                .font(.callout)
-                .foregroundStyle(note.isStub ? Color.secondary.opacity(0.6) : color.opacity(0.85))
-                .frame(width: 22)
+            if let name = note.photos?.first, let img = ImageStore.load(name) {
+                Image(uiImage: img).resizable().scaledToFill()
+                    .frame(width: 38, height: 38)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else {
+                Image(systemName: note.isStub ? "circle.dashed" : "doc.text.fill")
+                    .font(.callout)
+                    .foregroundStyle(note.isStub ? Color.secondary.opacity(0.6) : color.opacity(0.85))
+                    .frame(width: 22)
+            }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(note.displayName).font(.system(.body, design: .rounded).weight(.medium))
@@ -283,7 +289,17 @@ struct ReconnectView: View {
                     } else {
                         ForEach(nearby) { promptRow($0) }
                     }
-                } header: { Label("Near you now", systemImage: "location.fill") }
+                } header: {
+                    HStack {
+                        Label("Near you now", systemImage: "location.fill")
+                        Spacer()
+                        Button { Task { await refreshLocation() } } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .disabled(loading)
+                        .accessibilityLabel("Refresh location")
+                    }
+                }
 
                 Section {
                     TextField("A city or state — e.g. Charleston, SC", text: $query)
@@ -328,6 +344,20 @@ struct ReconnectView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    /// Re-fetch the current location (the header reset button).
+    private func refreshLocation() async {
+        loading = true; noFix = false; nearby = []
+        if locator.isAuthorized {
+            let place = await locator.currentRegion()
+            if let place {
+                nearby = AppModel.matchPeople(placeIndex, place: place,
+                                              cityReason: "You're here now", stateReason: "Same state — nearby")
+            }
+            noFix = (place == nil)
+        }
+        loading = false
     }
 
     private func refresh() async {

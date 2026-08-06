@@ -11,7 +11,7 @@ struct NoteDetailView: View {
     @State private var loadedBodyFor: UUID?
     @State private var editingBody = false           // reading (rendered links) vs raw editing
     @State private var openLinkTarget: LinkTarget?   // a tapped rendered link to open
-    @State private var photoItem: PhotosPickerItem?
+    @State private var photoItems: [PhotosPickerItem] = []
     @State private var showFollowUp = false
     @State private var followUpMessage: String?
     @State private var titleDraft = ""
@@ -58,13 +58,15 @@ struct NoteDetailView: View {
                 if editedBody != note.body { model.updateBody(note.id, body: editedBody) }
                 commitRename(note)
             }
-            .onChange(of: photoItem) { newItem in
-                guard let newItem else { return }
+            .onChange(of: photoItems) { items in
+                guard !items.isEmpty else { return }
                 Task {
-                    if let data = try? await newItem.loadTransferable(type: Data.self) {
-                        model.addPhoto(to: note.id, data: data)
+                    for item in items {
+                        if let data = try? await item.loadTransferable(type: Data.self) {
+                            model.addPhoto(to: note.id, data: data)
+                        }
                     }
-                    photoItem = nil
+                    photoItems = []
                 }
             }
             .toolbar {
@@ -413,8 +415,8 @@ struct NoteDetailView: View {
                         .padding(.vertical, 2)
                     }
                 }
-                PhotosPicker(selection: $photoItem, matching: .images) {
-                    Label("Add photo", systemImage: "photo.badge.plus")
+                PhotosPicker(selection: $photoItems, maxSelectionCount: 10, matching: .images) {
+                    Label("Add photos", systemImage: "photo.badge.plus")
                 }
             }
         }

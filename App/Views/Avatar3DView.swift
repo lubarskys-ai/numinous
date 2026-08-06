@@ -658,7 +658,7 @@ struct Avatar3DView: UIViewRepresentable {
                 // updateUIView). Billboarded so it always faces you.
                 if !gn.label.isEmpty {
                     let txt = SCNText(string: gn.label, extrusionDepth: 0)
-                    txt.font = UIFont.systemFont(ofSize: 11, weight: .semibold)
+                    txt.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
                     txt.flatness = 0.3
                     let tm = SCNMaterial(); tm.lightingModel = .constant
                     tm.diffuse.contents = UIColor.white; tm.emission.contents = UIColor.white
@@ -666,7 +666,7 @@ struct Avatar3DView: UIViewRepresentable {
                     txt.materials = [tm]
                     let label = SCNNode(geometry: txt)
                     label.name = "textlabel"
-                    label.scale = SCNVector3(0.005, 0.005, 0.005)
+                    label.scale = SCNVector3(0.006, 0.006, 0.006)
                     let (minB, maxB) = txt.boundingBox
                     label.pivot = SCNMatrix4MakeTranslation((minB.x + maxB.x) / 2, minB.y, 0)
                     // Child of the node (local offset), so it inherits the node's zoom
