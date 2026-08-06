@@ -23,7 +23,12 @@ struct NoteDetailView: View {
             List {
                 titleSection(note)
                 headerSection(note)
-                if isEntity(note) {
+                if isRecord(note) {
+                    // A logged activity (workout, mindful, nutrition) — keep it simple:
+                    // your own note, plus the one useful connection ("who were you with").
+                    bodySection(note, label: "Notes", minHeight: 70)
+                    suggestionsSection(note)
+                } else if isEntity(note) {
                     // A thing you relate to (person, place, concept) — lead with its
                     // web of connections; your own notes are secondary.
                     linkedFromSection(note)
@@ -99,6 +104,8 @@ struct NoteDetailView: View {
     /// concepts like history/1860s — is an entity we relate to, shown
     /// connections-first (links & relations) rather than as a writing surface.
     private func isEntity(_ note: Note) -> Bool { !Self.isDateTitled(note.displayName) }
+    /// A logged health record — gets a stripped-down detail view, not the CRM layout.
+    private func isRecord(_ note: Note) -> Bool { note.origin?.source == "healthkit" }
     private static func isDateTitled(_ name: String) -> Bool {
         name.range(of: #"^\d{4}-\d{2}-\d{2}"#, options: .regularExpression) != nil
     }
@@ -137,7 +144,7 @@ struct NoteDetailView: View {
                     }
                 }
             }
-            if isEntity(note) { entitySummary(note) }
+            if isEntity(note) && !isRecord(note) { entitySummary(note) }
             if let loc = note.location, !loc.isEmpty {
                 LabeledContent("Location", value: loc)
             }
