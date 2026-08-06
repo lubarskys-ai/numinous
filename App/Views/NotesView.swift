@@ -290,7 +290,7 @@ struct ReconnectView: View {
                         .textInputAutocapitalization(.words).autocorrectionDisabled()
                         .onChange(of: query) { q in
                             let place = q.trimmingCharacters(in: .whitespaces)
-                            placeResults = AppModel.matchPeople(placeIndex, place: place, reason: "In \(place)")
+                            placeResults = AppModel.matchPeople(placeIndex, place: place, cityReason: "", stateReason: "Same state")
                         }
                     ForEach(placeResults) { promptRow($0) }
                     if query.trimmingCharacters(in: .whitespaces).count >= 3 && placeResults.isEmpty {
@@ -334,8 +334,11 @@ struct ReconnectView: View {
         loading = true
         placeIndex = model.peopleWithPlaces()   // build the match index once
         if locator.isAuthorized {
-            let place = await locator.currentPlace()   // has an internal timeout
-            if let place { nearby = model.peopleAt(place: place, reason: "You're here now") }
+            let place = await locator.currentRegion()   // City, State — with an internal timeout
+            if let place {
+                nearby = AppModel.matchPeople(placeIndex, place: place,
+                                              cityReason: "You're here now", stateReason: "Same state — nearby")
+            }
             noFix = (place == nil)
         }
         loading = false   // stop the spinner after the location step — calendar loads on its own

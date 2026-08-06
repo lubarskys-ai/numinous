@@ -29,6 +29,16 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
         return await Self.placeName(for: location)
     }
 
+    /// The current "City, State" specifically (never a point-of-interest name) — the
+    /// reliable form for location matching / reconnection.
+    func currentRegion() async -> String? {
+        guard await ensureAuthorized(), let location = await requestLocation() else { return nil }
+        let geocoder = CLGeocoder()
+        guard let p = try? await geocoder.reverseGeocodeLocation(location).first else { return nil }
+        let parts = [p.locality ?? p.subAdministrativeArea, p.administrativeArea].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
+    }
+
     private func ensureAuthorized() async -> Bool {
         switch manager.authorizationStatus {
         case .authorizedWhenInUse, .authorizedAlways: return true

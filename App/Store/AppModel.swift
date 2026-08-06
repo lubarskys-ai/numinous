@@ -542,22 +542,34 @@ final class AppModel: ObservableObject {
         return places.map { PersonPlaces(id: $0.key, name: nameById[$0.key] ?? "", places: $0.value) }
     }
 
+    enum PlaceMatch { case city, state, none }
+
     /// Match a place against a prebuilt index — fast enough to run on every keystroke.
-    static func matchPeople(_ index: [PersonPlaces], place: String, reason: String) -> [ReconnectPrompt] {
+    /// City matches come first (precise); same-state matches follow as a looser fallback,
+    /// each labeled with its own reason.
+    static func matchPeople(_ index: [PersonPlaces], place: String,
+                            cityReason: String, stateReason: String) -> [ReconnectPrompt] {
         let q = place.trimmingCharacters(in: .whitespaces)
         guard q.count >= 3 else { return [] }
-        var out: [ReconnectPrompt] = []
+        var cityHits: [ReconnectPrompt] = [], stateHits: [ReconnectPrompt] = []
         for person in index {
-            if let hit = person.places.first(where: { placesMatch($0, q) }) {
-                out.append(ReconnectPrompt(id: person.id, name: person.name, place: hit, reason: reason))
+            var best: PlaceMatch = .none, bestPlace = ""
+            for p in person.places {
+                switch placeMatch(p, q) {
+                case .city:  best = .city; bestPlace = p
+                case .state: if best == .none { best = .state; bestPlace = p }
+                case .none:  break
+                }
+                if best == .city { break }
+            }
+            switch best {
+            case .city:  cityHits.append(ReconnectPrompt(id: person.id, name: person.name, place: bestPlace, reason: cityReason))
+            case .state: stateHits.append(ReconnectPrompt(id: person.id, name: person.name, place: bestPlace, reason: stateReason))
+            case .none:  break
             }
         }
-        return out.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-    }
-
-    /// People (in `people/` or `contacts/`) whose known places match `place` (one-off).
-    func peopleAt(place: String, reason: String) -> [ReconnectPrompt] {
-        Self.matchPeople(peopleWithPlaces(), place: place, reason: reason)
+        let byName: (ReconnectPrompt, ReconnectPrompt) -> Bool = { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        return cityHits.sorted(by: byName) + stateHits.sorted(by: byName)
     }
 
     /// From upcoming calendar events with a location, who you know there.
@@ -568,24 +580,51 @@ final class AppModel: ObservableObject {
         var seen = Set<UUID>()
         for e in events.filter({ $0.start > now }).sorted(by: { $0.start < $1.start }) {
             guard let loc = e.location, loc.count >= 3 else { continue }
-            for p in Self.matchPeople(index, place: loc, reason: "Trip · \(Self.shortDate(e.start))") {
+            let d = Self.shortDate(e.start)
+            for p in Self.matchPeople(index, place: loc, cityReason: "Trip · \(d)", stateReason: "Trip · \(d) · same state") {
                 if seen.insert(p.id).inserted { out.append(p) }
             }
         }
         return out
     }
 
-    /// Do two place strings refer to the same city or state? Tolerant of "City, State"
-    /// vs a bare "State", and of a venue address that contains the city/state.
-    static func placesMatch(_ a: String, _ b: String) -> Bool {
-        let na = a.lowercased().trimmingCharacters(in: .whitespaces)
-        let nb = b.lowercased().trimmingCharacters(in: .whitespaces)
-        guard na.count >= 3, nb.count >= 3 else { return false }
-        if na == nb || na.contains(nb) || nb.contains(na) { return true }
-        func state(_ s: String) -> String { (s.split(separator: ",").last.map { String($0) } ?? s).trimmingCharacters(in: .whitespaces) }
-        let sa = state(na), sb = state(nb)
-        return sa == sb && sa.count >= 3
+    /// How two place strings relate: same city (precise), same state (loose), or neither.
+    static func placeMatch(_ a: String, _ b: String) -> PlaceMatch {
+        let (cityA, stateA) = splitPlace(a), (cityB, stateB) = splitPlace(b)
+        if !cityA.isEmpty, cityA == cityB { return .city }
+        if !stateA.isEmpty, stateA == stateB { return .state }
+        return .none
     }
+
+    /// Split a place string into (city, normalized-state). Handles "City, State", a bare
+    /// "State", and a venue address ("123 Main St, Charleston, SC") — last comma part is
+    /// the state, the one before it the city.
+    static func splitPlace(_ s: String) -> (city: String, state: String) {
+        let comps = s.lowercased().split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        guard !comps.isEmpty else { return ("", "") }
+        let state = normalizeState(comps[comps.count - 1])
+        let city = comps.count >= 2 ? comps[comps.count - 2] : ""
+        return (city, state)
+    }
+
+    /// Canonicalize a US state to its 2-letter code so "South Carolina" == "SC".
+    static func normalizeState(_ s: String) -> String {
+        let k = s.trimmingCharacters(in: .whitespaces).lowercased()
+        if k.count == 2, Self.stateCodes.contains(k) { return k }
+        return Self.stateNameToCode[k] ?? k
+    }
+    private static let stateNameToCode: [String: String] = [
+        "alabama":"al","alaska":"ak","arizona":"az","arkansas":"ar","california":"ca","colorado":"co",
+        "connecticut":"ct","delaware":"de","florida":"fl","georgia":"ga","hawaii":"hi","idaho":"id",
+        "illinois":"il","indiana":"in","iowa":"ia","kansas":"ks","kentucky":"ky","louisiana":"la",
+        "maine":"me","maryland":"md","massachusetts":"ma","michigan":"mi","minnesota":"mn","mississippi":"ms",
+        "missouri":"mo","montana":"mt","nebraska":"ne","nevada":"nv","new hampshire":"nh","new jersey":"nj",
+        "new mexico":"nm","new york":"ny","north carolina":"nc","north dakota":"nd","ohio":"oh","oklahoma":"ok",
+        "oregon":"or","pennsylvania":"pa","rhode island":"ri","south carolina":"sc","south dakota":"sd",
+        "tennessee":"tn","texas":"tx","utah":"ut","vermont":"vt","virginia":"va","washington":"wa",
+        "west virginia":"wv","wisconsin":"wi","wyoming":"wy","district of columbia":"dc",
+    ]
+    private static let stateCodes = Set(stateNameToCode.values)
 
     /// Import Readwise books (Kindle + others) into type folders under Mind,
     /// idempotent by `user_book_id`. Highlights — and any `[[link]]` inside them —
