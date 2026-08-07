@@ -35,6 +35,8 @@ struct FoldersView: View {
     @State private var renameFolderPath: String?
     @State private var folderNameDraft = ""
     @State private var deleteFolderPath: String?
+    @State private var mergeSourcePath: String?
+    @State private var dropHighlight: String?
     @State private var showReadwise = false
     @State private var importMessage: String?
     @State private var path = NavigationPath()
@@ -50,7 +52,9 @@ struct FoldersView: View {
                     CabinetView(onOpenNote: { path.append($0) },
                                 onEditAxes: { axisPickerFolder = FolderRef(id: $0) },
                                 onBrowseFolder: { path.append($0) },
-                                onDeleteFolder: { deleteFolderPath = $0 })
+                                onDeleteFolder: { deleteFolderPath = $0 },
+                                onRenameFolder: { renameFolderPath = $0; folderNameDraft = $0 },
+                                onMergeFolder: { mergeSourcePath = $0 })
                 } else {
                     List {
                         OutlineGroup(buildTree(), children: \.children) { node in
@@ -114,6 +118,13 @@ struct FoldersView: View {
             } message: { folder in
                 let n = model.notes.filter { $0.folderName.lowercased() == folder.lowercased() || $0.folderName.lowercased().hasPrefix(folder.lowercased() + "/") }.count
                 Text("Permanently removes this folder and \(n) note\(n == 1 ? "" : "s") inside it.")
+            }
+            .sheet(item: Binding(get: { mergeSourcePath.map(FolderRef.init(id:)) },
+                                 set: { if $0 == nil { mergeSourcePath = nil } })) { ref in
+                MergeFolderPicker(source: ref.id) { destination in
+                    model.renameFolder(from: ref.id, to: destination)
+                    mergeSourcePath = nil
+                }
             }
             .fullScreenCover(item: $compose) { req in ComposeView(prefillTitle: req.prefillTitle, diary: req.diary, onSaved: { path.append($0) }) }
             .sheet(isPresented: $showReadwise) { ReadwiseConnectView() }
@@ -191,9 +202,19 @@ struct FoldersView: View {
     private func row(_ node: FolderNode) -> some View {
         if let note = node.note {
             NavigationLink(value: note.id) { NoteRow(note: note) }
+                .draggable(note.id.uuidString)
         } else {
             folderRow(node)
         }
+    }
+
+    /// Move any dropped note ids into `folder`. Returns true if at least one moved.
+    private func handleNoteDrop(_ ids: [String], into folder: String) -> Bool {
+        var moved = false
+        for raw in ids {
+            if let id = UUID(uuidString: raw), model.moveNote(id, toFolder: folder) { moved = true }
+        }
+        return moved
     }
 
     private func folderRow(_ node: FolderNode) -> some View {
@@ -223,6 +244,14 @@ struct FoldersView: View {
             if !path.isEmpty { folderMenu(path, growthAxes: folder?.growthAxes ?? [], intensity: folder?.defaultIntensity) }
         }
         .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .listRowBackground(dropHighlight == path && !path.isEmpty ? Color.accentColor.opacity(0.15) : nil)
+        .dropDestination(for: String.self) { ids, _ in
+            path.isEmpty ? false : handleNoteDrop(ids, into: path)
+        } isTargeted: { hovering in
+            if path.isEmpty { return }
+            dropHighlight = hovering ? path : (dropHighlight == path ? nil : dropHighlight)
+        }
     }
 
     private func subtitle(_ folder: Folder) -> String {
@@ -240,6 +269,9 @@ struct FoldersView: View {
             }
             Button { renameFolderPath = path; folderNameDraft = path } label: {
                 Label("Rename or move folder…", systemImage: "folder")
+            }
+            Button { mergeSourcePath = path } label: {
+                Label("Merge into…", systemImage: "arrow.triangle.merge")
             }
             Menu("Default intensity") {
                 Button { model.setFolderIntensity(nil, forFolder: path) } label: {
@@ -333,6 +365,77 @@ struct FoldersView: View {
 
 /// Wrapper so a folder path can drive a `.sheet(item:)`.
 struct FolderRef: Identifiable { let id: String }
+
+/// Pick a destination folder to merge a source folder into. Merging moves every note
+/// (and subfolder) out of the source and into the destination; notes that collide by
+/// name are combined, and all `[[links]]` are rewritten — this is just a rename onto an
+/// existing path. You can't merge a folder into itself or one of its own subfolders.
+struct MergeFolderPicker: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let source: String
+    let onPick: (String) -> Void
+    @State private var search = ""
+
+    /// Every folder path that exists (from folders and note paths, with all prefixes),
+    /// minus the source and its own subtree.
+    private var destinations: [String] {
+        var paths = Set<String>()
+        func addPrefixes(_ p: String) {
+            guard !p.isEmpty else { return }
+            var acc = ""
+            for seg in p.split(separator: "/").map(String.init) {
+                acc = acc.isEmpty ? seg : acc + "/" + seg
+                paths.insert(acc)
+            }
+        }
+        for n in model.notes { addPrefixes(n.folderName) }
+        for f in model.folders { addPrefixes(f.name) }
+        let src = source.lowercased()
+        return paths
+            .filter { let l = $0.lowercased(); return l != src && !l.hasPrefix(src + "/") }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private var filtered: [String] {
+        let q = search.lowercased().trimmingCharacters(in: .whitespaces)
+        return q.isEmpty ? destinations : destinations.filter { $0.lowercased().contains(q) }
+    }
+
+    private func count(_ path: String) -> Int {
+        let p = path.lowercased()
+        return model.notes.filter { let fn = $0.folderName.lowercased(); return fn == p || fn.hasPrefix(p + "/") }.count
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(filtered, id: \.self) { dest in
+                        Button { onPick(dest) } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "folder.fill")
+                                    .foregroundStyle(model.axis(id: model.folder(named: dest)?.axisID)?.color ?? .secondary)
+                                Text(dest).foregroundStyle(.primary)
+                                Spacer()
+                                Text("\(count(dest))").font(.caption).foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Merge “\(source)” into")
+                } footer: {
+                    Text("Moves every note in “\(source)” into the folder you pick. Notes with the same name are combined and all links update automatically.")
+                }
+            }
+            .searchable(text: $search, prompt: "Find a folder")
+            .navigationTitle("Merge folder")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+        }
+        .presentationDetents([.medium, .large])
+    }
+}
 
 /// Multi-select axis picker for a folder — tap several axes, they stay checked,
 /// then Done. (A `Menu` can't do this: it dismisses on every tap.)

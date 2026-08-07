@@ -115,6 +115,8 @@ final class AppModel: ObservableObject {
         if version < 5, Self.backfillLinkStubs(&n) { didMigrate = true }
         if version < 6, Self.backfillFolderAxes(n, &f) { didMigrate = true }
         if version < 7, Self.sanitizeAllLinks(&n) { didMigrate = true }
+        if version < 8, Self.migrateAddInfluencesAxis(&a) { didMigrate = true }
+        if version < 8, Self.migrateAuthorsToLinks(&n, &f) { didMigrate = true }
 
         self.folders = f
         self.notes = n
@@ -174,7 +176,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    static let schemaVersion = 7
+    static let schemaVersion = 8
 
     /// One-time (v7): repair any malformed/nested `[[links]]` already in the store.
     private static func sanitizeAllLinks(_ notes: inout [Note]) -> Bool {
@@ -241,6 +243,78 @@ final class AppModel: ObservableObject {
             axes.append(.gut)
         }
         return true
+    }
+
+    /// One-time (v8): add the `influences` axis — people who shape you through their
+    /// work (book authors, and later podcast hosts, etc.). Placed just before `heart`,
+    /// bridging Mind (their ideas) and Heart (them, as people).
+    private static func migrateAddInfluencesAxis(_ axes: inout [Axis]) -> Bool {
+        guard !axes.contains(where: { $0.id == "influences" }) else { return false }
+        if let heartIndex = axes.firstIndex(where: { $0.id == "heart" }) {
+            axes.insert(.influences, at: heartIndex)
+        } else {
+            axes.append(.influences)
+        }
+        return true
+    }
+
+    /// One-time (v8): turn the `Author` metadata on already-imported books into real
+    /// `[[authors/Name]]` links in the body, create the author stub notes, and ensure
+    /// the `authors` folder feeds the Influences axis. This retroactively connects your
+    /// existing library — every book now bridges to its author as a graph node.
+    private static func migrateAuthorsToLinks(_ notes: inout [Note], _ folders: inout [Folder]) -> Bool {
+        var changed = false
+        var existing = Set(notes.map { norm($0.title) })
+        var newStubs: [Note] = []
+        for i in notes.indices {
+            // Books only — article/podcast author fields are noisier (publications,
+            // odd formats) and would create junk author nodes.
+            guard Folder.normalize(notes[i].folderName) == "books" else { continue }
+            guard let authorRaw = notes[i].details.first(where: { $0.key == "Author" })?.value else { continue }
+            let targets = authorLinkTargets(from: authorRaw)
+            guard !targets.isEmpty else { continue }
+            let alreadyLinked = Set(WikilinkParser.extract(from: notes[i].body).map(norm))
+            let missing = targets.filter { !alreadyLinked.contains(norm($0)) }
+            guard !missing.isEmpty else { continue }
+            notes[i].body = prependingAuthorLinks(missing, to: notes[i].body)
+            for target in missing where existing.insert(norm(target)).inserted {
+                newStubs.append(Note(title: target, date: notes[i].date, isStub: true))
+            }
+            changed = true
+        }
+        notes.append(contentsOf: newStubs)
+        if changed { ensureAuthorsFolder(&folders) }
+        return changed
+    }
+
+    /// Ensure the `authors` folder exists and feeds the Influences axis, so author
+    /// notes count (once engaged) and render with the right color.
+    private static func ensureAuthorsFolder(_ folders: inout [Folder]) {
+        guard !folders.contains(where: { $0.id == Folder.normalize("authors") }) else { return }
+        folders.append(Folder(name: "authors", category: "Authors", axisID: "influences"))
+    }
+
+    /// Split an author string into one target path per author. Only splits on clear
+    /// multi-author separators (`;`, `&`, ` and `) — never on commas, which are too
+    /// often "Last, First" and would mangle single names. Each name is sanitized into
+    /// an `authors/Name` path.
+    static func authorLinkTargets(from raw: String) -> [String] {
+        let separators = [";", " & ", " and "]
+        var parts = [raw]
+        for sep in separators {
+            parts = parts.flatMap { $0.components(separatedBy: sep) }
+        }
+        return parts
+            .map { $0.replacingOccurrences(of: "/", with: "-").trimmingCharacters(in: .whitespaces) }
+            .filter { $0.count >= 2 }
+            .map { "authors/" + $0 }
+    }
+
+    /// Put the author link(s) at the top of a book body as a byline, keeping the rest
+    /// of the body (summary + highlights) intact beneath.
+    private static func prependingAuthorLinks(_ targets: [String], to body: String) -> String {
+        let byline = targets.map { "[[\($0)]]" }.joined(separator: ", ")
+        return body.isEmpty ? byline : byline + "\n" + body
     }
 
     /// One-time (v2): make `diary` a subfolder of `notes` (`diary/x` → `notes/diary/x`).
@@ -664,14 +738,20 @@ final class AppModel: ObservableObject {
             guard let title, !title.isEmpty else { return nil }
             let folder = ReadwiseService.folder(book.category)
             var details: [NoteDetail] = []
+            var authorTargets: [String] = []
             if let author = book.author?.trimmingCharacters(in: .whitespaces), !author.isEmpty {
                 details.append(NoteDetail(key: "Author", value: author))
+                // Books only: the author becomes a real [[authors/Name]] connection
+                // (Influences axis), so each book bridges to its author as a graph node.
+                if folder == "books" { authorTargets = Self.authorLinkTargets(from: author) }
             }
             if let cover = book.coverImageUrl?.trimmingCharacters(in: .whitespaces), !cover.isEmpty {
                 details.append(NoteDetail(key: "Cover", value: cover))
             }
+            let byline = authorTargets.isEmpty ? "" :
+                authorTargets.map { "[[\($0)]]" }.joined(separator: ", ") + "\n"
             return ImportedItem(
-                folder: folder, name: title, body: Self.readwiseBody(book),
+                folder: folder, name: title, body: byline + Self.readwiseBody(book),
                 details: details,
                 date: Self.readwiseDate(book),
                 intensity: ReadwiseService.intensity(for: book),
@@ -691,6 +771,12 @@ final class AppModel: ObservableObject {
             if self.folder(named: folder)?.defaultIntensity == nil {
                 setFolderIntensity(ReadwiseService.typeBase(category), forFolder: folder)
             }
+        }
+        // Author links spawned `authors/…` stub notes via ingest — make sure that
+        // folder carries the Influences axis (otherwise it'd land uncategorized).
+        if folder(named: "authors") == nil, notes.contains(where: { Folder.normalize($0.folderName) == "authors" }) {
+            folders.append(Folder(name: "authors", category: "Authors", axisID: "influences"))
+            persist()
         }
         return result
     }
@@ -969,6 +1055,22 @@ final class AppModel: ObservableObject {
             folders.removeAll { $0.id == f.id }
         }
         retitle(pairs)
+    }
+
+    /// Move a single note into `folderPath` (e.g. drag-and-drop onto a folder). Retitles
+    /// it to `folderPath/name`, rewrites every `[[link]]` to it, seeds the destination
+    /// folder's metadata if it's brand-new, and merges if a same-named note already lives
+    /// there. Returns false if the note is missing or already in that folder.
+    @discardableResult
+    func moveNote(_ id: UUID, toFolder folderPath: String) -> Bool {
+        guard let note = notes.first(where: { $0.id == id }) else { return false }
+        let dest = folderPath.trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let newTitle = dest.isEmpty ? note.displayName : dest + "/" + note.displayName
+        guard Self.norm(newTitle) != Self.norm(note.title) else { return false }
+        ensureFolderExists(for: newTitle, like: note.title)
+        retitle([(old: note.title, new: newTitle)])
+        return true
     }
 
     /// Apply a set of title changes, rewrite all links, then merge any collisions.
@@ -1269,32 +1371,54 @@ final class AppModel: ObservableObject {
     /// Create a fresh diary entry auto-titled with the current date & time, filed
     /// under `notes/diary` (Journal → Spirit), and return its id so the UI can open
     /// it straight into writing. Titles are made unique if two land in one minute.
-    func createDiaryEntry() -> UUID {
+    func createDiaryEntry(on day: Date = Date()) -> UUID {
         if folder(named: "notes/diary") == nil {
             folders.append(Folder(name: "notes/diary", category: "Journal", axisID: "spirit", defaultIntensity: 4))
         }
-        let base = "notes/diary/" + Self.dateTimeStamp()
+        let base = "notes/diary/" + Self.dateTimeStamp(day)
         var title = base, n = 2
         while notes.contains(where: { Self.norm($0.title) == Self.norm(title) }) { title = "\(base) (\(n))"; n += 1 }
-        let note = Note(title: title, date: Date(), intensity: defaultIntensity(forFolderNamed: "notes/diary"))
+        let note = Note(title: title, date: day, intensity: defaultIntensity(forFolderNamed: "notes/diary"))
         notes.append(note)
         persist()
         return note.id
     }
 
-    /// Today's most recent diary note, if one exists yet (does NOT create one). Lets the
-    /// composer pull today's entry forward for continued writing.
-    func todaysDiaryID() -> UUID? {
+    /// The most recent diary note dated to `day`, if one exists yet (does NOT create
+    /// one). `day` defaults to today.
+    func diaryID(on day: Date = Date()) -> UUID? {
         let cal = Calendar.current
         guard let i = notes.indices
-            .filter({ Folder.normalize(notes[$0].folderName).contains("diary") && cal.isDateInToday(notes[$0].date) })
+            .filter({ Folder.normalize(notes[$0].folderName).contains("diary") && cal.isDate(notes[$0].date, inSameDayAs: day) })
             .max(by: { notes[$0].date < notes[$1].date }) else { return nil }
         return notes[i].id
     }
 
+    /// Today's most recent diary note, if one exists yet (does NOT create one). Lets the
+    /// composer pull today's entry forward for continued writing.
+    func todaysDiaryID() -> UUID? { diaryID(on: Date()) }
+
+    /// The diary note to keep writing in for `day` (default today): the most recent one
+    /// dated that day, or a fresh one filed under notes/diary if there isn't one yet.
+    func openDiary(on day: Date = Date()) -> UUID { diaryID(on: day) ?? createDiaryEntry(on: day) }
+
     /// The diary note to keep writing in today: the most recent one dated today, or a
     /// fresh one if there isn't one yet.
-    func openTodayDiary() -> UUID { todaysDiaryID() ?? createDiaryEntry() }
+    func openTodayDiary() -> UUID { openDiary(on: Date()) }
+
+    /// Create the activity's note (so it's tracked & grows the right axis) and drop a
+    /// link to it into the diary for `day` — connecting the workout into that day.
+    /// `day` defaults to today; pass the activity's own date to file it retroactively.
+    @discardableResult
+    func linkHealthItemToDiary(_ item: HealthItem, on day: Date = Date()) -> UUID? {
+        guard let id = createNote(from: item), let note = self.note(id: id) else { return nil }
+        let diaryID = openDiary(on: day)
+        if let diary = self.note(id: diaryID) {
+            let sep = diary.body.isEmpty ? "" : "\n"
+            updateBody(diaryID, body: diary.body + sep + "[[\(note.title)]]")
+        }
+        return id
+    }
 
     /// Append a line to today's most recent diary entry (creating one if there isn't
     /// one yet). Any `[[links]]` in the line become real connections, as usual.
@@ -1320,9 +1444,9 @@ final class AppModel: ObservableObject {
         persist()
     }
 
-    private static func dateTimeStamp() -> String {
+    private static func dateTimeStamp(_ date: Date = Date()) -> String {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm"
-        return f.string(from: Date())
+        return f.string(from: date)
     }
 
     // MARK: - Capture (dictate/type → auto-linked note)
@@ -1554,6 +1678,8 @@ final class AppModel: ObservableObject {
             return "mind"
         case "books", "reading", "learning", "articles", "podcasts":
             return "mind"
+        case "authors", "author", "influences":
+            return "influences"
         case "health", "fitness", "exercise", "workouts", "sports", "golf clubs", "body":
             return "body"
         case "food", "nutrition", "diet", "meals", "cooking", "restaurants":

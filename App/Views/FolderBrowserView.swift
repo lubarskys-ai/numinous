@@ -8,6 +8,16 @@ struct FolderBrowserView: View {
     @EnvironmentObject var model: AppModel
     let category: String            // full folder path, e.g. "health" or "health/workouts"
     @State private var search = ""
+    @State private var dropHighlight: String?
+
+    /// Move any dropped note ids into `folder`. Returns true if at least one moved.
+    private func handleNoteDrop(_ ids: [String], into folder: String) -> Bool {
+        var moved = false
+        for raw in ids {
+            if let id = UUID(uuidString: raw), model.moveNote(id, toFolder: folder) { moved = true }
+        }
+        return moved
+    }
 
     private var prefix: String { category.lowercased() + "/" }
 
@@ -65,6 +75,12 @@ struct FolderBrowserView: View {
                                     Text("\(count(under: path))").font(.caption).foregroundStyle(.tertiary)
                                 }
                             }
+                            .listRowBackground(dropHighlight == path ? Color.accentColor.opacity(0.15) : nil)
+                            .dropDestination(for: String.self) { ids, _ in
+                                handleNoteDrop(ids, into: path)
+                            } isTargeted: { hovering in
+                                dropHighlight = hovering ? path : (dropHighlight == path ? nil : dropHighlight)
+                            }
                         }
                     }
                 }
@@ -72,6 +88,7 @@ struct FolderBrowserView: View {
                     Section("Notes") {
                         ForEach(directNotes) { note in
                             NavigationLink(value: note.id) { NoteRow(note: note) }
+                                .draggable(note.id.uuidString)
                         }
                     }
                 }
@@ -98,6 +115,7 @@ struct FolderBrowserView: View {
                 Section(key) {
                     ForEach(grouped[key]!.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }) { note in
                         NavigationLink(value: note.id) { NoteRow(note: note) }
+                            .draggable(note.id.uuidString)
                     }
                 }
             }

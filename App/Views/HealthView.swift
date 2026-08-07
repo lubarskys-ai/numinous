@@ -90,21 +90,16 @@ struct HealthView: View {
                             isPresented: Binding(get: { actionItem != nil }, set: { if !$0 { actionItem = nil } }),
                             titleVisibility: .visible,
                             presenting: actionItem) { item in
-            Button("Add to today's diary") { addToDiary(item); actionItem = nil }
+            Button("Add to today's diary") { model.linkHealthItemToDiary(item); actionItem = nil }
+            // For a past activity, also offer the diary for the day it happened.
+            if !Calendar.current.isDateInToday(item.start) {
+                Button("Add to \(Self.diaryDayLabel(item.start))'s diary") {
+                    model.linkHealthItemToDiary(item, on: item.start); actionItem = nil
+                }
+            }
             Button("Open activity") { open(item); actionItem = nil }
         } message: { item in
             Text(item.kind == .nutrition ? (item.detail ?? "") : "\(max(1, Int(item.duration / 60))) min")
-        }
-    }
-
-    /// Create the activity's note (so it's tracked & grows the right axis) and drop a
-    /// link to it into today's diary — connecting the workout into your day.
-    private func addToDiary(_ item: HealthItem) {
-        guard let id = model.createNote(from: item), let note = model.note(id: id) else { return }
-        let diaryID = model.openTodayDiary()
-        if let diary = model.note(id: diaryID) {
-            let sep = diary.body.isEmpty ? "" : "\n"
-            model.updateBody(diaryID, body: diary.body + sep + "[[\(note.title)]]")
         }
     }
 
@@ -168,6 +163,13 @@ struct HealthView: View {
         if cal.isDateInToday(date) { return "Today" }
         if cal.isDateInYesterday(date) { return "Yesterday" }
         let f = DateFormatter(); f.dateFormat = "EEEE, MMM d"
+        return f.string(from: date)
+    }
+
+    /// Short possessive-friendly label for the activity's own day: "Yesterday" or "Aug 5".
+    private static func diaryDayLabel(_ date: Date) -> String {
+        if Calendar.current.isDateInYesterday(date) { return "Yesterday" }
+        let f = DateFormatter(); f.dateFormat = "MMM d"
         return f.string(from: date)
     }
 

@@ -10,6 +10,8 @@ struct CabinetView: View {
     var onEditAxes: (String) -> Void
     var onBrowseFolder: (String) -> Void
     var onDeleteFolder: (String) -> Void
+    var onRenameFolder: (String) -> Void
+    var onMergeFolder: (String) -> Void
     @State private var openCategory: String?
 
     struct Cabinet: Identifiable {
@@ -52,7 +54,9 @@ struct CabinetView: View {
                                onOpenNote: onOpenNote,
                                onEditAxes: onEditAxes,
                                onBrowseFolder: onBrowseFolder,
-                               onDeleteFolder: onDeleteFolder)
+                               onDeleteFolder: onDeleteFolder,
+                               onRenameFolder: onRenameFolder,
+                               onMergeFolder: onMergeFolder)
                 }
             }
             .padding(.horizontal)
@@ -72,9 +76,21 @@ private struct DrawerView: View {
     let onEditAxes: (String) -> Void
     let onBrowseFolder: (String) -> Void
     let onDeleteFolder: (String) -> Void
+    let onRenameFolder: (String) -> Void
+    let onMergeFolder: (String) -> Void
+    @State private var dropTarget: String?
 
     /// Above this many files a grid is unwieldy — show a peek + "Browse all".
     private let gridLimit = 18
+
+    /// Move any dropped note ids into `folder`. Returns true if at least one moved.
+    private func handleNoteDrop(_ ids: [String], into folder: String) -> Bool {
+        var moved = false
+        for raw in ids {
+            if let id = UUID(uuidString: raw), model.moveNote(id, toFolder: folder) { moved = true }
+        }
+        return moved
+    }
 
     /// Immediate subfolder paths under this drawer's top category.
     private var subfolders: [String] {
@@ -130,9 +146,18 @@ private struct DrawerView: View {
             .overlay(alignment: .bottom) {
                 Capsule().fill(cabinet.color.opacity(0.4)).frame(width: 44, height: 4).padding(.bottom, 7)
             }
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Color.accentColor, lineWidth: dropTarget == cabinet.id ? 2.5 : 0)
+            )
             .shadow(color: .black.opacity(0.06), radius: 5, y: 3)
             .contentShape(Rectangle())
             .onTapGesture(perform: onToggle)
+            .dropDestination(for: String.self) { ids, _ in
+                handleNoteDrop(ids, into: cabinet.id)
+            } isTargeted: { hovering in
+                dropTarget = hovering ? cabinet.id : (dropTarget == cabinet.id ? nil : dropTarget)
+            }
 
             if isOpen {
                 if cabinet.notes.isEmpty {
@@ -153,8 +178,15 @@ private struct DrawerView: View {
                                         Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
                                     }
                                     .padding(.vertical, 9).padding(.horizontal, 4).contentShape(Rectangle())
+                                    .background(RoundedRectangle(cornerRadius: 8)
+                                        .fill(dropTarget == path ? Color.accentColor.opacity(0.15) : .clear))
                                 }
                                 .buttonStyle(.plain)
+                                .dropDestination(for: String.self) { ids, _ in
+                                    handleNoteDrop(ids, into: path)
+                                } isTargeted: { hovering in
+                                    dropTarget = hovering ? path : (dropTarget == path ? nil : dropTarget)
+                                }
                             }
                         }
                         .padding(.top, 10)
@@ -168,6 +200,7 @@ private struct DrawerView: View {
                             ForEach(shown) { note in
                                 MiniFileCard(note: note, color: cabinet.color)
                                     .onTapGesture { onOpenNote(note.id) }
+                                    .draggable(note.id.uuidString)
                             }
                         }
                         .padding(.top, 12)
@@ -192,6 +225,8 @@ private struct DrawerView: View {
     private var folderMenu: some View {
         Menu {
             Button { onEditAxes(cabinet.id) } label: { Label("Grows…", systemImage: "circle.hexagongrid") }
+            Button { onRenameFolder(cabinet.id) } label: { Label("Rename or move folder…", systemImage: "folder") }
+            Button { onMergeFolder(cabinet.id) } label: { Label("Merge into…", systemImage: "arrow.triangle.merge") }
             Menu("Default intensity") {
                 let intensity = model.folder(named: cabinet.id)?.defaultIntensity
                 Button { model.setFolderIntensity(nil, forFolder: cabinet.id) } label: {
