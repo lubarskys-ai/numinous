@@ -18,6 +18,22 @@ public struct NoteDetail: Hashable, Codable, Sendable {
     }
 }
 
+/// A place attached to a note: a display name and, when known, its coordinates.
+/// Coordinates are optional because a typed place isn't geocoded until needed —
+/// keeping them lets notes eventually be plotted on a map.
+public struct Place: Hashable, Codable, Sendable {
+    public var name: String
+    public var latitude: Double?
+    public var longitude: Double?
+    public init(name: String, latitude: Double? = nil, longitude: Double? = nil) {
+        self.name = name
+        self.latitude = latitude
+        self.longitude = longitude
+    }
+    /// True once this place carries a usable map coordinate.
+    public var hasCoordinate: Bool { latitude != nil && longitude != nil }
+}
+
 /// Where an imported note came from, so re-importing updates instead of
 /// duplicating. `nil` means the note was written by hand. `externalID` is stable
 /// within its `source` (a contact identifier, calendar event id, HealthKit uuid…).
@@ -45,8 +61,13 @@ public struct Note: Identifiable, Hashable, Codable, Sendable {
     /// 1–5 growth multiplier: how intensely this note develops you.
     /// See `ScoringConfig.factor(forIntensity:)` (3 is neutral ×1).
     public var intensity: Int
-    /// Optional free-text location (a place name, or "lat, long").
+    /// Legacy single free-text location. Kept for back-compat and as a mirror of the
+    /// first structured place (so older code and serialization keep working); read
+    /// `allPlaces` for the full list.
     public var location: String?
+    /// Structured places on this note (name + optional coordinates). Optional so notes
+    /// saved before multi-location decode cleanly (nil → fall back to `location`).
+    public var places: [Place]?
     /// Free-form key/value details (phone number, favorite team, …).
     public var details: [NoteDetail]
     /// Filenames of attached photos (stored on disk by the app). Optional for
@@ -70,6 +91,7 @@ public struct Note: Identifiable, Hashable, Codable, Sendable {
         body: String = "",
         intensity: Int = 3,
         location: String? = nil,
+        places: [Place]? = nil,
         details: [NoteDetail] = [],
         photos: [String]? = nil,
         source: NoteSource = .manual,
@@ -83,6 +105,7 @@ public struct Note: Identifiable, Hashable, Codable, Sendable {
         self.body = body
         self.intensity = intensity
         self.location = location
+        self.places = places
         self.details = details
         self.photos = photos
         self.source = source
@@ -106,5 +129,16 @@ public struct Note: Identifiable, Hashable, Codable, Sendable {
     /// Outgoing wikilink targets (`[[Name]]`) extracted from the body.
     public var linkTargets: [String] {
         WikilinkParser.extract(from: body)
+    }
+
+    /// Every place on this note as one list: the structured `places` when present,
+    /// otherwise the legacy single `location` string. One thing to read everywhere
+    /// (Reconnect matching, display, and eventually the map).
+    public var allPlaces: [Place] {
+        if let places, !places.isEmpty { return places }
+        if let location, !location.trimmingCharacters(in: .whitespaces).isEmpty {
+            return [Place(name: location)]
+        }
+        return []
     }
 }

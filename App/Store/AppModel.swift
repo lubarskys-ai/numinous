@@ -633,7 +633,8 @@ final class AppModel: ObservableObject {
         for n in notes {
             let f = Folder.normalize(n.folderName)
             guard f == "people" || f == "contacts" else { continue }
-            let text = (n.body + " " + (n.location ?? "")).lowercased()
+            let placeNames = n.allPlaces.map(\.name).joined(separator: " ")
+            let text = (n.body + " " + placeNames).lowercased()
             out.append(PersonPlaces(id: n.id, name: n.displayName, text: text))
         }
         return out
@@ -1307,14 +1308,54 @@ final class AppModel: ObservableObject {
 
     /// Edit a note's markdown body. Engaging a dormant/imported note (writing
     /// about it, adding [[links]]) activates it so it starts growing you.
-    /// Set (or clear) a note's own location. Kept separate from body edits so the diary
-    /// composer and note editor can change where a note happened.
+    /// Set (or clear) a note's PRIMARY location (the first place) as free text. Kept for
+    /// the single-location composer; edits the first place and leaves any others intact.
     func updateLocation(_ id: UUID, location: String?) {
         guard let i = notes.firstIndex(where: { $0.id == id }) else { return }
         let trimmed = location?.trimmingCharacters(in: .whitespaces)
-        let newValue = (trimmed?.isEmpty == false) ? trimmed : nil
-        guard notes[i].location != newValue else { return }
-        notes[i].location = newValue
+        let name = (trimmed?.isEmpty == false) ? trimmed! : nil
+        var places = notes[i].allPlaces
+        if let name {
+            if places.isEmpty { places = [Place(name: name)] }
+            else if places[0].name != name { places[0] = Place(name: name) }  // renamed → drop stale coords
+        } else if !places.isEmpty {
+            places.removeFirst()
+        }
+        commitPlaces(places, to: i)
+    }
+
+    /// Add a place to a note (with coordinates when known — e.g. from GPS). De-duplicates
+    /// by name; if the name already exists, fills in coordinates we didn't have before.
+    func addPlace(_ id: UUID, name: String, latitude: Double? = nil, longitude: Double? = nil) {
+        guard let i = notes.firstIndex(where: { $0.id == id }) else { return }
+        let n = name.trimmingCharacters(in: .whitespaces)
+        guard !n.isEmpty else { return }
+        var places = notes[i].allPlaces
+        if let j = places.firstIndex(where: { $0.name.caseInsensitiveCompare(n) == .orderedSame }) {
+            if latitude != nil, longitude != nil { places[j].latitude = latitude; places[j].longitude = longitude }
+        } else {
+            places.append(Place(name: n, latitude: latitude, longitude: longitude))
+        }
+        commitPlaces(places, to: i)
+    }
+
+    /// Remove a place from a note by name.
+    func removePlace(_ id: UUID, name: String) {
+        guard let i = notes.firstIndex(where: { $0.id == id }) else { return }
+        var places = notes[i].allPlaces
+        places.removeAll { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+        commitPlaces(places, to: i)
+    }
+
+    /// Store the places list (nil when empty) and mirror the first name into the legacy
+    /// `location` field so back-compat readers and serialization keep working. Persists
+    /// only when something actually changed.
+    private func commitPlaces(_ places: [Place], to i: Int) {
+        let newPlaces = places.isEmpty ? nil : places
+        let newLocation = places.first?.name
+        guard notes[i].places != newPlaces || notes[i].location != newLocation else { return }
+        notes[i].places = newPlaces
+        notes[i].location = newLocation
         persist()
     }
 

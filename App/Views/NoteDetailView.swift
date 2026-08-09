@@ -57,11 +57,11 @@ struct NoteDetailView: View {
             }
             .navigationTitle(note.displayName)
             .navigationBarTitleDisplayMode(.inline)
-            .alert("Location", isPresented: $editingLocation) {
+            .alert("Add a place", isPresented: $editingLocation) {
                 TextField("Where were you?", text: $locationDraft)
                 Button("Cancel", role: .cancel) {}
-                Button("Save") { model.updateLocation(note.id, location: locationDraft) }
-            } message: { Text("Set where this note happened.") }
+                Button("Add") { addTypedPlace(to: note.id, name: locationDraft) }
+            } message: { Text("Add a place to this note. You can add more than one.") }
             .onAppear {
                 if loadedBodyFor != note.id {
                     editedBody = note.body; titleDraft = note.title; loadedBodyFor = note.id
@@ -170,29 +170,7 @@ struct NoteDetailView: View {
                 }
             }
             if isEntity(note) && !isRecord(note) { entitySummary(note) }
-            if note.origin?.source != "readwise" {
-                Menu {
-                    Button { locationDraft = note.location ?? ""; editingLocation = true } label: {
-                        Label(note.location?.isEmpty == false ? "Edit location" : "Enter location", systemImage: "mappin")
-                    }
-                    Button { Task { if let p = await locator.currentPlace() { model.updateLocation(note.id, location: p) } } } label: {
-                        Label("Use current location", systemImage: "location.fill")
-                    }
-                    if note.location?.isEmpty == false {
-                        Button(role: .destructive) { model.updateLocation(note.id, location: nil) } label: {
-                            Label("Clear location", systemImage: "xmark")
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "mappin.and.ellipse").foregroundStyle(.secondary)
-                        Text(note.location?.isEmpty == false ? note.location! : "Add location")
-                            .foregroundStyle(note.location?.isEmpty == false ? .primary : .secondary)
-                        Spacer()
-                        Image(systemName: "pencil").font(.caption).foregroundStyle(.tertiary)
-                    }
-                }
-            }
+            if note.origin?.source != "readwise" { locationRows(note) }
             if note.origin?.source == "readwise" {
                 Toggle(isOn: Binding(get: { !note.isStub },
                                      set: { model.setFinished(note.id, $0) })) {
@@ -279,6 +257,59 @@ struct NoteDetailView: View {
                 Text("Suggested connections")
             } footer: {
                 Text("People and moments from around this time. Linking one connects it into your web.")
+            }
+        }
+    }
+
+    /// The note's places — one row each (with a delete), plus an add control. A note can
+    /// hold several places; coordinates (from GPS, or geocoded from a typed name) are kept
+    /// so these can later be plotted on a map.
+    @ViewBuilder
+    private func locationRows(_ note: Note) -> some View {
+        ForEach(note.allPlaces, id: \.name) { place in
+            HStack(spacing: 6) {
+                Image(systemName: place.hasCoordinate ? "mappin.circle.fill" : "mappin.and.ellipse")
+                    .foregroundStyle(.secondary)
+                Text(place.name)
+                Spacer()
+                Button {
+                    model.removePlace(note.id, name: place.name)
+                } label: {
+                    Image(systemName: "minus.circle.fill").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Remove \(place.name)")
+            }
+        }
+        Menu {
+            Button { locationDraft = ""; editingLocation = true } label: {
+                Label("Enter a place", systemImage: "mappin")
+            }
+            Button {
+                Task {
+                    if let p = await locator.currentPlaceStructured() {
+                        model.addPlace(note.id, name: p.name, latitude: p.latitude, longitude: p.longitude)
+                    }
+                }
+            } label: {
+                Label("Use current location", systemImage: "location.fill")
+            }
+        } label: {
+            Label(note.allPlaces.isEmpty ? "Add location" : "Add another location", systemImage: "plus.circle")
+                .foregroundStyle(.tint)
+        }
+    }
+
+    /// Add a typed place immediately, then geocode it in the background so it gains a
+    /// coordinate (making it map-ready). `addPlace` de-dupes by name, so the second call
+    /// just fills in the coordinate.
+    private func addTypedPlace(to id: UUID, name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        model.addPlace(id, name: trimmed)
+        Task {
+            if let c = await LocationService.coordinate(for: trimmed) {
+                model.addPlace(id, name: trimmed, latitude: c.latitude, longitude: c.longitude)
             }
         }
     }

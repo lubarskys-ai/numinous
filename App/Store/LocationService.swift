@@ -1,5 +1,6 @@
 import Foundation
 import CoreLocation
+import NuminousCore
 
 /// One-shot current-place lookup: asks for when-in-use permission, grabs a single
 /// location fix, and reverse-geocodes it to a readable place — a nearby point of
@@ -37,6 +38,27 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
         guard let p = try? await geocoder.reverseGeocodeLocation(location).first else { return nil }
         let parts = [p.locality ?? p.subAdministrativeArea, p.administrativeArea].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: ", ")
+    }
+
+    /// The current place as a structured `Place` — name plus exact coordinates, so a
+    /// GPS-captured location is map-ready. Falls back to a "lat, long" name if the
+    /// reverse-geocode has no readable name.
+    func currentPlaceStructured() async -> Place? {
+        guard await ensureAuthorized(), let location = await requestLocation() else { return nil }
+        let c = location.coordinate
+        let name = await Self.placeName(for: location)
+            ?? String(format: "%.4f, %.4f", c.latitude, c.longitude)
+        return Place(name: name, latitude: c.latitude, longitude: c.longitude)
+    }
+
+    /// Forward-geocode a typed place name to coordinates (for plotting typed places on a
+    /// map). Nil if it can't be resolved. Safe to call off the hot path.
+    static func coordinate(for name: String) async -> (latitude: Double, longitude: Double)? {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count >= 2 else { return nil }
+        let geocoder = CLGeocoder()
+        guard let p = try? await geocoder.geocodeAddressString(trimmed).first?.location else { return nil }
+        return (p.coordinate.latitude, p.coordinate.longitude)
     }
 
     private func ensureAuthorized() async -> Bool {
