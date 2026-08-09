@@ -5,15 +5,12 @@ import NuminousCore
 /// The Avatar tab: the 3D figure itself — grey when young, taking on each axis's
 /// color as it matures. Drag to rotate, pinch to zoom. A gentle "Numinous
 /// noticed…" reflection may sit beneath it.
-/// Wrapper so a tapped note id can drive a `.sheet(item:)`.
-private struct IdentifiedID: Identifiable { let id: UUID }
-
 struct AvatarView: View {
     @EnvironmentObject var model: AppModel
     @State private var reflection: ReflectionRecord?
     @State private var zoom: Double = 1
     @State private var committedZoom: Double = 1
-    @State private var openNote: IdentifiedID?
+    @State private var path: [UUID] = []
 
     var body: some View {
         let balance = model.score.axisBalance(over: model.axes)
@@ -26,7 +23,7 @@ struct AvatarView: View {
             .filter(\.isCounted)
             .map { GraphEdge(a: $0.a, b: $0.b, cross: $0.isCrossAxis) }
 
-        NavigationStack {
+        NavigationStack(path: $path) {
             ZStack {
                 spaceBackground.ignoresSafeArea()
                 VStack(spacing: 12) {
@@ -38,7 +35,7 @@ struct AvatarView: View {
                         links: graphLinks,
                         maturity: model.maturity,
                         zoom: zoom,
-                        onTapNode: { openNote = IdentifiedID(id: $0) },
+                        onTapNode: { path.append($0) },
                         onZoomChange: { zoom = $0; committedZoom = $0 }
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -55,8 +52,10 @@ struct AvatarView: View {
             .navigationTitle("Numinous")
             .toolbarBackground(.hidden, for: .navigationBar)
             .onAppear { if reflection == nil { reflection = model.currentReflection() } }
-            .sheet(item: $openNote) { wrapped in
-                NavigationStack { NoteDetailView(noteID: wrapped.id) }
+            // Push within the avatar's own stack rather than a sheet: this view lives
+            // inside a full-screen cover, and a sheet presented from there fails silently.
+            .navigationDestination(for: UUID.self) { id in
+                NoteDetailView(noteID: id)
             }
         }
         .preferredColorScheme(.dark)

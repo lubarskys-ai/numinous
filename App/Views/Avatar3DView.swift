@@ -37,7 +37,7 @@ struct Avatar3DView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView()
-        view.scene = buildScene()
+        view.scene = buildScene(context.coordinator)
         view.pointOfView = view.scene?.rootNode.childNode(withName: "camera", recursively: false)
         view.allowsCameraControl = false
         view.autoenablesDefaultLighting = false
@@ -74,32 +74,23 @@ struct Avatar3DView: UIViewRepresentable {
         // Rebuild when maturity changes (e.g. the "watch it grow" animation stepping
         // it) so the birth sequence plays; otherwise just track zoom.
         if abs(context.coordinator.builtMaturity - maturity) > 0.004 {
-            view.scene = buildScene()
+            view.scene = buildScene(context.coordinator)
             view.pointOfView = view.scene?.rootNode.childNode(withName: "camera", recursively: false)
             context.coordinator.builtMaturity = maturity
-            context.coordinator.labelsShown = !(zoom > 7)   // force re-apply below
         }
         // Orthographic zoom: scale the viewport, never dolly the camera — so foreground and
         // background nodes zoom identically (no parallax) and the camera never flies past
         // near nodes. This is what makes it behave like Obsidian's flat graph.
         view.pointOfView?.camera?.orthographicScale = Self.baseOrtho / max(0.1, zoom)
-        // Keep nodes & labels a roughly CONSTANT on-screen size as you zoom in, so a
-        // deep zoom spreads them apart to reveal structure instead of magnifying them
-        // into an overlapping mess (Obsidian-style). Only re-scale when zoom moved.
-        let showLabels = zoom > 7
+        // Node points hold a constant on-screen size automatically (screen-space point
+        // radius), so the only thing to re-scale on zoom is the link threads — thin them
+        // as you zoom in so a deep zoom reveals structure instead of fat tubes.
         let f = Float(1.0 / max(1.0, zoom))
-        let labelsChanged = showLabels != context.coordinator.labelsShown
-        if labelsChanged || abs(f - context.coordinator.lastNodeScale) > 0.002 {
-            context.coordinator.labelsShown = showLabels
+        if abs(f - context.coordinator.lastNodeScale) > 0.002 {
             context.coordinator.lastNodeScale = f
             view.scene?.rootNode.enumerateChildNodes { node, _ in
-                guard let name = node.name else { return }
-                if name == "textlabel" {
-                    node.isHidden = !showLabels   // size & offset inherited from its parent node
-                } else if name.hasPrefix("link:") {
+                if node.name?.hasPrefix("link:") == true {
                     node.scale = SCNVector3(f, 1, f)   // thin the thread, keep its length
-                } else if name == "halo" || UUID(uuidString: name) != nil {
-                    node.scale = SCNVector3(f, f, f)
                 }
             }
         }
@@ -113,9 +104,13 @@ struct Avatar3DView: UIViewRepresentable {
         var onTapNode: ((UUID) -> Void)?
         var onZoomChange: ((Double) -> Void)?
         var zoom: Double = 1
-        var labelsShown = false
         var lastNodeScale: Float = -1
         private var pinchStartZoom: Double = 1
+        // Nodes are now drawn as batched point clouds (no per-note SCNNode), so tap
+        // hit-testing works off these stored local positions, projected through the
+        // connectome node's current (animated) world transform.
+        var nodeHitTargets: [(id: UUID, local: SCNVector3)] = []
+        weak var connectomeNode: SCNNode?
 
         func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
 
@@ -154,23 +149,28 @@ struct Avatar3DView: UIViewRepresentable {
         @objc func tap(_ g: UITapGestureRecognizer) {
             guard let view, let scene = view.scene else { return }
             let p = g.location(in: view)
+            // Nodes are a batched point cloud now, so hit-test the stored local positions:
+            // convert each to world space through the connectome's CURRENT (animated)
+            // presentation node, then project to screen. Let SceneKit do the matrix math.
+            let connectome = connectomeNode?.presentation
             var nodePt: [UUID: CGPoint] = [:]
-            var links: [(UUID, UUID)] = []
             var best: (id: UUID, dist: CGFloat)?
+            for (id, local) in nodeHitTargets {
+                let wp = connectome?.convertPosition(local, to: nil) ?? local
+                let s = view.projectPoint(wp)
+                guard s.z > 0, s.z < 1 else { continue }
+                let pt = CGPoint(x: CGFloat(s.x), y: CGFloat(s.y))
+                nodePt[id] = pt
+                let d = hypot(pt.x - p.x, pt.y - p.y)
+                if d < 44, best == nil || d < best!.dist { best = (id, d) }
+            }
+            // Link threads are still individual nodes named "link:a:b".
+            var links: [(UUID, UUID)] = []
             scene.rootNode.enumerateChildNodes { node, _ in
-                guard let name = node.name else { return }
-                if let id = UUID(uuidString: name) {
-                    let s = view.projectPoint(node.worldPosition)
-                    guard s.z > 0, s.z < 1 else { return }
-                    let pt = CGPoint(x: CGFloat(s.x), y: CGFloat(s.y))
-                    nodePt[id] = pt
-                    let d = hypot(pt.x - p.x, pt.y - p.y)
-                    if d < 44, best == nil || d < best!.dist { best = (id, d) }
-                } else if name.hasPrefix("link:") {
-                    let parts = name.dropFirst(5).split(separator: ":")
-                    if parts.count == 2, let a = UUID(uuidString: String(parts[0])), let b = UUID(uuidString: String(parts[1])) {
-                        links.append((a, b))
-                    }
+                guard let name = node.name, name.hasPrefix("link:") else { return }
+                let parts = name.dropFirst(5).split(separator: ":")
+                if parts.count == 2, let a = UUID(uuidString: String(parts[0])), let b = UUID(uuidString: String(parts[1])) {
+                    links.append((a, b))
                 }
             }
             if let best { onTapNode?(best.id); return }
@@ -199,6 +199,35 @@ struct Avatar3DView: UIViewRepresentable {
 
     private func region(_ axis: String) -> (Double, Double, Double) { GLTFBody.region(axis) }
 
+    /// One batched point-cloud geometry for many same-color nodes — a single draw call
+    /// for the whole group instead of an SCNNode per note. Screen-space point radius
+    /// holds a constant on-screen dot size at any zoom (Obsidian-like). `additive` draws
+    /// a soft glow layer (larger, low-opacity, additive blend) so a crisp core over an
+    /// additive halo reads as a glowing orb — the batched, HDR-free stand-in for halos.
+    private func pointCloud(_ pts: [SCNVector3], color: UIColor, screenRadius: CGFloat,
+                            opacity: CGFloat, additive: Bool = false) -> SCNNode {
+        let source = SCNGeometrySource(vertices: pts)
+        let indices = (0..<pts.count).map { UInt32($0) }
+        let data = indices.withUnsafeBufferPointer { Data(buffer: $0) }
+        let element = SCNGeometryElement(data: data, primitiveType: .point,
+                                         primitiveCount: pts.count,
+                                         bytesPerIndex: MemoryLayout<UInt32>.size)
+        element.pointSize = screenRadius
+        element.minimumPointScreenSpaceRadius = screenRadius
+        element.maximumPointScreenSpaceRadius = screenRadius
+        let geo = SCNGeometry(sources: [source], elements: [element])
+        let m = SCNMaterial()
+        m.lightingModel = .constant
+        m.diffuse.contents = color
+        m.emission.contents = color
+        m.emission.intensity = additive ? 0.7 : 1.0
+        m.transparency = opacity
+        if additive { m.blendMode = .add }
+        m.writesToDepthBuffer = false
+        geo.materials = [m]
+        return SCNNode(geometry: geo)
+    }
+
     /// A soft radial glow image used as a galaxy/nebula sprite.
     private static func radialGlow(_ color: UIColor) -> UIImage {
         let size = 128
@@ -212,7 +241,7 @@ struct Avatar3DView: UIViewRepresentable {
         }
     }
 
-    private func buildScene() -> SCNScene {
+    private func buildScene(_ coordinator: Coordinator? = nil) -> SCNScene {
         let scene = SCNScene()
         func v(_ x: Double, _ y: Double, _ z: Double) -> SCNVector3 { SCNVector3(Float(x), Float(y), Float(z)) }
         func ball(_ r: Double) -> SCNSphere { let s = SCNSphere(radius: r); s.segmentCount = 64; return s }
@@ -620,6 +649,11 @@ struct Avatar3DView: UIViewRepresentable {
         func graphPos(_ id: UUID) -> SCNVector3 { v(fx[id] ?? 0, fy[id] ?? 0, fz[id] ?? 0) }
 
         var pos: [UUID: SCNVector3] = [:]
+        // Accumulate node positions grouped by axis + a size bucket, so the ENTIRE graph
+        // renders as a few batched point clouds (one draw call each) instead of one
+        // SCNNode per note. This is what keeps memory ~flat no matter how many notes.
+        var cloudPts: [String: [SCNVector3]] = [:]     // key = "axis|hub" or "axis|dot"
+        var hitTargets: [(id: UUID, local: SCNVector3)] = []
         for (axisKey, group) in Dictionary(grouping: nodes, by: { $0.axis }) {
             let c = region(axisKey)
             let (rx, ry, rz) = contain[axisKey] ?? (0.07, 0.07, 0.05)
@@ -637,57 +671,34 @@ struct Avatar3DView: UIViewRepresentable {
                 // into the body form as the avatar matures — so a low-growth avatar is
                 // a spread graph, not a body-shaped pile of nodes.
                 let converge = smoothstep(0.35, 0.85, matur)
-                // Low growth → the force-directed graph; high growth → drawn into the
-                // body form.
                 let p = lerpV(graphPos(gn.id), anatomical, converge)
                 pos[gn.id] = p
                 guard nodesAppear > 0.02 else { continue }
-                let col = color(gn.axis)
-                // Your nodes read clearly bigger/brighter than the decorative sky
-                // stars — they're *you*, not scenery. Grows with connections.
-                let r = min(0.032, 0.005 + 0.009 * Double(degree[gn.id] ?? 0).squareRoot())
-                let s = ball(r); s.segmentCount = 14
-                let m = SCNMaterial(); m.lightingModel = .constant
-                m.diffuse.contents = col; m.emission.contents = col
-                m.emission.intensity = 1.0; m.transparency = CGFloat(0.92 * nodesAppear)
-                s.materials = [m]
-                let node = SCNNode(geometry: s); node.position = p; node.renderingOrder = 12
-                node.name = gn.id.uuidString    // tap target → opens this note
-                connectomeFloat.addChildNode(node)
-                // A small name label that only shows when you zoom in (toggled in
-                // updateUIView). Billboarded so it always faces you.
-                if !gn.label.isEmpty {
-                    let txt = SCNText(string: gn.label, extrusionDepth: 0)
-                    txt.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
-                    txt.flatness = 0.3
-                    let tm = SCNMaterial(); tm.lightingModel = .constant
-                    tm.diffuse.contents = UIColor.white; tm.emission.contents = UIColor.white
-                    tm.writesToDepthBuffer = false
-                    txt.materials = [tm]
-                    let label = SCNNode(geometry: txt)
-                    label.name = "textlabel"
-                    label.scale = SCNVector3(0.006, 0.006, 0.006)
-                    let (minB, maxB) = txt.boundingBox
-                    label.pivot = SCNMatrix4MakeTranslation((minB.x + maxB.x) / 2, minB.y, 0)
-                    // Child of the node (local offset), so it inherits the node's zoom
-                    // scaling and stays pinned a constant gap right above its dot.
-                    label.position = SCNVector3(0, Float(r) + 0.03, 0)
-                    label.constraints = [SCNBillboardConstraint()]
-                    label.renderingOrder = 20
-                    label.isHidden = zoom <= 7   // only when zoomed in
-                    node.addChildNode(label)
-                }
-                // Soft glow halo so a node reads as a living orb, not a pinprick.
-                let halo = ball(r * 2.7); halo.segmentCount = 12
-                let hm = SCNMaterial(); hm.lightingModel = .constant
-                hm.diffuse.contents = col; hm.emission.contents = col; hm.emission.intensity = 0.7
-                hm.transparency = CGFloat(0.2 * nodesAppear); hm.blendMode = .add; hm.writesToDepthBuffer = false
-                halo.materials = [hm]
-                let haloNode = SCNNode(geometry: halo); haloNode.position = p; haloNode.renderingOrder = 11
-                haloNode.name = "halo"
-                connectomeFloat.addChildNode(haloNode)
+                // Hubs (many connections) render a touch larger for visual hierarchy.
+                let bucket = (degree[gn.id] ?? 0) >= 3 ? "hub" : "dot"
+                cloudPts[gn.axis + "|" + bucket, default: []].append(p)
+                hitTargets.append((gn.id, p))
             }
         }
+        // Build a soft additive glow layer + a crisp core per (axis, bucket). Two batched
+        // draw calls per group make every dot a glowing orb, at cost independent of count.
+        for (key, pts) in cloudPts where !pts.isEmpty {
+            let parts = key.split(separator: "|")
+            let axisKey = String(parts.first ?? "")
+            let isHub = parts.count > 1 && parts[1] == "hub"
+            let col = color(axisKey)
+            let coreR: CGFloat = isHub ? 7 : 4.5
+            let glow = pointCloud(pts, color: col, screenRadius: coreR * 2.6,
+                                  opacity: CGFloat(0.18 * nodesAppear), additive: true)
+            glow.renderingOrder = 11
+            connectomeFloat.addChildNode(glow)
+            let core = pointCloud(pts, color: col, screenRadius: coreR,
+                                  opacity: CGFloat(0.95 * nodesAppear))
+            core.renderingOrder = 12
+            connectomeFloat.addChildNode(core)
+        }
+        coordinator?.nodeHitTargets = hitTargets
+        coordinator?.connectomeNode = connectomeFloat
 
         // Curved neural threads: each link bows toward the core so it stays inside
         // the body instead of cutting straight across. Only cross-axis links carry
