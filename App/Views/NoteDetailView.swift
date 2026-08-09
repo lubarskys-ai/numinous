@@ -15,6 +15,10 @@ struct NoteDetailView: View {
     @State private var showFollowUp = false
     @State private var followUpMessage: String?
     @State private var titleDraft = ""
+    @State private var findLinksNote: Note?          // presents the composer's Find-links flow
+    @State private var hasTripRange = false          // travel notes: is a trip date range set?
+    @State private var tripStart = Date()
+    @State private var tripEnd = Date()
 
     private struct LinkTarget: Identifiable { let id: UUID }
 
@@ -23,6 +27,7 @@ struct NoteDetailView: View {
             List {
                 titleSection(note)
                 headerSection(note)
+                if isTrip(note) { tripSection(note) }
                 if isRecord(note) {
                     // A logged activity (workout, mindful, nutrition) — keep it simple:
                     // your own note, plus the one useful connection ("who were you with").
@@ -53,10 +58,20 @@ struct NoteDetailView: View {
                 if loadedBodyFor != note.id {
                     editedBody = note.body; titleDraft = note.title; loadedBodyFor = note.id
                     editingBody = note.body.isEmpty   // start reading unless there's nothing yet
+                    if let range = model.tripRange(note.id) {
+                        hasTripRange = true; tripStart = range.start; tripEnd = range.end
+                    } else {
+                        hasTripRange = false
+                    }
                 }
             }
             .sheet(item: $openLinkTarget) { t in
                 NavigationStack { NoteDetailView(noteID: t.id) }
+            }
+            .fullScreenCover(item: $findLinksNote, onDismiss: {
+                if let fresh = model.note(id: noteID) { editedBody = fresh.body }
+            }) { n in
+                ComposeView(editing: n)
             }
             .onDisappear {
                 // Autosave on leave so edits (and links) persist without a manual Save.
@@ -106,6 +121,8 @@ struct NoteDetailView: View {
     private func isEntity(_ note: Note) -> Bool { !Self.isDateTitled(note.displayName) }
     /// A logged health record — gets a stripped-down detail view, not the CRM layout.
     private func isRecord(_ note: Note) -> Bool { note.origin?.source == "healthkit" }
+    /// A travel note — can carry a trip date range that auto-links diary entries.
+    private func isTrip(_ note: Note) -> Bool { AppModel.isTravelNote(note.folderName) }
     private static func isDateTitled(_ name: String) -> Bool {
         name.range(of: #"^\d{4}-\d{2}-\d{2}"#, options: .regularExpression) != nil
     }
@@ -175,6 +192,42 @@ struct NoteDetailView: View {
         }
     }
 
+    /// Trip date range for a travel note. When set, any diary entry dated within the
+    /// range automatically links to this trip.
+    @ViewBuilder
+    private func tripSection(_ note: Note) -> some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { hasTripRange },
+                set: { on in
+                    hasTripRange = on
+                    if on { model.setTripRange(note.id, start: tripStart, end: tripEnd) }
+                    else { model.setTripRange(note.id, start: nil, end: nil) }
+                }
+            )) {
+                Label("These are trip dates", systemImage: "airplane")
+            }
+            if hasTripRange {
+                DatePicker("Start", selection: Binding(
+                    get: { tripStart },
+                    set: { tripStart = $0; if tripEnd < $0 { tripEnd = $0 }
+                           model.setTripRange(note.id, start: tripStart, end: tripEnd) }
+                ), displayedComponents: .date)
+                DatePicker("End", selection: Binding(
+                    get: { tripEnd },
+                    set: { tripEnd = $0; if tripStart > $0 { tripStart = $0 }
+                           model.setTripRange(note.id, start: tripStart, end: tripEnd) }
+                ), in: tripStart..., displayedComponents: .date)
+            }
+        } header: {
+            Text("Trip")
+        } footer: {
+            Text(hasTripRange
+                 ? "Diary entries dated within these days automatically link to this trip."
+                 : "Turn on to mark a start–end date range. Diary entries during a trip link here on their own.")
+        }
+    }
+
     @ViewBuilder
     private func suggestionsSection(_ note: Note) -> some View {
         let suggestions = model.connectionSuggestions(for: note)
@@ -226,9 +279,16 @@ struct NoteDetailView: View {
                     .onTapGesture { editingBody = true }   // tap the text to edit (cursor)
             }
         } header: {
-            HStack {
+            HStack(spacing: 14) {
                 Text(label)
                 Spacer()
+                if editedBody.trimmingCharacters(in: .whitespaces).count >= 3 {
+                    Button {
+                        // Save any in-progress edits first so the scan sees the latest text.
+                        if editedBody != note.body { model.updateBody(note.id, body: editedBody) }
+                        findLinksNote = model.note(id: note.id)
+                    } label: { Label("Find links", systemImage: "sparkles").font(.caption) }
+                }
                 if !editingBody {
                     Button { editingBody = true } label: { Label("Edit", systemImage: "pencil").font(.caption) }
                 }

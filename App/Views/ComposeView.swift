@@ -63,6 +63,26 @@ struct ComposeView: View {
         _category = State(initialValue: diary ? "notes/diary" : ((folder?.isEmpty == false) ? folder! : "notes"))
     }
 
+    /// Edit an EXISTING note in place — used by "Find links" from the note detail view, so
+    /// you get the full scan/review flow over a note you've already written. Save weaves
+    /// the kept links into that note's body (it doesn't create a new note).
+    init(editing note: Note, onSaved: ((UUID) -> Void)? = nil) {
+        self.onSaved = onSaved
+        self.diaryMode = false
+        _category = State(initialValue: note.folderName.isEmpty ? "notes" : note.folderName)
+        _text = State(initialValue: note.body)
+        _intensity = State(initialValue: note.intensity)
+        _location = State(initialValue: note.location ?? "")
+        _existingNoteID = State(initialValue: note.id)
+        _diaryResolved = State(initialValue: true)   // nothing to pull forward
+    }
+
+    private var navTitle: String {
+        if reviewing && !manualEdit { return "Review links" }
+        if diaryMode { return "Today's Diary" }
+        return existingNoteID != nil ? "Edit note" : "New Note"
+    }
+
     /// True once a scan found something to review. In this mode the note text is shown
     /// read-only with the findings highlighted, so nothing gets rewritten under you.
     private var reviewing: Bool { didScan && (!confirmed.isEmpty || !pending.isEmpty) }
@@ -100,7 +120,7 @@ struct ComposeView: View {
                     }
                 }
             }
-            .navigationTitle(reviewing && !manualEdit ? "Review links" : (diaryMode ? "Today's Diary" : "New Note"))
+            .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }

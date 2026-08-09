@@ -1,8 +1,10 @@
 import SwiftUI
+import UIKit
 
 struct RootView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.scenePhase) private var scenePhase
+    @State private var keyboardVisible = false
     // Initial tab can be set via the NUMINOUS_TAB env var (used for headless
     // screenshots). The avatar is no longer a tab — it's the floating companion.
     @State private var selection: String =
@@ -31,16 +33,27 @@ struct RootView: View {
                 .tabItem { Label("Health", systemImage: "heart.text.square") }
                 .tag("health")
         }
-        // The companion follows you across every tab; tap it for the full avatar.
+        // The companion follows you across every tab; tap it for the full avatar. It
+        // hides while the keyboard is up so it never sits over a note's editing controls
+        // (e.g. the "Done" button in the bottom-right).
         .overlay(alignment: .bottomTrailing) {
-            CompanionView(progress: model.maturity, tint: tint,
-                          action: companionAction, actionStart: companionActionStart)
-                .frame(width: 100, height: 116)
-                .contentShape(Rectangle())
-                .onTapGesture { showAvatar = true }
-                .padding(.trailing, 8)
-                .padding(.bottom, 54)
-                .accessibilityLabel("Open avatar")
+            if !keyboardVisible {
+                CompanionView(progress: model.maturity, tint: tint,
+                              action: companionAction, actionStart: companionActionStart)
+                    .frame(width: 100, height: 116)
+                    .contentShape(Rectangle())
+                    .onTapGesture { showAvatar = true }
+                    .padding(.trailing, 8)
+                    .padding(.bottom, 54)
+                    .accessibilityLabel("Open avatar")
+                    .transition(.opacity)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            withAnimation(.easeInOut(duration: 0.2)) { keyboardVisible = true }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            withAnimation(.easeInOut(duration: 0.2)) { keyboardVisible = false }
         }
         // A full-screen flourish whenever a new connection forms.
         .overlay { ConnectionSparkOverlay() }

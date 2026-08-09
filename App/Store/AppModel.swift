@@ -1359,6 +1359,8 @@ final class AppModel: ObservableObject {
         for target in notes[i].linkTargets where !noteExists(titled: target) {
             notes.append(Note(title: target, date: notes[i].date, isStub: true))
         }
+        // A diary entry dated within a trip auto-links that trip.
+        addTripLinkIfNeeded(i)
         persist()
     }
 
@@ -1380,8 +1382,90 @@ final class AppModel: ObservableObject {
         while notes.contains(where: { Self.norm($0.title) == Self.norm(title) }) { title = "\(base) (\(n))"; n += 1 }
         let note = Note(title: title, date: day, intensity: defaultIntensity(forFolderNamed: "notes/diary"))
         notes.append(note)
+        addTripLinkIfNeeded(notes.count - 1)   // if today falls within a trip, link it
         persist()
         return note.id
+    }
+
+    // MARK: - Trips (a travel note with a start–end date range)
+
+    /// A travel note with a date range. A diary entry dated within it auto-links here.
+    struct Trip: Identifiable { let id: UUID; let title: String; let start: Date; let end: Date }
+
+    private static let tripDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+    static func tripDayString(_ d: Date) -> String { tripDayFormatter.string(from: d) }
+    private static func tripDay(_ s: String) -> Date? { tripDayFormatter.date(from: s) }
+
+    /// Is this note a trip candidate — a note filed under the top-level `travel` folder?
+    static func isTravelNote(_ folderName: String) -> Bool {
+        let f = folderName.lowercased()
+        return f == "travel" || f.hasPrefix("travel/")
+    }
+
+    /// Every travel note that has both a start and end date set.
+    func trips() -> [Trip] {
+        notes.compactMap { n in
+            guard Self.isTravelNote(n.folderName) else { return nil }
+            guard let (s, e) = Self.tripRange(from: n.details) else { return nil }
+            return Trip(id: n.id, title: n.title, start: s, end: e)
+        }
+    }
+
+    /// The saved date range on a note, if any (normalized so start ≤ end).
+    func tripRange(_ id: UUID) -> (start: Date, end: Date)? {
+        note(id: id).flatMap { Self.tripRange(from: $0.details) }
+    }
+
+    private static func tripRange(from details: [NoteDetail]) -> (Date, Date)? {
+        let start = details.first { norm($0.key) == "trip start" }.flatMap { tripDay($0.value) }
+        let end = details.first { norm($0.key) == "trip end" }.flatMap { tripDay($0.value) }
+        guard let s = start, let e = end else { return nil }
+        return (min(s, e), max(s, e))
+    }
+
+    /// The trip whose range covers `date`, if any (by calendar day, inclusive).
+    func trip(coveringDate date: Date) -> Trip? {
+        let cal = Calendar.current
+        let day = cal.startOfDay(for: date)
+        return trips().first {
+            day >= cal.startOfDay(for: $0.start) && day <= cal.startOfDay(for: $0.end)
+        }
+    }
+
+    /// Set (or clear, when either is nil) a travel note's trip date range, then backfill:
+    /// any existing diary entry dated within the new range gets the trip link.
+    func setTripRange(_ id: UUID, start: Date?, end: Date?) {
+        guard let i = notes.firstIndex(where: { $0.id == id }) else { return }
+        setDetail(&notes[i], key: "Trip start", value: start.map(Self.tripDayString))
+        setDetail(&notes[i], key: "Trip end", value: end.map(Self.tripDayString))
+        if start != nil, end != nil {
+            for j in notes.indices { addTripLinkIfNeeded(j) }
+        }
+        persist()
+    }
+
+    private func setDetail(_ n: inout Note, key: String, value: String?) {
+        n.details.removeAll { Self.norm($0.key) == Self.norm(key) }
+        if let value { n.details.append(NoteDetail(key: key, value: value)) }
+    }
+
+    /// If notes[i] is a diary entry dated within a trip and isn't already linked to it,
+    /// append the trip link to its body. Idempotent; does not persist (caller persists).
+    private func addTripLinkIfNeeded(_ i: Int) {
+        guard notes.indices.contains(i),
+              Folder.normalize(notes[i].folderName).contains("diary"),
+              let trip = trip(coveringDate: notes[i].date),
+              trip.id != notes[i].id,
+              !notes[i].linkTargets.contains(where: { Self.norm($0) == Self.norm(trip.title) })
+        else { return }
+        let sep = notes[i].body.isEmpty ? "" : "\n"
+        notes[i].body += sep + "[[\(trip.title)]]"
     }
 
     /// The most recent diary note dated to `day`, if one exists yet (does NOT create
@@ -1646,6 +1730,11 @@ final class AppModel: ObservableObject {
                         intensity: intensity ?? defaultIntensity(forFolderNamed: category),
                         location: (loc?.isEmpty == false) ? loc : nil)
         save(note)   // also creates stubs for any [[links]]
+        // A new diary entry within a trip auto-links it (no-op for other folders).
+        if let i = notes.firstIndex(where: { $0.id == note.id }) {
+            addTripLinkIfNeeded(i)
+            if notes[i].body != note.body { persist() }
+        }
         return note.id
     }
 
