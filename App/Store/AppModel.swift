@@ -623,32 +623,20 @@ final class AppModel: ObservableObject {
     /// body, plus the location of any note that links them).
     struct PersonPlaces: Identifiable { let id: UUID; let name: String; let text: String }
 
-    /// Build the person→place-text index ONCE (O(notes + links)). Reads the same places a
-    /// notes search would — the person's note body and location, plus the location of every
-    /// note that links them — so "South Carolina" written anywhere in Jay's note is found.
+    /// Build the person→place-text index ONCE. A person matches a place only by their OWN
+    /// note — its body and its location (so "South Carolina" written anywhere in Jay's own
+    /// note is found). We deliberately do NOT pull in the location of other notes that link
+    /// them: a diary entry written at some place (where *you* were) must not make the people
+    /// it mentions look like they're there too.
     func peopleWithPlaces() -> [PersonPlaces] {
-        var personByTitle: [String: (id: UUID, name: String)] = [:]
+        var out: [PersonPlaces] = []
         for n in notes {
             let f = Folder.normalize(n.folderName)
-            if f == "people" || f == "contacts" { personByTitle[Self.norm(n.title)] = (n.id, n.displayName) }
+            guard f == "people" || f == "contacts" else { continue }
+            let text = (n.body + " " + (n.location ?? "")).lowercased()
+            out.append(PersonPlaces(id: n.id, name: n.displayName, text: text))
         }
-        var text: [UUID: String] = [:]
-        var nameById: [UUID: String] = [:]
-        for n in notes {
-            let f = Folder.normalize(n.folderName)
-            if f == "people" || f == "contacts" {
-                nameById[n.id] = n.displayName
-                text[n.id, default: ""] += " " + (n.body + " " + (n.location ?? "")).lowercased()
-            }
-            if let loc = n.location, !loc.trimmingCharacters(in: .whitespaces).isEmpty {
-                for t in n.linkTargets {
-                    if let p = personByTitle[Self.norm(t)] {
-                        text[p.id, default: ""] += " " + loc.lowercased(); nameById[p.id] = p.name
-                    }
-                }
-            }
-        }
-        return nameById.keys.map { PersonPlaces(id: $0, name: nameById[$0] ?? "", text: text[$0] ?? "") }
+        return out
     }
 
     /// Match a place against a prebuilt index — fast enough to run on every keystroke.
@@ -1319,6 +1307,17 @@ final class AppModel: ObservableObject {
 
     /// Edit a note's markdown body. Engaging a dormant/imported note (writing
     /// about it, adding [[links]]) activates it so it starts growing you.
+    /// Set (or clear) a note's own location. Kept separate from body edits so the diary
+    /// composer and note editor can change where a note happened.
+    func updateLocation(_ id: UUID, location: String?) {
+        guard let i = notes.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = location?.trimmingCharacters(in: .whitespaces)
+        let newValue = (trimmed?.isEmpty == false) ? trimmed : nil
+        guard notes[i].location != newValue else { return }
+        notes[i].location = newValue
+        persist()
+    }
+
     func updateBody(_ id: UUID, body: String) {
         guard let i = notes.firstIndex(where: { $0.id == id }) else { return }
         let body = WikilinkParser.sanitize(body)   // repair any malformed/nested links

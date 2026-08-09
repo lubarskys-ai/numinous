@@ -19,6 +19,9 @@ struct NoteDetailView: View {
     @State private var hasTripRange = false          // travel notes: is a trip date range set?
     @State private var tripStart = Date()
     @State private var tripEnd = Date()
+    @State private var editingLocation = false
+    @State private var locationDraft = ""
+    @StateObject private var locator = LocationService()
 
     private struct LinkTarget: Identifiable { let id: UUID }
 
@@ -54,6 +57,11 @@ struct NoteDetailView: View {
             }
             .navigationTitle(note.displayName)
             .navigationBarTitleDisplayMode(.inline)
+            .alert("Location", isPresented: $editingLocation) {
+                TextField("Where were you?", text: $locationDraft)
+                Button("Cancel", role: .cancel) {}
+                Button("Save") { model.updateLocation(note.id, location: locationDraft) }
+            } message: { Text("Set where this note happened.") }
             .onAppear {
                 if loadedBodyFor != note.id {
                     editedBody = note.body; titleDraft = note.title; loadedBodyFor = note.id
@@ -162,8 +170,28 @@ struct NoteDetailView: View {
                 }
             }
             if isEntity(note) && !isRecord(note) { entitySummary(note) }
-            if let loc = note.location, !loc.isEmpty {
-                LabeledContent("Location", value: loc)
+            if note.origin?.source != "readwise" {
+                Menu {
+                    Button { locationDraft = note.location ?? ""; editingLocation = true } label: {
+                        Label(note.location?.isEmpty == false ? "Edit location" : "Enter location", systemImage: "mappin")
+                    }
+                    Button { Task { if let p = await locator.currentPlace() { model.updateLocation(note.id, location: p) } } } label: {
+                        Label("Use current location", systemImage: "location.fill")
+                    }
+                    if note.location?.isEmpty == false {
+                        Button(role: .destructive) { model.updateLocation(note.id, location: nil) } label: {
+                            Label("Clear location", systemImage: "xmark")
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "mappin.and.ellipse").foregroundStyle(.secondary)
+                        Text(note.location?.isEmpty == false ? note.location! : "Add location")
+                            .foregroundStyle(note.location?.isEmpty == false ? .primary : .secondary)
+                        Spacer()
+                        Image(systemName: "pencil").font(.caption).foregroundStyle(.tertiary)
+                    }
+                }
             }
             if note.origin?.source == "readwise" {
                 Toggle(isOn: Binding(get: { !note.isStub },

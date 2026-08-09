@@ -443,6 +443,9 @@ struct ComposeView: View {
         if let id = model.todaysDiaryID() {
             existingNoteID = id
             text = model.note(id: id)?.body ?? ""
+            // Carry the diary's own saved location forward so it shows and can be edited
+            // (and so the auto-current-location task below doesn't overwrite it).
+            location = model.note(id: id)?.location ?? ""
         }
     }
 
@@ -457,6 +460,8 @@ struct ComposeView: View {
         for s in confirmed { body = insert(s, into: body) }
         if let id = existingNoteID {
             model.updateBody(id, body: body)
+            // Persist location edits too — updateBody alone left today's diary location stuck.
+            model.updateLocation(id, location: location.isEmpty ? nil : location)
             return id
         }
         return model.createCapturedNote(body: body, folder: category, intensity: intensity,
