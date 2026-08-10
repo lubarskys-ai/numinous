@@ -37,7 +37,10 @@ struct MapView: View {
     private struct NoteRef: Identifiable { let id: UUID }
 
     private struct Pin: Identifiable {
-        let id = UUID()
+        /// STABLE across re-renders (note id + place) — a fresh UUID each render made
+        /// SwiftUI mismatch annotations, so a pin's tap opened a different note and stale
+        /// pins lingered. Derive identity from the data instead.
+        let id: String
         let noteID: UUID
         let title: String
         let coordinate: CLLocationCoordinate2D
@@ -51,7 +54,8 @@ struct MapView: View {
             guard folderMatches(n), period.contains(n.date) else { continue }
             let color = model.axis(for: n)?.color ?? .red
             for p in n.allPlaces where p.hasCoordinate {
-                out.append(Pin(noteID: n.id, title: n.displayName,
+                out.append(Pin(id: "\(n.id.uuidString)|\(p.name.lowercased())",
+                               noteID: n.id, title: n.displayName,
                                coordinate: CLLocationCoordinate2D(latitude: p.latitude!, longitude: p.longitude!),
                                color: color))
             }

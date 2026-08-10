@@ -25,6 +25,9 @@ struct ComposeView: View {
     @State private var text = ""
     @State private var intensity = 3
     @State private var location = ""
+    /// Coordinates captured when the location came from GPS, so the saved place is
+    /// map-ready (not a hollow, coordinate-less pin). Cleared when you type a place.
+    @State private var locationCoord: (lat: Double, lng: Double)?
     @State private var category: String
     @State private var showCategoryPicker = false
     @State private var showLocationPrompt = false
@@ -150,7 +153,7 @@ struct ComposeView: View {
             .alert("Location", isPresented: $showLocationPrompt) {
                 TextField("Where were you?", text: $locationDraft)
                 Button("Cancel", role: .cancel) {}
-                Button("Save") { location = locationDraft.trimmingCharacters(in: .whitespaces) }
+                Button("Save") { location = locationDraft.trimmingCharacters(in: .whitespaces); locationCoord = nil }
             } message: { Text("Add a place to this note.") }
             .sheet(item: $editSheetFor) { s in editSheet(s) }
             .sheet(isPresented: $showFollowUp, onDismiss: { dismiss() }) {
@@ -431,8 +434,13 @@ struct ComposeView: View {
 
     private func useCurrentLocation() async {
         locating = true
-        if let place = await locator.currentPlace() { location = place }
-        else if !locator.isAuthorized { locationDraft = ""; showLocationPrompt = true }
+        // Capture the structured place (name + coordinates) so the saved note is map-ready.
+        if let p = await locator.currentPlaceStructured() {
+            location = p.name
+            if let lat = p.latitude, let lng = p.longitude { locationCoord = (lat, lng) }
+        } else if !locator.isAuthorized {
+            locationDraft = ""; showLocationPrompt = true
+        }
         locating = false
     }
 
@@ -458,14 +466,35 @@ struct ComposeView: View {
     private func createNote() -> UUID {
         var body = text
         for s in confirmed { body = insert(s, into: body) }
-        if let id = existingNoteID {
-            model.updateBody(id, body: body)
+        let id: UUID
+        if let existing = existingNoteID {
+            model.updateBody(existing, body: body)
             // Persist location edits too — updateBody alone left today's diary location stuck.
-            model.updateLocation(id, location: location.isEmpty ? nil : location)
-            return id
+            model.updateLocation(existing, location: location.isEmpty ? nil : location)
+            id = existing
+        } else {
+            id = model.createCapturedNote(body: body, folder: category, intensity: intensity,
+                                          location: location.isEmpty ? nil : location)
         }
-        return model.createCapturedNote(body: body, folder: category, intensity: intensity,
-                                        location: location.isEmpty ? nil : location)
+        attachCoordinates(to: id)
+        return id
+    }
+
+    /// Give the note's location a coordinate so it can appear on the map — from the GPS
+    /// fix we captured, or by geocoding the typed name in the background. Without this a
+    /// composed location was a hollow, coordinate-less pin.
+    private func attachCoordinates(to id: UUID) {
+        let name = location.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        if let c = locationCoord {
+            model.addPlace(id, name: name, latitude: c.lat, longitude: c.lng)
+        } else {
+            Task {
+                if let c = await LocationService.coordinate(for: name) {
+                    model.addPlace(id, name: name, latitude: c.latitude, longitude: c.longitude)
+                }
+            }
+        }
     }
 
     // MARK: - Text helpers
