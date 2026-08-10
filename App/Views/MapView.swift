@@ -54,7 +54,9 @@ struct MapView: View {
         for n in model.notes {
             guard folderMatches(n), period.contains(n.date) else { continue }
             let color = model.axis(for: n)?.color ?? .red
-            for p in n.allPlaces where p.hasCoordinate {
+            // Skip places whose name isn't plausibly a location (a reminder / amount that
+            // got geocoded once and stored) so junk pins don't show even after the fact.
+            for p in n.allPlaces where p.hasCoordinate && LocationService.looksLikePlace(p.name) {
                 out.append(Pin(id: "\(n.id.uuidString)|\(p.name.lowercased())",
                                noteID: n.id, title: n.displayName,
                                coordinate: CLLocationCoordinate2D(latitude: p.latitude!, longitude: p.longitude!),

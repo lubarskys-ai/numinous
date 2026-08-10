@@ -52,13 +52,33 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
     }
 
     /// Forward-geocode a typed place name to coordinates (for plotting typed places on a
-    /// map). Nil if it can't be resolved. Safe to call off the hot path.
+    /// map). Nil if it doesn't look like a place, can't be resolved, or resolves only to a
+    /// vague fallback — so a reminder like "Christina Ewoldt $5000" never becomes a pin.
     static func coordinate(for name: String) async -> (latitude: Double, longitude: Double)? {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
-        guard trimmed.count >= 2 else { return nil }
+        guard looksLikePlace(trimmed) else { return nil }
         let geocoder = CLGeocoder()
-        guard let p = try? await geocoder.geocodeAddressString(trimmed).first?.location else { return nil }
-        return (p.coordinate.latitude, p.coordinate.longitude)
+        guard let mark = try? await geocoder.geocodeAddressString(trimmed).first,
+              let loc = mark.location else { return nil }
+        // Require it to have resolved to a REAL named place (a city/region/country/POI),
+        // not a lenient guess — CLGeocoder happily returns a centroid for junk otherwise.
+        let resolved = mark.locality ?? mark.administrativeArea ?? mark.country ?? mark.areasOfInterest?.first
+        guard resolved != nil else { return nil }
+        return (loc.coordinate.latitude, loc.coordinate.longitude)
+    }
+
+    /// A cheap sanity check that a string is plausibly a place/address — not a dollar
+    /// amount, phone number, id, or a reminder someone stashed in a contact field. Keeps
+    /// non-location junk from being geocoded into (or shown as) a map pin.
+    static func looksLikePlace(_ raw: String) -> Bool {
+        let s = raw.trimmingCharacters(in: .whitespaces)
+        guard s.count >= 3 else { return false }
+        if s.contains(where: { "$€£¥₹@".contains($0) }) { return false }   // amounts / emails, not places (# is ok — apt numbers)
+        let letters = s.filter { $0.isLetter }.count
+        let digits = s.filter { $0.isNumber }.count
+        guard letters >= 3 else { return false }        // a place has real words
+        if digits > letters { return false }            // mostly-numeric → not a place
+        return true
     }
 
     private func ensureAuthorized() async -> Bool {
