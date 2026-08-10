@@ -32,6 +32,7 @@ struct MapView: View {
     @State private var period: Period = .all
     @State private var position: MapCameraPosition = .automatic
     @State private var openNote: NoteRef?
+    @State private var selection: String?             // tapped marker's stable id
     @State private var geocodedOnce = false
 
     private struct NoteRef: Identifiable { let id: UUID }
@@ -81,21 +82,23 @@ struct MapView: View {
 
     var body: some View {
         NavigationStack {
-            Map(position: $position) {
+            // Native Marker + tag + Map(selection:) — MapKit binds each marker's
+            // coordinate and selection to its stable tag itself, so a marker can't render
+            // at another note's spot or open the wrong note (the custom-annotation Button
+            // approach did both). Tapping sets `selection`; we resolve it to the note.
+            Map(position: $position, selection: $selection) {
                 ForEach(pins) { pin in
-                    Annotation(pin.title, coordinate: pin.coordinate) {
-                        Button { openNote = NoteRef(id: pin.noteID) } label: {
-                            Image(systemName: "mappin.circle.fill")
-                                .font(.title)
-                                .symbolRenderingMode(.palette)
-                                .foregroundStyle(.white, pin.color)
-                                .shadow(radius: 1.5)
-                        }
-                        .buttonStyle(.plain)
-                    }
+                    Marker(pin.title, systemImage: "mappin", coordinate: pin.coordinate)
+                        .tint(pin.color)
+                        .tag(pin.id)
                 }
             }
             .mapStyle(.standard(pointsOfInterest: .excludingAll))
+            .onChange(of: selection) { _, id in
+                guard let id, let pin = pins.first(where: { $0.id == id }) else { return }
+                openNote = NoteRef(id: pin.noteID)
+                selection = nil
+            }
             .overlay(alignment: .top) { filterBar }
             .overlay { if pins.isEmpty { emptyState } }
             .navigationTitle("Map")
