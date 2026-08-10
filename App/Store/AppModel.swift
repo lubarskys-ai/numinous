@@ -125,6 +125,8 @@ final class AppModel: ObservableObject {
         self.followUps = loaded?.followUps ?? []
         self.linkLearning = loaded?.linkLearning ?? LinkLearning()
         self.readwiseToken = UserDefaults.standard.string(forKey: Self.readwiseTokenKey)
+        self.homeLocation = UserDefaults.standard.data(forKey: Self.homeKey)
+            .flatMap { try? JSONDecoder().decode(Place.self, from: $0) }
         self.score = ScoreEngine().score(notes: n, folders: f, axes: a)
         recomputeLastTended()
         if loaded == nil || didMigrate || version < Self.schemaVersion {
@@ -1373,7 +1375,96 @@ final class AppModel: ObservableObject {
         guard notes[i].places != newPlaces || notes[i].location != newLocation else { return }
         notes[i].places = newPlaces
         notes[i].location = newLocation
+        applyTravelValue(i)   // a place note's distance from home now feeds its growth
         persist()
+    }
+
+    // MARK: - Home & travel value
+
+    /// Where you live — the origin for "how far did you travel". Persisted in UserDefaults.
+    @Published private(set) var homeLocation: Place?
+    private static let homeKey = "home_location"
+
+    /// Set (or clear) home, persist it, and re-derive every place note's travel value so the
+    /// whole map re-weights against the new home.
+    func setHome(_ place: Place?) {
+        homeLocation = place
+        if let place, let data = try? JSONEncoder().encode(place) {
+            UserDefaults.standard.set(data, forKey: Self.homeKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.homeKey)
+        }
+        for i in notes.indices { applyTravelValue(i) }
+        persist()
+    }
+
+    /// Folders whose notes are "places" — where a location and travel value make sense.
+    static func isPlaceLikeFolder(_ folderName: String) -> Bool {
+        let top = folderName.lowercased().split(separator: "/").first.map(String.init) ?? folderName.lowercased()
+        return ["travel", "trips", "trip", "location", "locations", "places", "restaurants"].contains(top)
+    }
+
+    /// Re-derive a place note's intensity from how far it is from home and how long the trip
+    /// lasted — farther + longer grows Meaning more. No-op unless home is set and the note is
+    /// a place note with a coordinate. Mutates only; the caller persists.
+    private func applyTravelValue(_ i: Int) {
+        guard notes.indices.contains(i),
+              Self.isPlaceLikeFolder(notes[i].folderName),
+              let home = homeLocation, let hlat = home.latitude, let hlon = home.longitude,
+              let place = notes[i].allPlaces.first(where: { $0.hasCoordinate }),
+              let plat = place.latitude, let plon = place.longitude else { return }
+        let km = Self.distanceKm(hlat, hlon, plat, plon)
+        let days = Self.tripDays(from: notes[i].details)
+        notes[i].intensity = Self.travelIntensity(distanceKm: km, days: days)
+    }
+
+    /// Map distance-from-home and trip length to a 1–5 intensity (the same growth dial
+    /// everything else uses): base 3, +0…2 for distance (log-tiered so it saturates — a
+    /// nearby trip and a far one both count, far more so), +0…1 for a multi-day trip.
+    static func travelIntensity(distanceKm: Double, days: Int) -> Int {
+        var score = 3.0
+        switch distanceKm {
+        case ..<50:    score += 0     // around town
+        case ..<800:   score += 1     // regional
+        default:       score += 2     // far afield
+        }
+        if days >= 7 { score += 1 } else if days >= 3 { score += 0.5 }
+        return min(5, max(1, Int(score.rounded())))
+    }
+
+    /// Trip length in days from a note's Trip start/end details (inclusive); 1 if none.
+    private static func tripDays(from details: [NoteDetail]) -> Int {
+        guard let (s, e) = tripRange(from: details) else { return 1 }
+        let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: s),
+                                                   to: Calendar.current.startOfDay(for: e)).day ?? 0
+        return max(1, days + 1)
+    }
+
+    /// Great-circle distance between two lat/long points, in kilometres (haversine).
+    static func distanceKm(_ lat1: Double, _ lon1: Double, _ lat2: Double, _ lon2: Double) -> Double {
+        let r = 6371.0
+        let dLat = (lat2 - lat1) * .pi / 180, dLon = (lon2 - lon1) * .pi / 180
+        let a = sin(dLat / 2) * sin(dLat / 2)
+            + cos(lat1 * .pi / 180) * cos(lat2 * .pi / 180) * sin(dLon / 2) * sin(dLon / 2)
+        return r * 2 * atan2(a.squareRoot(), (1 - a).squareRoot())
+    }
+
+    // MARK: - Auto-location for place notes
+
+    private lazy var autoLocator = LocationService()
+
+    /// Give a place-type note a location on its own: current GPS when granted (you're
+    /// usually there when you log it), else geocode its name. Skips notes that already have
+    /// a place, and non-place folders. Correctable afterwards via the pin editor.
+    func autoLocatePlaceNote(_ id: UUID) async {
+        guard let note = note(id: id),
+              Self.isPlaceLikeFolder(note.folderName),
+              note.allPlaces.isEmpty else { return }
+        if autoLocator.isAuthorized, let p = await autoLocator.currentPlaceStructured() {
+            addPlace(id, name: p.name, latitude: p.latitude, longitude: p.longitude)
+        } else if let c = await LocationService.coordinate(for: note.displayName) {
+            addPlace(id, name: note.displayName, latitude: c.latitude, longitude: c.longitude)
+        }
     }
 
     func updateBody(_ id: UUID, body: String) {
@@ -1504,6 +1595,7 @@ final class AppModel: ObservableObject {
         if start != nil, end != nil {
             for j in notes.indices { addTripLinkIfNeeded(j) }
         }
+        applyTravelValue(i)   // longer trips grow you more
         persist()
     }
 
@@ -1791,6 +1883,10 @@ final class AppModel: ObservableObject {
         if let i = notes.firstIndex(where: { $0.id == note.id }) {
             addTripLinkIfNeeded(i)
             if notes[i].body != note.body { persist() }
+        }
+        // A place-type note with no location yet gets one on its own (GPS or geocode).
+        if loc == nil || loc?.isEmpty == true {
+            Task { await autoLocatePlaceNote(note.id) }
         }
         return note.id
     }

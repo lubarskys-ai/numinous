@@ -521,6 +521,9 @@ struct AxisSettingsView: View {
     @State private var showRestorePicker = false
     @State private var pendingRestore: URL?
     @State private var restoreMessage: String?
+    @State private var showHomePrompt = false
+    @State private var homeDraft = ""
+    @StateObject private var locator = LocationService()
 
     var body: some View {
         NavigationStack {
@@ -531,6 +534,29 @@ struct AxisSettingsView: View {
                     Text("Axes")
                 } footer: {
                     Text("Rename or recolor the parts of life your avatar grows along. Your notes and growth stay exactly as they are.")
+                }
+
+                Section {
+                    HStack {
+                        Image(systemName: "house.fill").foregroundStyle(.secondary)
+                        Text(model.homeLocation?.name ?? "Not set")
+                            .foregroundStyle(model.homeLocation == nil ? .secondary : .primary)
+                    }
+                    Button {
+                        Task { if let p = await locator.currentPlaceStructured() { model.setHome(p) } }
+                    } label: { Label("Use current location", systemImage: "location.fill") }
+                    Button { homeDraft = model.homeLocation?.name ?? ""; showHomePrompt = true } label: {
+                        Label("Enter home city", systemImage: "mappin")
+                    }
+                    if model.homeLocation != nil {
+                        Button(role: .destructive) { model.setHome(nil) } label: {
+                            Label("Clear home", systemImage: "xmark")
+                        }
+                    }
+                } header: {
+                    Text("Home")
+                } footer: {
+                    Text("Where you live. Travel notes grow your Meaning axis more the farther they are from home and the longer the trip.")
                 }
 
                 Section {
@@ -580,6 +606,21 @@ struct AxisSettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .onAppear { backupURL = model.exportBackup() }
+            .alert("Home", isPresented: $showHomePrompt) {
+                TextField("City, State", text: $homeDraft)
+                Button("Cancel", role: .cancel) {}
+                Button("Set") {
+                    let name = homeDraft.trimmingCharacters(in: .whitespaces)
+                    guard !name.isEmpty else { return }
+                    Task {
+                        if let c = await LocationService.coordinate(for: name) {
+                            model.setHome(Place(name: name, latitude: c.latitude, longitude: c.longitude))
+                        } else {
+                            model.setHome(Place(name: name))   // keep the name even if it won't geocode
+                        }
+                    }
+                }
+            } message: { Text("Where do you live? Used to measure how far your travels take you.") }
             .fileImporter(isPresented: $showRestorePicker, allowedContentTypes: [.json]) { result in
                 if case .success(let url) = result { pendingRestore = url }
             }
