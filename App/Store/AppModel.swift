@@ -1339,6 +1339,23 @@ final class AppModel: ObservableObject {
         commitPlaces(places, to: i)
     }
 
+    /// Correct a place — replace the one matched by its current name with a new name
+    /// and/or coordinate, keeping its position in the list. Used by the pin editor to fix
+    /// a wrong geocode.
+    func updatePlace(_ id: UUID, original: String, name: String, latitude: Double?, longitude: Double?) {
+        guard let i = notes.firstIndex(where: { $0.id == id }) else { return }
+        let newName = name.trimmingCharacters(in: .whitespaces)
+        guard !newName.isEmpty else { return }
+        var places = notes[i].allPlaces
+        let replacement = Place(name: newName, latitude: latitude, longitude: longitude)
+        if let j = places.firstIndex(where: { $0.name.caseInsensitiveCompare(original) == .orderedSame }) {
+            places[j] = replacement
+        } else {
+            places.append(replacement)
+        }
+        commitPlaces(places, to: i)
+    }
+
     /// Remove a place from a note by name.
     func removePlace(_ id: UUID, name: String) {
         guard let i = notes.firstIndex(where: { $0.id == id }) else { return }

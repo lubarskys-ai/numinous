@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import MapKit
 import NuminousCore
 
 struct NoteDetailView: View {
@@ -21,9 +22,11 @@ struct NoteDetailView: View {
     @State private var tripEnd = Date()
     @State private var editingLocation = false
     @State private var locationDraft = ""
+    @State private var editingPlace: PlaceRef?
     @StateObject private var locator = LocationService()
 
     private struct LinkTarget: Identifiable { let id: UUID }
+    private struct PlaceRef: Identifiable { let id = UUID(); let place: Place }
 
     var body: some View {
         if let note = model.note(id: noteID) {
@@ -62,6 +65,9 @@ struct NoteDetailView: View {
                 Button("Cancel", role: .cancel) {}
                 Button("Add") { addTypedPlace(to: note.id, name: locationDraft) }
             } message: { Text("Add a place to this note. You can add more than one.") }
+            .sheet(item: $editingPlace) { ref in
+                PlaceEditorView(noteID: note.id, place: ref.place)
+            }
             .onAppear {
                 if loadedBodyFor != note.id {
                     editedBody = note.body; titleDraft = note.title; loadedBodyFor = note.id
@@ -268,10 +274,19 @@ struct NoteDetailView: View {
     private func locationRows(_ note: Note) -> some View {
         ForEach(note.allPlaces, id: \.name) { place in
             HStack(spacing: 6) {
-                Image(systemName: place.hasCoordinate ? "mappin.circle.fill" : "mappin.and.ellipse")
-                    .foregroundStyle(.secondary)
-                Text(place.name)
-                Spacer()
+                Button { editingPlace = PlaceRef(place: place) } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: place.hasCoordinate ? "mappin.circle.fill" : "mappin.and.ellipse")
+                            .foregroundStyle(place.hasCoordinate ? Color.secondary : Color.orange)
+                        Text(place.name).foregroundStyle(.primary)
+                        Spacer()
+                        Text(place.hasCoordinate ? "" : "set on map")
+                            .font(.caption2).foregroundStyle(.orange)
+                        Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
                 Button {
                     model.removePlace(note.id, name: place.name)
                 } label: {
@@ -620,5 +635,101 @@ struct NoteDetailView: View {
             Spacer(minLength: 0)
         }
         .padding(.vertical, 4)
+    }
+}
+
+/// Correct where a place sits when a geocode is wrong: tap the map to move the pin to the
+/// right spot, re-search the name, or use your current location. Saves the corrected name
+/// + coordinate back to the note.
+struct PlaceEditorView: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let noteID: UUID
+    let place: Place
+
+    @State private var name: String
+    @State private var coord: CLLocationCoordinate2D?
+    @State private var position: MapCameraPosition
+    @StateObject private var locator = LocationService()
+
+    init(noteID: UUID, place: Place) {
+        self.noteID = noteID
+        self.place = place
+        _name = State(initialValue: place.name)
+        if let lat = place.latitude, let lng = place.longitude {
+            let c = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+            _coord = State(initialValue: c)
+            _position = State(initialValue: .region(MKCoordinateRegion(center: c, latitudinalMeters: 4000, longitudinalMeters: 4000)))
+        } else {
+            _coord = State(initialValue: nil)
+            _position = State(initialValue: .automatic)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    Image(systemName: "mappin.and.ellipse").foregroundStyle(.secondary)
+                    TextField("Place name", text: $name)
+                        .autocorrectionDisabled()
+                        .onSubmit { Task { await search() } }
+                    Button { Task { await search() } } label: { Image(systemName: "magnifyingglass") }
+                        .accessibilityLabel("Search this name")
+                    Button { Task { await useCurrent() } } label: { Image(systemName: "location.fill") }
+                        .accessibilityLabel("Use current location")
+                }
+                .padding(12)
+                Divider()
+                MapReader { proxy in
+                    Map(position: $position) {
+                        if let coord {
+                            Marker(name.isEmpty ? "Here" : name, coordinate: coord).tint(.red)
+                        }
+                    }
+                    .onTapGesture { pt in
+                        if let c = proxy.convert(pt, from: .local) { coord = c }
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    Text(coord == nil ? "Tap the map to drop a pin where this was."
+                                      : "Tap the map to move the pin to the right spot.")
+                        .font(.caption).padding(.horizontal, 12).padding(.vertical, 8)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .padding(.bottom, 14)
+                }
+            }
+            .navigationTitle("Fix location")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { save() }
+                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+    }
+
+    /// Geocode the typed name and center the pin there.
+    private func search() async {
+        guard let c = await LocationService.coordinate(for: name) else { return }
+        let cc = CLLocationCoordinate2D(latitude: c.latitude, longitude: c.longitude)
+        coord = cc
+        position = .region(MKCoordinateRegion(center: cc, latitudinalMeters: 4000, longitudinalMeters: 4000))
+    }
+
+    private func useCurrent() async {
+        guard let p = await locator.currentPlaceStructured(), let lat = p.latitude, let lng = p.longitude else { return }
+        let cc = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+        coord = cc
+        if name.trimmingCharacters(in: .whitespaces).isEmpty { name = p.name }
+        position = .region(MKCoordinateRegion(center: cc, latitudinalMeters: 2000, longitudinalMeters: 2000))
+    }
+
+    private func save() {
+        model.updatePlace(noteID, original: place.name, name: name,
+                          latitude: coord?.latitude, longitude: coord?.longitude)
+        dismiss()
     }
 }
