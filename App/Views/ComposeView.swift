@@ -28,6 +28,9 @@ struct ComposeView: View {
     /// Coordinates captured when the location came from GPS, so the saved place is
     /// map-ready (not a hollow, coordinate-less pin). Cleared when you type a place.
     @State private var locationCoord: (lat: Double, lng: Double)?
+    /// True when `location` was auto-filled from current GPS (not typed) — so we can drop
+    /// it if the note turns out to be a place note (whose location comes from its name).
+    @State private var locationAutoFilled = false
     @State private var category: String
     @State private var showCategoryPicker = false
     @State private var showLocationPrompt = false
@@ -148,12 +151,23 @@ struct ComposeView: View {
                     detailsMenu
                 }
             }
-            .task { if location.isEmpty, locator.isAuthorized { await useCurrentLocation() } }
+            // Auto-fill current location for ordinary notes (where you are). NOT for place
+            // notes — those take their location from the note's name.
+            .task {
+                if location.isEmpty, !AppModel.isPlaceLikeFolder(category), locator.isAuthorized {
+                    await useCurrentLocation(); locationAutoFilled = true
+                }
+            }
+            .onChange(of: category) { newCategory in
+                if AppModel.isPlaceLikeFolder(newCategory), locationAutoFilled {
+                    location = ""; locationCoord = nil; locationAutoFilled = false
+                }
+            }
             .onAppear { resolveDiary() }
             .alert("Location", isPresented: $showLocationPrompt) {
                 TextField("Where were you?", text: $locationDraft)
                 Button("Cancel", role: .cancel) {}
-                Button("Save") { location = locationDraft.trimmingCharacters(in: .whitespaces); locationCoord = nil }
+                Button("Save") { location = locationDraft.trimmingCharacters(in: .whitespaces); locationCoord = nil; locationAutoFilled = false }
             } message: { Text("Add a place to this note.") }
             .sheet(item: $editSheetFor) { s in editSheet(s) }
             .sheet(isPresented: $showFollowUp, onDismiss: { dismiss() }) {

@@ -51,20 +51,29 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
         return Place(name: name, latitude: c.latitude, longitude: c.longitude)
     }
 
-    /// Forward-geocode a typed place name to coordinates (for plotting typed places on a
-    /// map). Nil if it doesn't look like a place, can't be resolved, or resolves only to a
-    /// vague fallback — so a reminder like "Christina Ewoldt $5000" never becomes a pin.
-    static func coordinate(for name: String) async -> (latitude: Double, longitude: Double)? {
+    /// Forward-geocode a place name to coordinates. `near` biases the search to a region
+    /// (so a chain like "Dunkin" resolves to the branch nearest you). Nil if it doesn't
+    /// look like a place, can't be resolved, or resolves only to a vague fallback — so a
+    /// reminder like "Christina Ewoldt $5000" never becomes a pin.
+    static func coordinate(for name: String, near center: CLLocationCoordinate2D? = nil) async -> (latitude: Double, longitude: Double)? {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard looksLikePlace(trimmed) else { return nil }
         let geocoder = CLGeocoder()
-        guard let mark = try? await geocoder.geocodeAddressString(trimmed).first,
+        let region = center.map { CLCircularRegion(center: $0, radius: 60_000, identifier: "bias") }
+        guard let mark = try? await geocoder.geocodeAddressString(trimmed, in: region, preferredLocale: nil).first,
               let loc = mark.location else { return nil }
         // Require it to have resolved to a REAL named place (a city/region/country/POI),
         // not a lenient guess — CLGeocoder happily returns a centroid for junk otherwise.
         let resolved = mark.locality ?? mark.administrativeArea ?? mark.country ?? mark.areasOfInterest?.first
         guard resolved != nil else { return nil }
         return (loc.coordinate.latitude, loc.coordinate.longitude)
+    }
+
+    /// Just the current coordinate (no reverse-geocode to a name) — used to bias a name
+    /// lookup to where you are.
+    func currentCoordinate() async -> CLLocationCoordinate2D? {
+        guard await ensureAuthorized(), let location = await requestLocation() else { return nil }
+        return location.coordinate
     }
 
     /// A cheap sanity check that a string is plausibly a place/address — not a dollar

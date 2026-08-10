@@ -1018,6 +1018,26 @@ final class AppModel: ObservableObject {
         guard !new.isEmpty, Self.norm(new) != Self.norm(old) else { return }
         ensureFolderExists(for: new, like: old)
         retitle([(old, new)])
+        // Named into a place folder (e.g. travel/restaurant/Dunkin) → make the pin match
+        // the new name, overriding any earlier auto-GPS guess (explicit naming wins).
+        if let note = note(id: id), Self.isPlaceLikeFolder(note.folderName) {
+            Task { await setPlaceFromName(id) }
+        }
+    }
+
+    /// Set a place note's pin from its NAME (geocoded, biased to nearby), replacing an
+    /// existing auto-derived location — so renaming a note to a place moves its pin to
+    /// match. No-op if the name doesn't resolve to a real place (keeps what's there).
+    func setPlaceFromName(_ id: UUID) async {
+        guard let note = note(id: id), Self.isPlaceLikeFolder(note.folderName) else { return }
+        let name = note.displayName
+        // Already matches the name → nothing to do.
+        if note.allPlaces.first?.name.caseInsensitiveCompare(name) == .orderedSame,
+           note.allPlaces.first?.hasCoordinate == true { return }
+        let near = autoLocator.isAuthorized ? await autoLocator.currentCoordinate() : nil
+        guard let c = await LocationService.coordinate(for: name, near: near),
+              let i = notes.firstIndex(where: { $0.id == id }) else { return }
+        commitPlaces([Place(name: name, latitude: c.latitude, longitude: c.longitude)], to: i)
     }
 
     /// Rename or move a folder path (e.g. `entertainment/restaurant` →
@@ -1453,17 +1473,20 @@ final class AppModel: ObservableObject {
 
     private lazy var autoLocator = LocationService()
 
-    /// Give a place-type note a location on its own: current GPS when granted (you're
-    /// usually there when you log it), else geocode its name. Skips notes that already have
-    /// a place, and non-place folders. Correctable afterwards via the pin editor.
+    /// Give a place-type note a location on its own. The note's NAME is the place, so
+    /// geocode that first (`location/Eiffel Tower` → the Eiffel Tower), biased to where you
+    /// are so a chain resolves to the nearby branch. Only when the name isn't a real place
+    /// (e.g. a note auto-titled by date) fall back to your current location. Skips notes
+    /// that already have a place. Correctable afterwards via the pin editor.
     func autoLocatePlaceNote(_ id: UUID) async {
         guard let note = note(id: id),
               Self.isPlaceLikeFolder(note.folderName),
               note.allPlaces.isEmpty else { return }
-        if autoLocator.isAuthorized, let p = await autoLocator.currentPlaceStructured() {
-            addPlace(id, name: p.name, latitude: p.latitude, longitude: p.longitude)
-        } else if let c = await LocationService.coordinate(for: note.displayName) {
+        let near = autoLocator.isAuthorized ? await autoLocator.currentCoordinate() : nil
+        if let c = await LocationService.coordinate(for: note.displayName, near: near) {
             addPlace(id, name: note.displayName, latitude: c.latitude, longitude: c.longitude)
+        } else if autoLocator.isAuthorized, let p = await autoLocator.currentPlaceStructured() {
+            addPlace(id, name: p.name, latitude: p.latitude, longitude: p.longitude)
         }
     }
 
