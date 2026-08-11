@@ -575,14 +575,6 @@ struct Avatar3DView: UIViewRepresentable {
             connectomeFloat.addChildNode(organ)
         }
 
-        // Every axis places its nodes inside a small interior ellipsoid, so the
-        // whole connectome stays within the body (Body fills the torso/pelvis core).
-        let contain: [String: (Double, Double, Double)] = [
-            "mind": (0.06, 0.07, 0.05), "meaning": (0.06, 0.07, 0.05),
-            "heart": (0.08, 0.075, 0.055), "spirit": (0.065, 0.075, 0.05),
-            "gut": (0.08, 0.06, 0.055), "body": (0.10, 0.20, 0.06),
-        ]
-
         // ── Force-directed graph layout (Obsidian-style). Run Fruchterman–Reingold
         // only on the LINKED nodes (fast even with thousands of files), then scatter
         // the unlinked files on a surrounding shell so every file still shows.
@@ -648,6 +640,42 @@ struct Avatar3DView: UIViewRepresentable {
         }
         func graphPos(_ id: UUID) -> SCNVector3 { v(fx[id] ?? 0, fy[id] ?? 0, fz[id] ?? 0) }
 
+        // Each axis's nodes settle into the SHAPE of its organ — heart lobes tapering to a
+        // point, brain hemispheres, a gut coil, a radiant core, an aura shell — so even a
+        // young graph coalesces into a suggestion of an organ system rather than a vague
+        // orb. Sparse notes trace a faint outline (infancy); more notes fill the organ in.
+        func organSample(_ axis: String, _ i: Int, _ n: Int) -> SCNVector3 {
+            let c = region(axis)
+            let t = (Double(i) + 0.5) / Double(max(1, n))
+            func r(_ salt: Int) -> Double { hrand(i, salt) }
+            switch axis {
+            case "heart":
+                if r(20) < 0.62 {                    // two lobes at the top
+                    let lobe = r(21) < 0.5 ? -1.0 : 1.0
+                    let rr = 0.05 * r(22).squareRoot(), ang = r(23) * 2 * .pi
+                    return v(c.0 + lobe * 0.028 + rr * cos(ang), c.1 + 0.03 + rr * sin(ang) * 0.85, c.2 + (r(24) - 0.5) * 0.05)
+                }
+                let tp = r(25)                       // tapering to a point below
+                return v(c.0 + (r(26) - 0.5) * 0.05 * (1 - tp), c.1 + 0.02 - tp * 0.09, c.2 + (r(27) - 0.5) * 0.04)
+            case "mind", "meaning":                  // a hemisphere offset to one side
+                let side = axis == "mind" ? -1.0 : 1.0
+                let rr = 0.055 * pow(r(20), 1.0 / 3.0), th = r(21) * 2 * .pi, ph = acos(2 * r(22) - 1)
+                return v(c.0 + side * 0.03 + rr * sin(ph) * cos(th) * 0.8, c.1 + rr * cos(ph) * 0.9, c.2 + rr * sin(ph) * sin(th))
+            case "gut":                              // a serpentine coil winding downward
+                return v(c.0 + sin(t * .pi * 3) * 0.05 + (r(20) - 0.5) * 0.02,
+                         c.1 + (0.5 - t) * 0.13 + (r(21) - 0.5) * 0.02,
+                         c.2 + cos(t * .pi * 2) * 0.03 + (r(22) - 0.5) * 0.02)
+            case "body":                             // spread through torso and limbs
+                return v(c.0 + (r(20) - 0.5) * 0.17, c.1 + (r(21) - 0.5) * 0.55, c.2 + (r(22) - 0.5) * 0.10)
+            case "influences":                       // an aura shell around the figure
+                let rr = 0.15 + r(20) * 0.05, th = r(21) * 2 * .pi, ph = acos(2 * r(22) - 1)
+                return v(c.0 + rr * sin(ph) * cos(th), c.1 + rr * cos(ph) * 0.85, c.2 + rr * sin(ph) * sin(th))
+            default:                                 // spirit: a small radiant core
+                let rr = 0.045 * pow(r(20), 1.0 / 3.0), th = r(21) * 2 * .pi, ph = acos(2 * r(22) - 1)
+                return v(c.0 + rr * sin(ph) * cos(th), c.1 + rr * cos(ph), c.2 + rr * sin(ph) * sin(th))
+            }
+        }
+
         var pos: [UUID: SCNVector3] = [:]
         // Accumulate node positions grouped by axis + a size bucket, so the ENTIRE graph
         // renders as a few batched point clouds (one draw call each) instead of one
@@ -655,22 +683,14 @@ struct Avatar3DView: UIViewRepresentable {
         var cloudPts: [String: [SCNVector3]] = [:]     // key = "axis|hub" or "axis|dot"
         var hitTargets: [(id: UUID, local: SCNVector3)] = []
         for (axisKey, group) in Dictionary(grouping: nodes, by: { $0.axis }) {
-            let c = region(axisKey)
-            let (rx, ry, rz) = contain[axisKey] ?? (0.07, 0.07, 0.05)
-            let n = Double(group.count)
+            let n = group.count
             for (i, gn) in group.enumerated() {
-                let t = (Double(i) + 0.5) / max(1, n)
-                let ga = Double(i) * 2.399963
-                let rad = t.squareRoot()
-                // Nodes start scattered across space and only drift together into
-                // the body form as the avatar matures — a few loose points first.
-                let anatomical = v(c.0 + rx * rad * cos(ga),
-                                   c.1 + (t - 0.5) * 2 * ry,
-                                   c.2 + rz * rad * sin(ga))
-                // Nodes spread out as a loose web when young and only draw together
-                // into the body form as the avatar matures — so a low-growth avatar is
-                // a spread graph, not a body-shaped pile of nodes.
-                let converge = smoothstep(0.35, 0.85, matur)
+                let anatomical = organSample(axisKey, i, n)
+                // Nodes sit in their organ's shape so the graph reads as a coalescing organ
+                // system even in infancy. Unlinked notes go fully into the organ; linked
+                // ones keep a little web pull (tightening as the avatar matures), so the
+                // threads between them read as connective tissue rather than scattering.
+                let converge = linkedSet.contains(gn.id) ? (0.7 + 0.3 * smoothstep(0.15, 0.75, matur)) : 1.0
                 let p = lerpV(graphPos(gn.id), anatomical, converge)
                 pos[gn.id] = p
                 guard nodesAppear > 0.02 else { continue }
