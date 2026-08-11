@@ -693,24 +693,31 @@ struct Avatar3DView: UIViewRepresentable {
         // Accumulate node positions grouped by axis + a size bucket, so the ENTIRE graph
         // renders as a few batched point clouds (one draw call each) instead of one
         // SCNNode per note. This is what keeps memory ~flat no matter how many notes.
-        var cloudPts: [String: [SCNVector3]] = [:]     // key = "axis|hub" or "axis|dot"
+        var cloudPts: [String: [SCNVector3]] = [:]     // LINKED nodes → organ shapes (bright)
+        var looseByAxis: [String: [SCNVector3]] = [:]  // UNLINKED nodes → loose, dim, outside
         var hitTargets: [(id: UUID, local: SCNVector3)] = []
         for (axisKey, group) in Dictionary(grouping: nodes, by: { $0.axis }) {
             let n = group.count
             for (i, gn) in group.enumerated() {
-                let anatomical = organSample(axisKey, i, n)
-                // Nodes sit in their organ's shape so the graph reads as a coalescing organ
-                // system even in infancy. Unlinked notes go fully into the organ; linked
-                // ones keep a little web pull (tightening as the avatar matures), so the
-                // threads between them read as connective tissue rather than scattering.
-                let converge = linkedSet.contains(gn.id) ? (0.7 + 0.3 * smoothstep(0.15, 0.75, matur)) : 1.0
-                let p = lerpV(graphPos(gn.id), anatomical, converge)
+                let linked = linkedSet.contains(gn.id)
+                // Only CONNECTED notes coalesce into the organs — the web builds the body.
+                // Unlinked notes stay loose points drifting around it, not part of an organ.
+                let p: SCNVector3
+                if linked {
+                    let converge = 0.7 + 0.3 * smoothstep(0.15, 0.75, matur)
+                    p = lerpV(graphPos(gn.id), organSample(axisKey, i, n), converge)
+                } else {
+                    p = graphPos(gn.id)   // the surrounding shell — loose, unintegrated
+                }
                 pos[gn.id] = p
-                guard nodesAppear > 0.02 else { continue }
-                // Hubs (many connections) render a touch larger for visual hierarchy.
-                let bucket = (degree[gn.id] ?? 0) >= 3 ? "hub" : "dot"
-                cloudPts[gn.axis + "|" + bucket, default: []].append(p)
                 hitTargets.append((gn.id, p))
+                guard nodesAppear > 0.02 else { continue }
+                if linked {
+                    let bucket = (degree[gn.id] ?? 0) >= 3 ? "hub" : "dot"   // hubs a touch larger
+                    cloudPts[gn.axis + "|" + bucket, default: []].append(p)
+                } else {
+                    looseByAxis[gn.axis, default: []].append(p)
+                }
             }
         }
         // Nodes are the star: a glowing dot per note (soft additive halo + crisp core),
@@ -729,6 +736,13 @@ struct Avatar3DView: UIViewRepresentable {
                                   opacity: CGFloat(0.95 * nodesAppear))
             core.renderingOrder = 12
             connectomeFloat.addChildNode(core)
+        }
+        // Unlinked notes: small, dim, no glow — present but clearly not part of the web.
+        for (axisKey, pts) in looseByAxis where !pts.isEmpty {
+            let loose = pointCloud(pts, color: color(axisKey), screenRadius: 2.2,
+                                   opacity: CGFloat(0.28 * nodesAppear))
+            loose.renderingOrder = 10
+            connectomeFloat.addChildNode(loose)
         }
         coordinator?.nodeHitTargets = hitTargets
         coordinator?.connectomeNode = connectomeFloat
