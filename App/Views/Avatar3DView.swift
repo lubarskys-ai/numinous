@@ -359,7 +359,7 @@ struct Avatar3DView: UIViewRepresentable {
         // The body materializes from a shimmer of motes that gathers onto its
         // surface — only during the body stage, once connections have multiplied.
         if !bodySamples.isEmpty {
-            for i in 0..<460 {
+            for i in 0..<240 {
                 let target = bodySamples[(i * 89) % bodySamples.count]
                 let ax = GLTFBody.axis(forX: Double(target.x), y: Double(target.y))
                 // Each mote gathers onto the surface at ITS region's rate — so an
@@ -381,7 +381,7 @@ struct Avatar3DView: UIViewRepresentable {
 
         // A boundless background starfield on a far shell that surrounds the camera,
         // so the cosmos keeps going (never shows an edge) however far you zoom out.
-        for i in 0..<700 {
+        for i in 0..<360 {
             let u = hrand(i, 11) * 2 - 1
             let phi = hrand(i, 12) * 2 * .pi
             let r = 26 + hrand(i, 13) * 16
@@ -573,8 +573,8 @@ struct Avatar3DView: UIViewRepresentable {
             let col = GLTFBody.blend(UIColor(white: 0.55, alpha: 1), color(axisKey), CGFloat(g) * 0.9)
             let m = SCNMaterial(); m.lightingModel = .constant
             m.diffuse.contents = col; m.emission.contents = col
-            m.emission.intensity = CGFloat(0.12 + 0.4 * form)
-            m.transparency = CGFloat(0.16 + 0.42 * form)   // faint outline → more solid organ
+            m.emission.intensity = CGFloat(0.08 + 0.22 * form)
+            m.transparency = CGFloat(0.07 + 0.2 * form)   // a vague, soft outline at first
             m.writesToDepthBuffer = false; m.isDoubleSided = true
             let organ = organNode(axisKey, orr, m)
             organ.position = v(c.0, c.1, c.2)
@@ -713,20 +713,14 @@ struct Avatar3DView: UIViewRepresentable {
                 hitTargets.append((gn.id, p))
             }
         }
-        // Build a soft additive glow layer + a crisp core per (axis, bucket). Two batched
-        // draw calls per group make every dot a glowing orb, at cost independent of count.
+        // Just a faint suggestion of notes gathering — small, dim points, no glowing orbs.
+        // The organ outlines carry the shape; the nodes are a whisper of dots inside.
         for (key, pts) in cloudPts where !pts.isEmpty {
             let parts = key.split(separator: "|")
             let axisKey = String(parts.first ?? "")
             let isHub = parts.count > 1 && parts[1] == "hub"
-            let col = color(axisKey)
-            let coreR: CGFloat = isHub ? 7 : 4.5
-            let glow = pointCloud(pts, color: col, screenRadius: coreR * 2.6,
-                                  opacity: CGFloat(0.18 * nodesAppear), additive: true)
-            glow.renderingOrder = 11
-            connectomeFloat.addChildNode(glow)
-            let core = pointCloud(pts, color: col, screenRadius: coreR,
-                                  opacity: CGFloat(0.95 * nodesAppear))
+            let core = pointCloud(pts, color: color(axisKey), screenRadius: isHub ? 3.8 : 2.4,
+                                  opacity: CGFloat(0.5 * nodesAppear))
             core.renderingOrder = 12
             connectomeFloat.addChildNode(core)
         }
@@ -768,10 +762,10 @@ struct Avatar3DView: UIViewRepresentable {
             let col = e.cross ? UIColor(red: 0.6, green: 0.85, blue: 1.0, alpha: 1) : UIColor(white: 0.78, alpha: 1)
             let mat = SCNMaterial(); mat.lightingModel = .constant
             mat.diffuse.contents = col; mat.emission.contents = col
-            mat.emission.intensity = (e.cross ? 0.5 : 0.32) * linksAppear
-            mat.transparency = CGFloat((e.cross ? 0.6 : 0.42) * linksAppear)
+            mat.emission.intensity = (e.cross ? 0.22 : 0.14) * linksAppear
+            mat.transparency = CGFloat((e.cross ? 0.18 : 0.1) * linksAppear)   // faint, calm
             mat.writesToDepthBuffer = false
-            thread(a, b, e.cross ? 0.0032 : 0.0022, mat, name: "link:\(e.a.uuidString):\(e.b.uuidString)")
+            thread(a, b, e.cross ? 0.0015 : 0.0011, mat, name: "link:\(e.a.uuidString):\(e.b.uuidString)")
         }
 
         // The body and the connectome each gently float and tumble in space — a
