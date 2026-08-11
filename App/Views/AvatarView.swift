@@ -11,6 +11,7 @@ struct AvatarView: View {
     @State private var zoom: Double = 1
     @State private var committedZoom: Double = 1
     @State private var path: [UUID] = []
+    @State private var nodeLabels: [NodeLabel] = []
 
     var body: some View {
         let balance = model.score.axisBalance(over: model.axes)
@@ -36,9 +37,11 @@ struct AvatarView: View {
                         maturity: model.maturity,
                         zoom: zoom,
                         onTapNode: { path.append($0) },
-                        onZoomChange: { zoom = $0; committedZoom = $0 }
+                        onZoomChange: { zoom = $0; committedZoom = $0 },
+                        onLabels: { nodeLabels = $0 }
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay { labelOverlay }
                     .overlay(alignment: .bottomTrailing) { zoomControls.padding(14) }
 
                     if let reflection {
@@ -61,6 +64,22 @@ struct AvatarView: View {
         .preferredColorScheme(.dark)
     }
 
+
+    /// Names for the few nodes nearest the centre when zoomed in — drawn in 2D over the
+    /// scene (no 3D text), positioned from Avatar3DView's per-frame projection.
+    private var labelOverlay: some View {
+        ForEach(nodeLabels) { label in
+            Text(label.text)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(.black.opacity(0.5), in: Capsule())
+                .fixedSize()
+                .position(x: label.point.x, y: label.point.y - 15)
+                .allowsHitTesting(false)
+        }
+    }
 
     /// A deep-space backdrop so the connectome and stardust actually glow.
     private var spaceBackground: some View {

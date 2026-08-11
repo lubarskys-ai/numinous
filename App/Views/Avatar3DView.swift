@@ -5,6 +5,9 @@ import SceneKit
 struct GraphNode { let id: UUID; let axis: String; var label: String = "" }
 /// A scored connection between two placed notes.
 struct GraphEdge { let a: UUID; let b: UUID; let cross: Bool }
+/// A node's name projected to 2D screen space, for a lightweight SwiftUI label overlay
+/// (drawn only when zoomed in — no memory-heavy 3D text).
+struct NodeLabel: Identifiable { let id: UUID; let text: String; let point: CGPoint }
 
 /// Phase-1/3 spike: a rotatable androgynous body (grey when young, tinting to each
 /// axis's color as it grows) with the connection graph rendered *inside* it — the
@@ -24,6 +27,9 @@ struct Avatar3DView: UIViewRepresentable {
     /// Called with a note's id when its node is tapped.
     var onTapNode: ((UUID) -> Void)? = nil
     var onZoomChange: ((Double) -> Void)? = nil
+    /// Reports on-screen positions of node names near the centre while zoomed in, so a 2D
+    /// SwiftUI layer can draw labels without any 3D text geometry.
+    var onLabels: (([NodeLabel]) -> Void)? = nil
 
     // A long "telephoto" rig: the camera sits far back with a narrow field of view, which
     // flattens perspective so foreground and background nodes zoom at nearly the same rate
@@ -64,13 +70,17 @@ struct Avatar3DView: UIViewRepresentable {
         context.coordinator.onTapNode = onTapNode
         context.coordinator.zoom = zoom
         context.coordinator.onZoomChange = onZoomChange
+        context.coordinator.onLabels = onLabels
+        view.delegate = context.coordinator     // per-frame hook for projecting labels
         return view
     }
 
     func updateUIView(_ view: SCNView, context: Context) {
         context.coordinator.onTapNode = onTapNode
         context.coordinator.onZoomChange = onZoomChange
+        context.coordinator.onLabels = onLabels
         context.coordinator.zoom = zoom
+        context.coordinator.viewSize = view.bounds.size
         // Rebuild when maturity changes (e.g. the "watch it grow" animation stepping
         // it) so the birth sequence plays; otherwise just track zoom.
         if abs(context.coordinator.builtMaturity - maturity) > 0.004 {
@@ -98,11 +108,12 @@ struct Avatar3DView: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate, SCNSceneRendererDelegate {
         weak var view: SCNView?
         var builtMaturity: Double = -1
         var onTapNode: ((UUID) -> Void)?
         var onZoomChange: ((Double) -> Void)?
+        var onLabels: (([NodeLabel]) -> Void)?
         var zoom: Double = 1
         var lastNodeScale: Float = -1
         private var pinchStartZoom: Double = 1
@@ -110,9 +121,40 @@ struct Avatar3DView: UIViewRepresentable {
         // hit-testing works off these stored local positions, projected through the
         // connectome node's current (animated) world transform.
         var nodeHitTargets: [(id: UUID, local: SCNVector3)] = []
+        var labelTargets: [(id: UUID, local: SCNVector3, text: String)] = []
+        var viewSize: CGSize = .zero
+        private var lastLabelTime: TimeInterval = 0
+        private var labelsEmpty = true
         weak var connectomeNode: SCNNode?
 
         func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+
+        /// Once per rendered frame (throttled): when zoomed in, project the node names near
+        /// screen centre and hand a small set to the 2D SwiftUI overlay. Labels are drawn in
+        /// SwiftUI, never as SceneKit text, so they add no scene memory.
+        func renderer(_ renderer: SCNSceneRenderer, didRenderScene scene: SCNScene, atTime time: TimeInterval) {
+            guard let view, zoom > 6, viewSize.width > 1 else {
+                if !labelsEmpty { labelsEmpty = true; DispatchQueue.main.async { self.onLabels?([]) } }
+                return
+            }
+            guard time - lastLabelTime > 0.11 else { return }   // ~9 Hz is plenty for labels
+            lastLabelTime = time
+            let sz = viewSize
+            let center = CGPoint(x: sz.width / 2, y: sz.height / 2)
+            let connectome = connectomeNode?.presentation
+            var cands: [(NodeLabel, CGFloat)] = []
+            for (id, local, text) in labelTargets {
+                let wp = connectome?.convertPosition(local, to: nil) ?? local
+                let s = view.projectPoint(wp)
+                guard s.z > 0, s.z < 1 else { continue }
+                let pt = CGPoint(x: CGFloat(s.x), y: CGFloat(s.y))
+                guard pt.x > -30, pt.y > -20, pt.x < sz.width + 30, pt.y < sz.height + 20 else { continue }
+                cands.append((NodeLabel(id: id, text: text, point: pt), hypot(pt.x - center.x, pt.y - center.y)))
+            }
+            let nearest = cands.sorted { $0.1 < $1.1 }.prefix(14).map(\.0)
+            labelsEmpty = nearest.isEmpty
+            DispatchQueue.main.async { self.onLabels?(nearest) }
+        }
 
         /// Two-finger drag pans the camera (in its own plane), so you can bring any
         /// section to centre and zoom into it.
@@ -672,6 +714,7 @@ struct Avatar3DView: UIViewRepresentable {
         var cloudPts: [String: [SCNVector3]] = [:]     // LINKED nodes → organ shapes (bright)
         var looseByAxis: [String: [SCNVector3]] = [:]  // UNLINKED nodes → loose, dim, outside
         var hitTargets: [(id: UUID, local: SCNVector3)] = []
+        var labelTargets: [(id: UUID, local: SCNVector3, text: String)] = []
         for (axisKey, group) in Dictionary(grouping: nodes, by: { $0.axis }) {
             let n = group.count
             for (i, gn) in group.enumerated() {
@@ -687,6 +730,7 @@ struct Avatar3DView: UIViewRepresentable {
                 }
                 pos[gn.id] = p
                 hitTargets.append((gn.id, p))
+                if !gn.label.isEmpty { labelTargets.append((gn.id, p, gn.label)) }
                 guard nodesAppear > 0.02 else { continue }
                 if linked {
                     let bucket = (degree[gn.id] ?? 0) >= 3 ? "hub" : "dot"   // hubs a touch larger
@@ -721,6 +765,7 @@ struct Avatar3DView: UIViewRepresentable {
             connectomeFloat.addChildNode(loose)
         }
         coordinator?.nodeHitTargets = hitTargets
+        coordinator?.labelTargets = labelTargets
         coordinator?.connectomeNode = connectomeFloat
 
         // Curved neural threads: each link bows toward the core so it stays inside
