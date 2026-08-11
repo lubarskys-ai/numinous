@@ -560,33 +560,9 @@ struct Avatar3DView: UIViewRepresentable {
             return parent
         }
 
-        let organRadius: [String: Double] = ["mind": 0.10, "meaning": 0.10, "heart": 0.12, "spirit": 0.09, "gut": 0.12]
-        for (axisKey, orr) in organRadius {
-            // Each organ is driven by ITS OWN axis's growth: a faint wisp of an outline when
-            // the axis is young (embryo), deepening in colour, opacity and size as it
-            // develops. A neglected axis stays a ghostly outline — the body honestly mirrors
-            // where your life is thriving vs. thin, with your notes glowing inside it.
-            let g = min(1, max(0, growth(axisKey)))
-            guard g > 0.004 else { continue }
-            let form = pow(g, 0.6)               // ease so even a little growth shows an organ
-            let c = region(axisKey)
-            let col = GLTFBody.blend(UIColor(white: 0.55, alpha: 1), color(axisKey), CGFloat(g) * 0.45)
-            let m = SCNMaterial(); m.lightingModel = .constant
-            m.diffuse.contents = col; m.emission.contents = col
-            m.emission.intensity = CGFloat(0.04 + 0.1 * form)
-            m.transparency = CGFloat(0.03 + 0.09 * form)   // barely-there ghost — nodes lead
-            m.writesToDepthBuffer = false; m.isDoubleSided = true
-            let organ = organNode(axisKey, orr, m)
-            organ.position = v(c.0, c.1, c.2)
-            let s = Float(0.55 + 0.45 * form)              // grows from embryo to full size
-            organ.scale = SCNVector3(s, s, s)
-            organ.renderingOrder = 8
-            connectomeFloat.addChildNode(organ)
-        }
-
-        // Influences has no discrete organ — its aura is carried by its own nodes, which
-        // organSample scatters on a shell around the figure. (No solid sphere: an additive
-        // ball just floods the body and hides the organs behind it.)
+        // No solid organ meshes: the organs are suggested purely by where the connected
+        // nodes coalesce (organSample places each axis's linked notes into its organ shape)
+        // and the threads between them. The graph itself is the body.
 
         // ── Force-directed graph layout (Obsidian-style). Run Fruchterman–Reingold
         // only on the LINKED nodes (fast even with thousands of files), then scatter
