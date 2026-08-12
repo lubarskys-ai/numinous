@@ -147,6 +147,10 @@ struct Avatar3DView: UIViewRepresentable {
             lastLabelTime = time
             let sz = viewSize
             let center = CGPoint(x: sz.width / 2, y: sz.height / 2)
+            // Only label nodes actually near the middle of what you're looking at, so a node
+            // you've zoomed past (now off to the edge or off-screen) drops its label instead
+            // of lingering. The window tightens the further you zoom in.
+            let maxR = min(sz.width, sz.height) * (zoom >= 14 ? 0.28 : 0.4)
             let connectome = connectomeNode?.presentation
             var cands: [(NodeLabel, CGFloat)] = []
             for (id, local, text) in labelTargets {
@@ -154,10 +158,12 @@ struct Avatar3DView: UIViewRepresentable {
                 let s = view.projectPoint(wp)
                 guard s.z > 0, s.z < 1 else { continue }
                 let pt = CGPoint(x: CGFloat(s.x), y: CGFloat(s.y))
-                guard pt.x > -30, pt.y > -20, pt.x < sz.width + 30, pt.y < sz.height + 20 else { continue }
-                cands.append((NodeLabel(id: id, text: text, point: pt), hypot(pt.x - center.x, pt.y - center.y)))
+                guard pt.x >= 0, pt.y >= 0, pt.x <= sz.width, pt.y <= sz.height else { continue }
+                let d = hypot(pt.x - center.x, pt.y - center.y)
+                guard d <= maxR else { continue }
+                cands.append((NodeLabel(id: id, text: text, point: pt), d))
             }
-            let nearest = cands.sorted { $0.1 < $1.1 }.prefix(14).map(\.0)
+            let nearest = cands.sorted { $0.1 < $1.1 }.prefix(10).map(\.0)
             labelsEmpty = nearest.isEmpty
             DispatchQueue.main.async { self.onLabels?(nearest) }
         }
