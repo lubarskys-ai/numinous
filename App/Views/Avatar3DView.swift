@@ -92,6 +92,11 @@ struct Avatar3DView: UIViewRepresentable {
         // background nodes zoom identically (no parallax) and the camera never flies past
         // near nodes. This is what makes it behave like Obsidian's flat graph.
         view.pointOfView?.camera?.orthographicScale = Self.baseOrtho / max(0.1, zoom)
+        // Freeze the drifting connectome (and body) while zoomed in so the labels hold
+        // still and stay readable; resume the gentle motion when you zoom back out.
+        let frozen = zoom > 6
+        context.coordinator.connectomeNode?.isPaused = frozen
+        context.coordinator.bodyFloatNode?.isPaused = frozen
         // Node points hold a constant on-screen size automatically (screen-space point
         // radius), so the only thing to re-scale on zoom is the link threads — thin them
         // as you zoom in so a deep zoom reveals structure instead of fat tubes.
@@ -126,6 +131,7 @@ struct Avatar3DView: UIViewRepresentable {
         private var lastLabelTime: TimeInterval = 0
         private var labelsEmpty = true
         weak var connectomeNode: SCNNode?
+        weak var bodyFloatNode: SCNNode?
 
         func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
 
@@ -767,6 +773,7 @@ struct Avatar3DView: UIViewRepresentable {
         coordinator?.nodeHitTargets = hitTargets
         coordinator?.labelTargets = labelTargets
         coordinator?.connectomeNode = connectomeFloat
+        coordinator?.bodyFloatNode = bodyFloat
 
         // Curved neural threads: each link bows toward the core so it stays inside
         // the body instead of cutting straight across. Only cross-axis links carry

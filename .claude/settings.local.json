@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(swift --version)",
-      "Bash(xcode-select -p)"
+      "Bash(xcode-select -p)",
+      "Bash(cd /Users/amirshomefolder/Numinous && echo \"=== App tree ===\" && find App -type f -name \"*.swift\" | sort && echo \"\" && echo \"=== Core tree ===\" && find Core -type f -name \"*.swift\" | sort)"
     ]
   }
 }
