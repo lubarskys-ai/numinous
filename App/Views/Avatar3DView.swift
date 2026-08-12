@@ -729,7 +729,12 @@ struct Avatar3DView: UIViewRepresentable {
                 // Unlinked notes stay loose points drifting around it, not part of an organ.
                 let p: SCNVector3
                 if linked {
-                    let converge = 0.7 + 0.3 * smoothstep(0.15, 0.75, matur)
+                    // Start scattered — a loose web at the force-directed graph positions —
+                    // and only migrate into the organ SHAPE as THIS axis matures. So a young
+                    // graph is diffuse stardust, and organs (then a whole body) emerge slowly,
+                    // each axis at its own pace: a rich axis solidifies while a sparse one
+                    // stays ethereal and spread out.
+                    let converge = smoothstep(0.05, 0.9, regionMaturity(axisKey))
                     p = lerpV(graphPos(gn.id), organSample(axisKey, i, n), converge)
                 } else {
                     p = graphPos(gn.id)   // the surrounding shell — loose, unintegrated
