@@ -370,6 +370,39 @@ final class AppModel: ObservableObject {
         return folders.first { $0.id == key }
     }
 
+    /// Re-case `path` so each segment matches an existing folder of the same name
+    /// (case-insensitively) — drawn from folder records AND existing note paths — so we
+    /// never spawn "Medical" beside "medical". Segments with no existing match keep the
+    /// casing given. This is the guard that stops case-variant folders being created.
+    func canonicalFolderCasing(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !trimmed.isEmpty else { return trimmed }
+        var known: [String: String] = [:]   // norm(prefix) -> the casing already in use
+        func register(_ p: String) {
+            var acc = ""
+            for seg in p.split(separator: "/").map(String.init) {
+                acc = acc.isEmpty ? seg : acc + "/" + seg
+                let key = Self.norm(acc)
+                if known[key] == nil { known[key] = acc }
+            }
+        }
+        for f in folders { register(f.name) }
+        for note in notes {
+            let comps = note.title.split(separator: "/").map(String.init)
+            if comps.count > 1 { register(comps.dropLast().joined(separator: "/")) }
+        }
+        var acc = "", result = ""
+        for seg in trimmed.split(separator: "/").map(String.init) {
+            acc = acc.isEmpty ? seg : acc + "/" + seg
+            if let canon = known[Self.norm(acc)] {
+                result = canon                                   // adopt the established casing
+            } else {
+                result = result.isEmpty ? seg : result + "/" + seg
+            }
+        }
+        return result
+    }
+
     func axis(for note: Note) -> Axis? {
         guard let axisID = folder(named: note.folderName)?.axisID else { return nil }
         return axes.first { $0.id == axisID }
@@ -1916,7 +1949,8 @@ final class AppModel: ObservableObject {
     @discardableResult
     func createCapturedNote(body: String, folder: String = "notes",
                             intensity: Int? = nil, location: String? = nil) -> UUID {
-        let category = folder.trimmingCharacters(in: CharacterSet(charactersIn: " /")).isEmpty ? "notes" : folder
+        let raw = folder.trimmingCharacters(in: CharacterSet(charactersIn: " /"))
+        let category = canonicalFolderCasing(raw.isEmpty ? "notes" : raw)
         ensureCategoryFolder(category)
         let base = category + "/" + Self.dateTimeStamp()
         var title = base, n = 2
