@@ -1068,6 +1068,25 @@ final class AppModel: ObservableObject {
         retitle(pairs)
     }
 
+    /// Move a whole folder (and its subtree) so it becomes a subfolder of `targetRaw` —
+    /// e.g. drag the "food" drawer onto "meals" to get "meals/food". Every note retitles and
+    /// all links rewrite (via renameFolder). No-ops if it would move a folder into itself,
+    /// into its own subtree, or where it already lives. Returns whether anything moved.
+    @discardableResult
+    func moveFolder(_ pathRaw: String, into targetRaw: String) -> Bool {
+        let path = pathRaw.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let target = targetRaw.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !path.isEmpty, !target.isEmpty else { return false }
+        let l = path.lowercased(), t = target.lowercased()
+        // Not into itself, and not into its own descendant (would orphan/cycle).
+        guard l != t, !t.hasPrefix(l + "/") else { return false }
+        let leaf = path.split(separator: "/").last.map(String.init) ?? path
+        let newPath = target + "/" + leaf
+        guard newPath.lowercased() != l else { return false }   // already a child of target
+        renameFolder(from: path, to: newPath)
+        return true
+    }
+
     /// Move a single note into `folderPath` (e.g. drag-and-drop onto a folder). Retitles
     /// it to `folderPath/name`, rewrites every `[[link]]` to it, seeds the destination
     /// folder's metadata if it's brand-new, and merges if a same-named note already lives

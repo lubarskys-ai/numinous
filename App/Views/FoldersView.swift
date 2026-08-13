@@ -31,11 +31,10 @@ struct FoldersView: View {
     @EnvironmentObject var model: AppModel
     @State private var showSettings = false
     @State private var compose: ComposeRequest?
-    @State private var axisPickerFolder: FolderRef?
+    @State private var folderSheet: FolderSheet?
     @State private var renameFolderPath: String?
     @State private var folderNameDraft = ""
     @State private var deleteFolderPath: String?
-    @State private var mergeSourcePath: String?
     @State private var dropHighlight: String?
     @State private var showReadwise = false
     @State private var importMessage: String?
@@ -50,11 +49,11 @@ struct FoldersView: View {
                     searchResults(searchText)
                 } else if cabinetMode {
                     CabinetView(onOpenNote: { path.append($0) },
-                                onEditAxes: { axisPickerFolder = FolderRef(id: $0) },
+                                onEditAxes: { folderSheet = .axes($0) },
                                 onBrowseFolder: { path.append($0) },
                                 onDeleteFolder: { deleteFolderPath = $0 },
                                 onRenameFolder: { renameFolderPath = $0; folderNameDraft = $0 },
-                                onMergeFolder: { mergeSourcePath = $0 })
+                                onMergeFolder: { folderSheet = .merge($0) })
                 } else {
                     List {
                         OutlineGroup(buildTree(), children: \.children) { node in
@@ -102,7 +101,19 @@ struct FoldersView: View {
                     }
                 }
             }
-            .sheet(item: $axisPickerFolder) { ref in FolderAxisPicker(path: ref.id) }
+            // One sheet driven by an enum — stacking several `.sheet(item:)` on one view
+            // let some (like Merge) silently fail to present.
+            .sheet(item: $folderSheet) { sheet in
+                switch sheet {
+                case .axes(let p):
+                    FolderAxisPicker(path: p)
+                case .merge(let p):
+                    MergeFolderPicker(source: p) { destination in
+                        model.renameFolder(from: p, to: destination)
+                        folderSheet = nil
+                    }
+                }
+            }
             .alert("Rename or move folder", isPresented: Binding(get: { renameFolderPath != nil }, set: { if !$0 { renameFolderPath = nil } })) {
                 TextField("folder path", text: $folderNameDraft)
                     .textInputAutocapitalization(.never)
@@ -118,13 +129,6 @@ struct FoldersView: View {
             } message: { folder in
                 let n = model.notes.filter { $0.folderName.lowercased() == folder.lowercased() || $0.folderName.lowercased().hasPrefix(folder.lowercased() + "/") }.count
                 Text("Permanently removes this folder and \(n) note\(n == 1 ? "" : "s") inside it.")
-            }
-            .sheet(item: Binding(get: { mergeSourcePath.map(FolderRef.init(id:)) },
-                                 set: { if $0 == nil { mergeSourcePath = nil } })) { ref in
-                MergeFolderPicker(source: ref.id) { destination in
-                    model.renameFolder(from: ref.id, to: destination)
-                    mergeSourcePath = nil
-                }
             }
             .fullScreenCover(item: $compose) { req in ComposeView(prefillTitle: req.prefillTitle, diary: req.diary, onSaved: { path.append($0) }) }
             .sheet(isPresented: $showReadwise) { ReadwiseConnectView() }
@@ -264,13 +268,13 @@ struct FoldersView: View {
 
     private func folderMenu(_ path: String, growthAxes: [String], intensity: Int?) -> some View {
         Menu {
-            Button { axisPickerFolder = FolderRef(id: path) } label: {
+            Button { folderSheet = .axes(path) } label: {
                 Label(growthAxes.isEmpty ? "Grows…" : "Grows: \(growthAxes.count) axes", systemImage: "circle.hexagongrid")
             }
             Button { renameFolderPath = path; folderNameDraft = path } label: {
                 Label("Rename or move folder…", systemImage: "folder")
             }
-            Button { mergeSourcePath = path } label: {
+            Button { folderSheet = .merge(path) } label: {
                 Label("Merge into…", systemImage: "arrow.triangle.merge")
             }
             Menu("Default intensity") {
@@ -365,6 +369,19 @@ struct FoldersView: View {
 
 /// Wrapper so a folder path can drive a `.sheet(item:)`.
 struct FolderRef: Identifiable { let id: String }
+
+/// The one folder sheet FoldersView presents, tagged by kind — so a single
+/// `.sheet(item:)` covers both (stacking two silently broke Merge).
+enum FolderSheet: Identifiable {
+    case axes(String)
+    case merge(String)
+    var id: String {
+        switch self {
+        case .axes(let p): return "axes:" + p
+        case .merge(let p): return "merge:" + p
+        }
+    }
+}
 
 /// Pick a destination folder to merge a source folder into. Merging moves every note
 /// (and subfolder) out of the source and into the destination; notes that collide by

@@ -83,11 +83,17 @@ private struct DrawerView: View {
     /// Above this many files a grid is unwieldy — show a peek + "Browse all".
     private let gridLimit = 18
 
-    /// Move any dropped note ids into `folder`. Returns true if at least one moved.
-    private func handleNoteDrop(_ ids: [String], into folder: String) -> Bool {
+    /// Handle a drop onto `folder`: a dropped note id (UUID string) moves that note here; a
+    /// dropped folder path moves that whole folder in as a subfolder. Returns true if
+    /// anything moved.
+    private func handleDrop(_ items: [String], into folder: String) -> Bool {
         var moved = false
-        for raw in ids {
-            if let id = UUID(uuidString: raw), model.moveNote(id, toFolder: folder) { moved = true }
+        for raw in items {
+            if let id = UUID(uuidString: raw) {
+                if model.moveNote(id, toFolder: folder) { moved = true }
+            } else if model.moveFolder(raw, into: folder) {
+                moved = true
+            }
         }
         return moved
     }
@@ -153,8 +159,10 @@ private struct DrawerView: View {
             .shadow(color: .black.opacity(0.06), radius: 5, y: 3)
             .contentShape(Rectangle())
             .onTapGesture(perform: onToggle)
-            .dropDestination(for: String.self) { ids, _ in
-                handleNoteDrop(ids, into: cabinet.id)
+            // Drag a whole drawer onto another to move this category under it.
+            .draggable(cabinet.id)
+            .dropDestination(for: String.self) { items, _ in
+                handleDrop(items, into: cabinet.id)
             } isTargeted: { hovering in
                 dropTarget = hovering ? cabinet.id : (dropTarget == cabinet.id ? nil : dropTarget)
             }
@@ -182,8 +190,9 @@ private struct DrawerView: View {
                                         .fill(dropTarget == path ? Color.accentColor.opacity(0.15) : .clear))
                                 }
                                 .buttonStyle(.plain)
-                                .dropDestination(for: String.self) { ids, _ in
-                                    handleNoteDrop(ids, into: path)
+                                .draggable(path)
+                                .dropDestination(for: String.self) { items, _ in
+                                    handleDrop(items, into: path)
                                 } isTargeted: { hovering in
                                     dropTarget = hovering ? path : (dropTarget == path ? nil : dropTarget)
                                 }
