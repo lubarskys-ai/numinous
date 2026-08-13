@@ -137,8 +137,15 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
     private static func placeName(for location: CLLocation) async -> String? {
         let geocoder = CLGeocoder()
         guard let p = try? await geocoder.reverseGeocodeLocation(location).first else { return nil }
+        // Prefer the town/city ("Truckee, CA") over a point-of-interest. A huge POI like a
+        // national forest otherwise wins and mislabels a whole region as, e.g., "Tahoe
+        // National Forest" even when you're in a town inside it. Fall back to the POI only
+        // when there's no locality (e.g. genuinely out in a park).
+        if let locality = p.locality ?? p.subLocality ?? p.subAdministrativeArea {
+            let parts = [locality, p.administrativeArea].compactMap { $0 }
+            return parts.joined(separator: ", ")
+        }
         if let poi = p.areasOfInterest?.first, !poi.isEmpty { return poi }
-        let parts = [p.locality ?? p.subAdministrativeArea, p.administrativeArea].compactMap { $0 }
-        return parts.isEmpty ? nil : parts.joined(separator: ", ")
+        return p.administrativeArea
     }
 }

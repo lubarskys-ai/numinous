@@ -60,8 +60,13 @@ struct ComposeView: View {
     /// Folders to switch tabs or push the note). The editor still dismisses itself.
     var onSaved: ((UUID) -> Void)? = nil
 
-    init(prefillTitle: String? = nil, diary: Bool = false, onSaved: ((UUID) -> Void)? = nil) {
+    /// Focus the text editor on appear (keyboard up) — used by the "Today's diary" Action
+    /// Button so you land ready to tap the mic and dictate.
+    let autofocus: Bool
+
+    init(prefillTitle: String? = nil, diary: Bool = false, autofocus: Bool = false, onSaved: ((UUID) -> Void)? = nil) {
         self.onSaved = onSaved
+        self.autofocus = autofocus
         self.diaryMode = diary
         let folder: String? = prefillTitle.flatMap { t in
             guard let slash = t.lastIndex(of: "/") else { return t.isEmpty ? nil : t }
@@ -75,6 +80,7 @@ struct ComposeView: View {
     /// the kept links into that note's body (it doesn't create a new note).
     init(editing note: Note, onSaved: ((UUID) -> Void)? = nil) {
         self.onSaved = onSaved
+        self.autofocus = false
         self.diaryMode = false
         _category = State(initialValue: note.folderName.isEmpty ? "notes" : note.folderName)
         _text = State(initialValue: note.body)
@@ -116,7 +122,7 @@ struct ComposeView: View {
                 if reviewing && !manualEdit {
                     reviewArea
                 } else {
-                    LinkingEditor(text: $text)
+                    LinkingEditor(text: $text, autofocus: autofocus)
                         .padding(.horizontal, 14)
                         .padding(.top, 6)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)

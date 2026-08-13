@@ -20,6 +20,8 @@ struct LinkingEditor: View {
     @EnvironmentObject var model: AppModel
     @Binding var text: String
     var minHeight: CGFloat = 130
+    /// Focus the editor as soon as it appears (bring the keyboard up).
+    var autofocus: Bool = false
     /// Called with the full text right after a link is inserted from the autocomplete,
     /// so a note can persist links automatically without a manual Save.
     var onCommit: ((String) -> Void)? = nil
@@ -28,7 +30,7 @@ struct LinkingEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            LinkTextView(text: $text, controller: controller, onCommit: onCommit,
+            LinkTextView(text: $text, controller: controller, autofocus: autofocus, onCommit: onCommit,
                          colorForTarget: { target in
                              let folder = target.lastIndex(of: "/").map { String(target[..<$0]) } ?? target
                              return UIColor(model.axis(id: model.folder(named: folder)?.axisID ?? "")?.color ?? .accentColor)
@@ -118,6 +120,7 @@ struct LinkingEditor: View {
 private struct LinkTextView: UIViewRepresentable {
     @Binding var text: String
     @ObservedObject var controller: LinkEditorController
+    var autofocus: Bool = false
     var onCommit: ((String) -> Void)? = nil
     var colorForTarget: ((String) -> UIColor)? = nil
 
@@ -149,6 +152,11 @@ private struct LinkTextView: UIViewRepresentable {
         context.coordinator.textView = tv
         controller.insertClosure = { [weak c = context.coordinator] value in c?.insertLink(value) }
         context.coordinator.restyle()
+        // Bring the keyboard up on appear (Action Button → today's diary), so you can tap
+        // the keyboard mic and dictate right away.
+        if autofocus {
+            DispatchQueue.main.async { tv.becomeFirstResponder() }
+        }
         return tv
     }
 

@@ -11,6 +11,7 @@ struct RootView: View {
         ProcessInfo.processInfo.environment["NUMINOUS_TAB"] ?? "notes"
     @State private var showAvatar = false
     @State private var showCapture = false
+    @State private var showDiary = false
     @State private var companionAction: CompanionAction = .idle
     @State private var companionActionStart = Date()
     @ObservedObject private var quickCapture = QuickCapture.shared
@@ -63,6 +64,8 @@ struct RootView: View {
         .fullScreenCover(isPresented: $showAvatar) { AvatarExpandedView() }
         // Quick-capture (from the Action Button / Siri / Shortcuts) opens here.
         .fullScreenCover(isPresented: $showCapture) { ComposeView(prefillTitle: nil, onSaved: { _ in selection = "notes" }) }
+        // "Today's diary" (Action Button / Siri) opens the diary with the keyboard up.
+        .fullScreenCover(isPresented: $showDiary) { ComposeView(prefillTitle: nil, diary: true, autofocus: true, onSaved: { _ in selection = "notes" }) }
         // The companion strolls when you change pages…
         .onChange(of: selection) { _ in trigger(.walk) }
         // …and does a joyful, heart-popping cheer when a new connection forms.
@@ -70,7 +73,11 @@ struct RootView: View {
         // Refresh already-connected sources (contacts, Readwise) when returning to the app.
         .onChange(of: scenePhase) { if $0 == .active { Task { await model.autoSync() } } }
         .onChange(of: quickCapture.requested) { if $0 { showCapture = true; quickCapture.requested = false } }
-        .onAppear { if quickCapture.requested { showCapture = true; quickCapture.requested = false } }
+        .onChange(of: quickCapture.diaryRequested) { if $0 { showDiary = true; quickCapture.diaryRequested = false } }
+        .onAppear {
+            if quickCapture.requested { showCapture = true; quickCapture.requested = false }
+            if quickCapture.diaryRequested { showDiary = true; quickCapture.diaryRequested = false }
+        }
     }
 
     private func trigger(_ action: CompanionAction) {
