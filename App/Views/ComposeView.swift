@@ -49,6 +49,11 @@ struct ComposeView: View {
     @State private var existingNoteID: UUID?               // set in diary mode → save updates in place
     @State private var diaryResolved = false
     @StateObject private var locator = LocationService()
+    @StateObject private var dictation = DictationService()
+    /// The note text as it stood when dictation began — live transcript is folded onto it.
+    @State private var dictationBase = ""
+    @State private var polishing = false
+    @State private var polishNote: String?   // reason the on-device polish can't run
 
     /// When true, this is "Add to today's diary": on appear it pulls today's diary entry
     /// forward (if one exists) and saves back into it instead of creating a new note.
@@ -137,11 +142,24 @@ struct ComposeView: View {
                     if reviewing && !manualEdit {
                         Button { manualEdit = true } label: { Label("Edit text", systemImage: "pencil") }
                     } else {
+                        if dictation.isAvailable {
+                            Button { toggleDictation() } label: {
+                                Label(dictation.isRecording ? "Stop" : "Dictate",
+                                      systemImage: dictation.isRecording ? "stop.circle.fill" : "mic.fill")
+                                    .labelStyle(.iconOnly)
+                            }
+                            .tint(dictation.isRecording ? .red : nil)
+                        }
+                        Button { polish() } label: {
+                            if polishing { ProgressView() }
+                            else { Label("Polish", systemImage: "wand.and.stars").labelStyle(.iconOnly) }
+                        }
+                        .disabled(polishing || dictation.isRecording || text.trimmingCharacters(in: .whitespaces).count < 4)
                         Button { findLinks() } label: {
                             if scanning { HStack { ProgressView(); Text("Finding…") } }
                             else { Label(didScan ? "Re-scan" : "Find links", systemImage: "sparkles") }
                         }
-                        .disabled(scanning || text.trimmingCharacters(in: .whitespaces).count < 3)
+                        .disabled(scanning || dictation.isRecording || text.trimmingCharacters(in: .whitespaces).count < 3)
                         if reviewing && manualEdit {
                             Button { manualEdit = false } label: { Label("Highlights", systemImage: "highlighter") }
                         }
@@ -154,6 +172,17 @@ struct ComposeView: View {
             // "Use current location" or type one — never silently from ambient GPS.
             // (Place-type notes still take their location from the note's name, in AppModel.)
             .onAppear { resolveDiary() }
+            // Fold the live dictation transcript onto whatever was already written.
+            .onReceive(dictation.$transcript) { t in
+                guard !t.isEmpty else { return }
+                text = dictationBase.isEmpty ? t : dictationBase + "\n\n" + t
+            }
+            .onReceive(dictation.$problem.compactMap { $0 }) { polishNote = $0 }
+            .alert("Dictation & polishing", isPresented: Binding(
+                get: { polishNote != nil }, set: { if !$0 { polishNote = nil } }
+            )) {
+                Button("OK", role: .cancel) { polishNote = nil }
+            } message: { Text(polishNote ?? "") }
             .alert("Location", isPresented: $showLocationPrompt) {
                 TextField("Where were you?", text: $locationDraft)
                 Button("Cancel", role: .cancel) {}
@@ -293,6 +322,37 @@ struct ComposeView: View {
     }
 
     // MARK: - Actions
+
+    /// Start/stop talking your entry straight into the note. The live transcript folds
+    /// onto whatever was already written (see `.onReceive` above).
+    private func toggleDictation() {
+        if dictation.isRecording {
+            dictation.stop()
+        } else {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            dictationBase = text
+            Task { await dictation.start() }
+        }
+    }
+
+    /// Clean the (usually dictated) text into a tidy diary entry ON DEVICE, then run the
+    /// link scan so known names are ready to link — the whole "summarise + link" step in
+    /// one tap, nothing leaving the phone. Falls back to just scanning if the model is off.
+    private func polish() {
+        if dictation.isRecording { dictation.stop() }
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        if case .unavailable(let reason) = DiaryPolisher.status { polishNote = reason; return }
+        polishing = true
+        Task {
+            if let polished = await DiaryPolisher.polish(text) { text = polished }
+            let found = await model.smartLinkSuggestions(in: text)
+            confirmed = found.filter { !$0.isNew }
+            pending = found.filter { $0.isNew }
+            didScan = true
+            manualEdit = true
+            polishing = false
+        }
+    }
 
     /// Scan for links and enter review — WITHOUT touching the note text. Findings are
     /// held as suggestions and only written into the note when you save.
