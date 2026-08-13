@@ -47,8 +47,6 @@ targets:
         # Declares no non-exempt encryption, so TestFlight skips the export-
         # compliance prompt on every upload.
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
-        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Numinous uses the microphone so you can dictate a note or diary entry. Audio is transcribed on your device and never uploaded."
-        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "Numinous turns your dictation into text on your device. Your speech is never uploaded."
         INFOPLIST_KEY_NSContactsUsageDescription: "Numinous reads your contacts on your device to fill your People folder. They are never uploaded."
         INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "Numinous fills in where you were on your device so a note remembers its place. Your location is never uploaded."
         INFOPLIST_KEY_NSCalendarsUsageDescription: "Numinous reads your calendar on your device so you can turn events into notes. Nothing is uploaded."
