@@ -1046,7 +1046,10 @@ final class AppModel: ObservableObject {
     func renameFolder(from oldPathRaw: String, to newPathRaw: String) {
         let oldPath = oldPathRaw.trimmingCharacters(in: .whitespaces)
         let newPath = newPathRaw.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard !oldPath.isEmpty, !newPath.isEmpty, Self.norm(oldPath) != Self.norm(newPath) else { return }
+        // Exact (case-SENSITIVE) compare: renaming "Medical" → "medical" must be allowed, so
+        // two folders differing only in case can be merged. A norm() compare treated them as
+        // the same folder and silently no-op'd the merge/move.
+        guard !oldPath.isEmpty, !newPath.isEmpty, oldPath != newPath else { return }
 
         let prefix = oldPath + "/"
         let pairs: [(String, String)] = notes.compactMap { note in
@@ -1097,7 +1100,9 @@ final class AppModel: ObservableObject {
         let dest = folderPath.trimmingCharacters(in: .whitespaces)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let newTitle = dest.isEmpty ? note.displayName : dest + "/" + note.displayName
-        guard Self.norm(newTitle) != Self.norm(note.title) else { return false }
+        // Exact compare so a note can move between folders that differ only in case
+        // ("Medical" → "medical"); a norm() compare skipped it as "already here".
+        guard newTitle != note.title else { return false }
         ensureFolderExists(for: newTitle, like: note.title)
         retitle([(old: note.title, new: newTitle)])
         return true

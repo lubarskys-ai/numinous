@@ -408,9 +408,10 @@ struct MergeFolderPicker: View {
         }
         for n in model.notes { addPrefixes(n.folderName) }
         for f in model.folders { addPrefixes(f.name) }
-        let src = source.lowercased()
+        // Exclude the EXACT source (case-sensitive) and its own subtree — so a case-variant
+        // like "medical" is still offered as a destination for "Medical".
         return paths
-            .filter { let l = $0.lowercased(); return l != src && !l.hasPrefix(src + "/") }
+            .filter { $0 != source && !$0.lowercased().hasPrefix(source.lowercased() + "/") }
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
