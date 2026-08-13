@@ -150,11 +150,11 @@ struct ComposeView: View {
                             }
                             .tint(dictation.isRecording ? .red : nil)
                         }
-                        Button { polish() } label: {
-                            if polishing { ProgressView() }
-                            else { Label("Polish", systemImage: "wand.and.stars").labelStyle(.iconOnly) }
+                        Button { summarizeEntry() } label: {
+                            if polishing { HStack { ProgressView(); Text("Summarizing…") } }
+                            else { Label("Summarize", systemImage: "wand.and.stars") }
                         }
-                        .disabled(polishing || dictation.isRecording || text.trimmingCharacters(in: .whitespaces).count < 4)
+                        .disabled(polishing || dictation.isRecording || text.trimmingCharacters(in: .whitespaces).count < 12)
                         Button { findLinks() } label: {
                             if scanning { HStack { ProgressView(); Text("Finding…") } }
                             else { Label(didScan ? "Re-scan" : "Find links", systemImage: "sparkles") }
@@ -178,7 +178,7 @@ struct ComposeView: View {
                 text = dictationBase.isEmpty ? t : dictationBase + "\n\n" + t
             }
             .onReceive(dictation.$problem.compactMap { $0 }) { polishNote = $0 }
-            .alert("Dictation & polishing", isPresented: Binding(
+            .alert("Dictation & summarizing", isPresented: Binding(
                 get: { polishNote != nil }, set: { if !$0 { polishNote = nil } }
             )) {
                 Button("OK", role: .cancel) { polishNote = nil }
@@ -335,21 +335,19 @@ struct ComposeView: View {
         }
     }
 
-    /// Clean the (usually dictated) text into a tidy diary entry ON DEVICE, then run the
-    /// link scan so known names are ready to link — the whole "summarise + link" step in
-    /// one tap, nothing leaving the phone. Falls back to just scanning if the model is off.
-    private func polish() {
+    /// Summarize the (usually dictated) entry into a tidy diary note ON DEVICE and replace
+    /// the text with it — a standalone step so you actually SEE the summary. Linking is a
+    /// separate tap ("Find links"). Nothing leaves the phone; if the model can't run, the
+    /// text is kept and the reason is shown.
+    private func summarizeEntry() {
         if dictation.isRecording { dictation.stop() }
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-        if case .unavailable(let reason) = DiaryPolisher.status { polishNote = reason; return }
         polishing = true
         Task {
-            if let polished = await DiaryPolisher.polish(text) { text = polished }
-            let found = await model.smartLinkSuggestions(in: text)
-            confirmed = found.filter { !$0.isNew }
-            pending = found.filter { $0.isNew }
-            didScan = true
-            manualEdit = true
+            switch await DiaryPolisher.summarize(text) {
+            case .summary(let s): text = s
+            case .skipped(let reason): polishNote = reason
+            }
             polishing = false
         }
     }
