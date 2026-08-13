@@ -42,13 +42,14 @@ enum DiaryPolisher {
     }
 
     /// Rewrite `raw` into a tidy diary entry, preserving every name and inventing nothing.
-    /// Returns nil if the model is unavailable or errors — caller falls back to `raw`.
+    /// Returns nil if the model is unavailable, errors, or takes too long — caller falls
+    /// back to `raw` (so the Polish button always finishes, even on a cold model).
     static func polish(_ raw: String) async -> String? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 4 else { return nil }
         #if canImport(FoundationModels)
         if #available(iOS 26.0, *), case .available = status {
-            do {
+            return await withTimeout(seconds: 30) {
                 let session = LanguageModelSession {
                     """
                     You clean up a spoken, dictated diary entry into clear first-person prose.
@@ -64,11 +65,24 @@ enum DiaryPolisher {
                 let response = try await session.respond { trimmed }
                 let out = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
                 return out.isEmpty ? nil : out
-            } catch {
-                return nil
             }
         }
         #endif
         return nil
+    }
+
+    /// Run `op`, returning nil if it throws or doesn't finish within `seconds` — so a
+    /// hung/cold on-device model can never leave the caller spinning forever.
+    private static func withTimeout(seconds: Double, _ op: @escaping () async throws -> String?) async -> String? {
+        await withTaskGroup(of: String?.self) { group in
+            group.addTask { try? await op() }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                return nil
+            }
+            let result = await group.next() ?? nil
+            group.cancelAll()
+            return result
+        }
     }
 }

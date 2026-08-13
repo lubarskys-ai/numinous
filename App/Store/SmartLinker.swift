@@ -51,11 +51,23 @@ enum SmartLinker {
         For each entity copy the exact words, give a clean corrected name, and choose the folder.
         """
         let session = LanguageModelSession(instructions: instructions)
-        do {
-            let response = try await session.respond(to: text, generating: Extraction.self)
-            return response.content.entities
-        } catch {
-            return []
+        return await withTaskGroup(of: [Entity]?.self) { group in
+            group.addTask {
+                do {
+                    let response = try await session.respond(to: text, generating: Extraction.self)
+                    return response.content.entities
+                } catch {
+                    return []
+                }
+            }
+            group.addTask {
+                // Don't let a cold/slow model leave "Find links" (or Polish) spinning forever.
+                try? await Task.sleep(nanoseconds: 30 * 1_000_000_000)
+                return nil
+            }
+            let result = (await group.next() ?? nil) ?? []
+            group.cancelAll()
+            return result
         }
     }
 

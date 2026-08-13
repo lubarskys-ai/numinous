@@ -6,9 +6,13 @@ import AVFoundation
 /// publishes a live transcript, so you can talk your diary straight into a note instead
 /// of dictating elsewhere and pasting. Recognition runs on the device when the model
 /// supports it (`requiresOnDeviceRecognition`), so your words never leave the phone.
+///
+/// Long dictation is handled by accumulating each *finalised* segment into `committed`
+/// and starting a fresh recognition request for what comes next — so the transcript keeps
+/// growing instead of erasing itself when the recogniser wraps up a phrase or times out.
 @MainActor
 final class DictationService: NSObject, ObservableObject {
-    /// The text recognised so far in the CURRENT dictation session (resets on start).
+    /// Everything recognised so far in the current dictation session.
     @Published var transcript = ""
     @Published var isRecording = false
     /// A human-readable problem to surface (permission denied, recogniser unavailable),
@@ -19,6 +23,11 @@ final class DictationService: NSObject, ObservableObject {
     private let audioEngine = AVAudioEngine()
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
+    private var tapInstalled = false
+    /// Text from segments the recogniser has already finalised; live partials are appended
+    /// to this for display, and it's what survives a mid-session restart.
+    private var committed = ""
+    private var lastRestart = Date.distantPast
 
     /// Whether dictation can run at all on this device/locale — used to hide the mic
     /// button when there's no recogniser (rather than offering a dead control).
@@ -51,11 +60,7 @@ final class DictationService: NSObject, ObservableObject {
         }
 
         transcript = ""
-        let request = SFSpeechAudioBufferRecognitionRequest()
-        request.shouldReportPartialResults = true
-        // Keep it on-device when the model allows — nothing leaves the phone.
-        if recognizer.supportsOnDeviceRecognition { request.requiresOnDeviceRecognition = true }
-        self.request = request
+        committed = ""
 
         do {
             let session = AVAudioSession.sharedInstance()
@@ -68,9 +73,16 @@ final class DictationService: NSObject, ObservableObject {
 
         let input = audioEngine.inputNode
         let format = input.outputFormat(forBus: 0)
+        // A zero sample-rate format means the input node isn't ready — bail rather than crash.
+        guard format.sampleRate > 0 else {
+            problem = "The microphone isn't ready. Try again."
+            try? AVAudioSession.sharedInstance().setActive(false)
+            return
+        }
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             self?.request?.append(buffer)
         }
+        tapInstalled = true
         audioEngine.prepare()
         do { try audioEngine.start() } catch {
             problem = "Couldn't start the microphone."
@@ -78,30 +90,69 @@ final class DictationService: NSObject, ObservableObject {
             return
         }
         isRecording = true
+        beginRequest()
+    }
+
+    /// Stop dictation, keeping whatever was recognised in `transcript`.
+    func stop() {
+        guard isRecording else { return }
+        isRecording = false
+        teardown()
+    }
+
+    /// Spin up a new recognition request/task over the still-running audio engine. Called at
+    /// the start and again after each finalised segment, so dictation can run indefinitely.
+    private func beginRequest() {
+        guard let recognizer else { return }
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.shouldReportPartialResults = true
+        if recognizer.supportsOnDeviceRecognition { request.requiresOnDeviceRecognition = true }
+        self.request = request
+        lastRestart = Date()
 
         task = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            guard let self else { return }
             Task { @MainActor in
-                if let result { self.transcript = result.bestTranscription.formattedString }
-                if error != nil || (result?.isFinal ?? false) { self.finish() }
+                // Ignore callbacks from a request we've already superseded (a restart cancels
+                // the previous task, whose late cancellation error must not stop us).
+                guard let self, self.isRecording, self.request === request else { return }
+                if let result {
+                    let segment = result.bestTranscription.formattedString
+                    self.transcript = self.committed.isEmpty ? segment
+                        : (segment.isEmpty ? self.committed : self.committed + " " + segment)
+                    if result.isFinal {
+                        // Bank this segment and keep listening for the next one.
+                        self.committed = self.transcript
+                        self.restart()
+                    }
+                }
+                if error != nil {
+                    // Bank whatever we have; retry once if it wasn't an immediate/tight loop,
+                    // otherwise stop cleanly (so a "no speech" error can't spin forever).
+                    self.committed = self.transcript
+                    if Date().timeIntervalSince(self.lastRestart) > 1.2 {
+                        self.restart()
+                    } else {
+                        self.stop()
+                    }
+                }
             }
         }
     }
 
-    /// Stop dictation, keeping whatever was recognised in `transcript`.
-    func stop() { finish() }
-
-    private func finish() {
+    /// Tear down the current request/task (keeping the audio engine running) and start a
+    /// fresh one, preserving `committed`.
+    private func restart() {
         guard isRecording else { return }
-        audioEngine.stop()
-        request?.endAudio()
-        task?.cancel()
-        teardown()
-        isRecording = false
+        task?.cancel(); task = nil
+        request?.endAudio(); request = nil
+        beginRequest()
     }
 
     private func teardown() {
-        if audioEngine.inputNode.numberOfInputs > 0 { audioEngine.inputNode.removeTap(onBus: 0) }
+        audioEngine.stop()
+        request?.endAudio()
+        task?.cancel()
+        if tapInstalled { audioEngine.inputNode.removeTap(onBus: 0); tapInstalled = false }
         request = nil
         task = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
