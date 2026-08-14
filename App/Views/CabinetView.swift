@@ -161,11 +161,6 @@ private struct DrawerView: View {
             .onTapGesture(perform: onToggle)
             // Drag a whole drawer onto another to move this category under it.
             .draggable(cabinet.id)
-            .dropDestination(for: String.self) { items, _ in
-                handleDrop(items, into: cabinet.id)
-            } isTargeted: { hovering in
-                dropTarget = hovering ? cabinet.id : (dropTarget == cabinet.id ? nil : dropTarget)
-            }
 
             if isOpen {
                 if cabinet.notes.isEmpty {
@@ -228,6 +223,14 @@ private struct DrawerView: View {
                     }
                 }
             }
+        }
+        // The WHOLE drawer is the drop target (not just the header), so a note or folder
+        // dropped anywhere on an open drawer lands instead of snapping back to where it
+        // started. Subfolder rows above keep their own, more-specific drop zones.
+        .dropDestination(for: String.self) { items, _ in
+            handleDrop(items, into: cabinet.id)
+        } isTargeted: { hovering in
+            dropTarget = hovering ? cabinet.id : (dropTarget == cabinet.id ? nil : dropTarget)
         }
     }
 
