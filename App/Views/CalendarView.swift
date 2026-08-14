@@ -56,9 +56,30 @@ struct CalendarView: View {
                 } message: { event in
                     Text(diarySnippet(event))
                 }
-                .alert("Calendar", isPresented: Binding(get: { toast != nil }, set: { if !$0 { toast = nil } })) {
-                    Button("OK", role: .cancel) {}
-                } message: { Text(toast ?? "") }
+                // A lightweight overlay toast — NOT an .alert. Stacking .alert beneath the
+                // .confirmationDialog on one view stopped the dialog from presenting, so
+                // tapping an event did nothing and it "wouldn't add to the diary".
+                .overlay(alignment: .bottom) { toastView }
+                .task(id: toast) {
+                    guard toast != nil else { return }
+                    try? await Task.sleep(nanoseconds: 2_200_000_000)
+                    withAnimation { toast = nil }
+                }
+                .animation(.easeInOut(duration: 0.25), value: toast)
+        }
+    }
+
+    @ViewBuilder
+    private var toastView: some View {
+        if let toast {
+            Text(toast)
+                .font(.callout.weight(.medium))
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(.secondary.opacity(0.2)))
+                .shadow(radius: 8, y: 2)
+                .padding(.bottom, 28)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
 
