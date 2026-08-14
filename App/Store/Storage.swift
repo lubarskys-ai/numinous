@@ -68,9 +68,14 @@ struct Storage {
     init() { try? fm.createDirectory(at: root, withIntermediateDirectories: true) }
 
     func load() -> StoredData? {
-        guard let data = try? Data(contentsOf: file),
-              let decoded = try? JSONDecoder().decode(StoredData.self, from: data) else { return nil }
-        return decoded
+        guard let data = try? Data(contentsOf: file) else { return nil }   // no file yet → first launch
+        if let decoded = try? JSONDecoder().decode(StoredData.self, from: data) { return decoded }
+        // The file exists but won't decode (e.g. a future schema change). NEVER silently drop
+        // it: the app would then seed sample data and overwrite it. Back the raw bytes up first
+        // so real data is recoverable instead of lost.
+        let backup = root.appendingPathComponent("store.corrupt-\(Int(Date().timeIntervalSince1970)).json")
+        try? data.write(to: backup)
+        return nil
     }
 
     func save(_ data: StoredData) {
