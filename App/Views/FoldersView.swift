@@ -206,19 +206,26 @@ struct FoldersView: View {
     private func row(_ node: FolderNode) -> some View {
         if let note = node.note {
             NavigationLink(value: note.id) { NoteRow(note: note) }
-                .draggable(note.id.uuidString)
+                .onDrag { NSItemProvider(object: note.id.uuidString as NSString) }
         } else {
             folderRow(node)
         }
     }
 
-    /// Move any dropped note ids into `folder`. Returns true if at least one moved.
-    private func handleNoteDrop(_ ids: [String], into folder: String) -> Bool {
-        var moved = false
-        for raw in ids {
-            if let id = UUID(uuidString: raw), model.moveNote(id, toFolder: folder) { moved = true }
+    /// Move any dropped notes into `folder` (classic NSItemProvider API — reliable on a
+    /// physical device). Returns whether the drop was accepted.
+    private func handleNoteDrop(_ providers: [NSItemProvider], into folder: String) -> Bool {
+        let usable = providers.filter { $0.canLoadObject(ofClass: NSString.self) }
+        guard !usable.isEmpty else { return false }
+        for p in usable {
+            _ = p.loadObject(ofClass: NSString.self) { obj, _ in
+                guard let raw = obj as? String else { return }
+                let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let id = UUID(uuidString: s) else { return }
+                Task { @MainActor in model.moveNote(id, toFolder: folder) }
+            }
         }
-        return moved
+        return true
     }
 
     private func folderRow(_ node: FolderNode) -> some View {
@@ -250,11 +257,11 @@ struct FoldersView: View {
         .padding(.vertical, 4)
         .contentShape(Rectangle())
         .listRowBackground(dropHighlight == path && !path.isEmpty ? Color.accentColor.opacity(0.15) : nil)
-        .dropDestination(for: String.self) { ids, _ in
-            path.isEmpty ? false : handleNoteDrop(ids, into: path)
-        } isTargeted: { hovering in
-            if path.isEmpty { return }
-            dropHighlight = hovering ? path : (dropHighlight == path ? nil : dropHighlight)
+        .onDrop(of: [.text], isTargeted: Binding(
+            get: { dropHighlight == path && !path.isEmpty },
+            set: { if !path.isEmpty { dropHighlight = $0 ? path : (dropHighlight == path ? nil : dropHighlight) } }
+        )) { providers in
+            path.isEmpty ? false : handleNoteDrop(providers, into: path)
         }
     }
 

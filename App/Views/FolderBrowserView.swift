@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import NuminousCore
 
 /// Hierarchical browser for a folder: its immediate **subfolders** first (tap to drill
@@ -11,12 +12,18 @@ struct FolderBrowserView: View {
     @State private var dropHighlight: String?
 
     /// Move any dropped note ids into `folder`. Returns true if at least one moved.
-    private func handleNoteDrop(_ ids: [String], into folder: String) -> Bool {
-        var moved = false
-        for raw in ids {
-            if let id = UUID(uuidString: raw), model.moveNote(id, toFolder: folder) { moved = true }
+    private func handleNoteDrop(_ providers: [NSItemProvider], into folder: String) -> Bool {
+        let usable = providers.filter { $0.canLoadObject(ofClass: NSString.self) }
+        guard !usable.isEmpty else { return false }
+        for p in usable {
+            _ = p.loadObject(ofClass: NSString.self) { obj, _ in
+                guard let raw = obj as? String else { return }
+                let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let id = UUID(uuidString: s) else { return }
+                Task { @MainActor in model.moveNote(id, toFolder: folder) }
+            }
         }
-        return moved
+        return true
     }
 
     private var prefix: String { category.lowercased() + "/" }
@@ -76,10 +83,11 @@ struct FolderBrowserView: View {
                                 }
                             }
                             .listRowBackground(dropHighlight == path ? Color.accentColor.opacity(0.15) : nil)
-                            .dropDestination(for: String.self) { ids, _ in
-                                handleNoteDrop(ids, into: path)
-                            } isTargeted: { hovering in
-                                dropHighlight = hovering ? path : (dropHighlight == path ? nil : dropHighlight)
+                            .onDrop(of: [.text], isTargeted: Binding(
+                                get: { dropHighlight == path },
+                                set: { dropHighlight = $0 ? path : (dropHighlight == path ? nil : dropHighlight) }
+                            )) { providers in
+                                handleNoteDrop(providers, into: path)
                             }
                         }
                     }
@@ -88,7 +96,7 @@ struct FolderBrowserView: View {
                     Section("Notes") {
                         ForEach(directNotes) { note in
                             NavigationLink(value: note.id) { NoteRow(note: note) }
-                                .draggable(note.id.uuidString)
+                                .onDrag { NSItemProvider(object: note.id.uuidString as NSString) }
                         }
                     }
                 }
