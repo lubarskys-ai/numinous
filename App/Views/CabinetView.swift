@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import NuminousCore
 
 /// A "virtual file cabinet": each top-level category is a drawer you pull open,
@@ -83,19 +84,29 @@ private struct DrawerView: View {
     /// Above this many files a grid is unwieldy — show a peek + "Browse all".
     private let gridLimit = 18
 
-    /// Handle a drop onto `folder`: a dropped note id (UUID string) moves that note here; a
-    /// dropped folder path moves that whole folder in as a subfolder. Returns true if
-    /// anything moved.
-    private func handleDrop(_ items: [String], into folder: String) -> Bool {
-        var moved = false
-        for raw in items {
-            if let id = UUID(uuidString: raw) {
-                if model.moveNote(id, toFolder: folder) { moved = true }
-            } else if model.moveFolder(raw, into: folder) {
-                moved = true
+    /// Handle a drop onto `folder` using the classic NSItemProvider API (reliable on a
+    /// physical device, unlike `.dropDestination(for: String.self)`, which can deliver an
+    /// empty payload there). Each provider carries a note id (UUID string → move that note)
+    /// or a folder path (→ move that whole folder in). The load is async, so we apply the
+    /// move back on the main actor. Returns whether we accepted the drop.
+    private func handleDrop(_ providers: [NSItemProvider], into folder: String) -> Bool {
+        let usable = providers.filter { $0.canLoadObject(ofClass: NSString.self) }
+        guard !usable.isEmpty else { return false }
+        for p in usable {
+            _ = p.loadObject(ofClass: NSString.self) { obj, _ in
+                guard let raw = obj as? String else { return }
+                let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !s.isEmpty else { return }
+                Task { @MainActor in
+                    if let id = UUID(uuidString: s) {
+                        model.moveNote(id, toFolder: folder)
+                    } else {
+                        model.moveFolder(s, into: folder)
+                    }
+                }
             }
         }
-        return moved
+        return true
     }
 
     /// Immediate subfolder paths under this drawer's top category.
@@ -160,7 +171,7 @@ private struct DrawerView: View {
             .contentShape(Rectangle())
             .onTapGesture(perform: onToggle)
             // Drag a whole drawer onto another to move this category under it.
-            .draggable(cabinet.id)
+            .onDrag { NSItemProvider(object: cabinet.id as NSString) }
 
             if isOpen {
                 if cabinet.notes.isEmpty {
@@ -185,11 +196,12 @@ private struct DrawerView: View {
                                         .fill(dropTarget == path ? Color.accentColor.opacity(0.15) : .clear))
                                 }
                                 .buttonStyle(.plain)
-                                .draggable(path)
-                                .dropDestination(for: String.self) { items, _ in
-                                    handleDrop(items, into: path)
-                                } isTargeted: { hovering in
-                                    dropTarget = hovering ? path : (dropTarget == path ? nil : dropTarget)
+                                .onDrag { NSItemProvider(object: path as NSString) }
+                                .onDrop(of: [.text], isTargeted: Binding(
+                                    get: { dropTarget == path },
+                                    set: { dropTarget = $0 ? path : (dropTarget == path ? nil : dropTarget) }
+                                )) { providers in
+                                    handleDrop(providers, into: path)
                                 }
                             }
                         }
@@ -204,7 +216,7 @@ private struct DrawerView: View {
                             ForEach(shown) { note in
                                 MiniFileCard(note: note, color: cabinet.color)
                                     .onTapGesture { onOpenNote(note.id) }
-                                    .draggable(note.id.uuidString)
+                                    .onDrag { NSItemProvider(object: note.id.uuidString as NSString) }
                             }
                         }
                         .padding(.top, 12)
@@ -227,10 +239,11 @@ private struct DrawerView: View {
         // The WHOLE drawer is the drop target (not just the header), so a note or folder
         // dropped anywhere on an open drawer lands instead of snapping back to where it
         // started. Subfolder rows above keep their own, more-specific drop zones.
-        .dropDestination(for: String.self) { items, _ in
-            handleDrop(items, into: cabinet.id)
-        } isTargeted: { hovering in
-            dropTarget = hovering ? cabinet.id : (dropTarget == cabinet.id ? nil : dropTarget)
+        .onDrop(of: [.text], isTargeted: Binding(
+            get: { dropTarget == cabinet.id },
+            set: { dropTarget = $0 ? cabinet.id : (dropTarget == cabinet.id ? nil : dropTarget) }
+        )) { providers in
+            handleDrop(providers, into: cabinet.id)
         }
     }
 
