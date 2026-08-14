@@ -15,7 +15,9 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
     override init() {
         super.init()
         manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        // Best fix so a captured place is precise (street/venue level) rather than a
+        // ~100m blob that can land on the wrong building or blur which town you're in.
+        manager.desiredAccuracy = kCLLocationAccuracyBest
     }
 
     /// Already granted, so we can auto-fill without prompting.
@@ -137,14 +139,24 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
     private static func placeName(for location: CLLocation) async -> String? {
         let geocoder = CLGeocoder()
         guard let p = try? await geocoder.reverseGeocodeLocation(location).first else { return nil }
-        // Prefer the town/city ("Truckee, CA") over a point-of-interest. A huge POI like a
-        // national forest otherwise wins and mislabels a whole region as, e.g., "Tahoe
-        // National Forest" even when you're in a town inside it. Fall back to the POI only
-        // when there's no locality (e.g. genuinely out in a park).
-        if let locality = p.locality ?? p.subLocality ?? p.subAdministrativeArea {
-            let parts = [locality, p.administrativeArea].compactMap { $0 }
-            return parts.joined(separator: ", ")
+        let city = p.locality ?? p.subLocality ?? p.subAdministrativeArea
+
+        // Most specific first: a street address ("1200 Getty Center Dr, Los Angeles").
+        if let street = p.thoroughfare {
+            let line = [p.subThoroughfare, street].compactMap { $0 }.joined(separator: " ")
+            return [line, city].compactMap { $0 }.joined(separator: ", ")
         }
+        // Then a named venue/POI — but NOT a giant area-of-interest like a national forest,
+        // which otherwise mislabels a whole region (the "Tahoe National Forest" bug).
+        if let name = p.name, name != city, name != p.administrativeArea,
+           !(p.areasOfInterest?.contains(name) ?? false) {
+            return [name, city].compactMap { $0 }.joined(separator: ", ")
+        }
+        // Then the town/city.
+        if let city {
+            return [city, p.administrativeArea].compactMap { $0 }.joined(separator: ", ")
+        }
+        // Only out in the wild (no street, no town) do we fall back to the park name.
         if let poi = p.areasOfInterest?.first, !poi.isEmpty { return poi }
         return p.administrativeArea
     }
