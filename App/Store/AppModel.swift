@@ -1141,6 +1141,23 @@ final class AppModel: ObservableObject {
         return true
     }
 
+    /// Drop folder records that no longer have any note filed under them (after a move or
+    /// merge empties a category). Otherwise an emptied folder lingers — and its stale casing
+    /// could re-impose itself (via canonicalFolderCasing) on the next note you file there.
+    private func pruneEmptyFolders() {
+        var used = Set<String>()
+        for note in notes {
+            let comps = note.title.split(separator: "/").map(String.init)
+            guard comps.count > 1 else { continue }
+            var acc = ""
+            for seg in comps.dropLast() {
+                acc = acc.isEmpty ? seg : acc + "/" + seg
+                used.insert(Folder.normalize(acc))
+            }
+        }
+        folders.removeAll { !used.contains($0.id) }
+    }
+
     /// Apply a set of title changes, rewrite all links, then merge any collisions.
     private func retitle(_ pairs: [(old: String, new: String)]) {
         var map: [String: String] = [:]          // normalized old → new
@@ -1153,6 +1170,7 @@ final class AppModel: ObservableObject {
             if rewritten != notes[i].body { notes[i].body = rewritten }
         }
         dedupeByTitle()
+        pruneEmptyFolders()
         persist()
     }
 
