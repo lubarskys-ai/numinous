@@ -138,6 +138,14 @@ final class AppModel: ObservableObject {
         Task { await checkFollowUps() }
         // Silently refresh already-connected sources (contacts, Readwise).
         Task { await autoSync() }
+        // Show the auto-backup folder name in Settings, and write a fresh backup on launch.
+        if let bm = UserDefaults.standard.data(forKey: Self.autoBackupKey) {
+            var stale = false
+            if let u = try? URL(resolvingBookmarkData: bm, bookmarkDataIsStale: &stale) {
+                autoBackupFolderName = u.lastPathComponent
+            }
+            runAutoBackup(force: true)
+        }
     }
 
     /// Refresh already-connected import sources on launch/foreground. Idempotent
@@ -1225,6 +1233,53 @@ final class AppModel: ObservableObject {
         storage.save(StoredData(notes: notes, folders: folders, axes: axes,
                                 schemaVersion: Self.schemaVersion, reflections: reflectionLog,
                                 followUps: followUps, linkLearning: linkLearning))
+        runAutoBackup()
+    }
+
+    // MARK: - Automatic backup (survives deleting the app)
+
+    private static let autoBackupKey = "auto_backup_folder_bookmark"
+    /// The name of the folder auto-backups are written to (nil = off), for display in Settings.
+    @Published private(set) var autoBackupFolderName: String?
+    private var lastAutoBackup = Date.distantPast
+
+    var isAutoBackupOn: Bool { UserDefaults.standard.data(forKey: Self.autoBackupKey) != nil }
+
+    /// Turn on auto-backup: remember a user-chosen folder (ideally in iCloud Drive) and write
+    /// a copy of the data there now and on every change. A security-scoped bookmark keeps
+    /// access across launches — no iCloud entitlement needed.
+    @discardableResult
+    func enableAutoBackup(folder url: URL) -> Bool {
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        guard let bookmark = try? url.bookmarkData() else { return false }
+        UserDefaults.standard.set(bookmark, forKey: Self.autoBackupKey)
+        autoBackupFolderName = url.lastPathComponent
+        runAutoBackup(force: true)
+        return true
+    }
+
+    func disableAutoBackup() {
+        UserDefaults.standard.removeObject(forKey: Self.autoBackupKey)
+        autoBackupFolderName = nil
+    }
+
+    /// Write the current store into the auto-backup folder (throttled), as both a
+    /// per-day file and a "latest" file. No-op when auto-backup is off.
+    func runAutoBackup(force: Bool = false) {
+        guard let bookmark = UserDefaults.standard.data(forKey: Self.autoBackupKey) else { return }
+        if !force, Date().timeIntervalSince(lastAutoBackup) < 20 { return }   // don't hammer iCloud
+        var stale = false
+        guard let url = try? URL(resolvingBookmarkData: bookmark, bookmarkDataIsStale: &stale) else { return }
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
+        storage.writeBackup(to: url, filename: "Numinous-backup-\(df.string(from: Date())).json")
+        storage.writeBackup(to: url, filename: "Numinous-latest.json")
+        lastAutoBackup = Date()
+        if stale, let refreshed = try? url.bookmarkData() {
+            UserDefaults.standard.set(refreshed, forKey: Self.autoBackupKey)
+        }
     }
 
     // MARK: - Find-links learning (suggestions get better with your decisions)

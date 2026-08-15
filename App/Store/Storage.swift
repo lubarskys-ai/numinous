@@ -82,4 +82,13 @@ struct Storage {
         guard let encoded = try? JSONEncoder().encode(data) else { return }
         try? encoded.write(to: file, options: .atomic)
     }
+
+    /// Copy the current store into `folder` under `filename` — used for automatic backups to
+    /// a user-chosen iCloud Drive folder, so a copy survives even if the app is deleted.
+    @discardableResult
+    func writeBackup(to folder: URL, filename: String) -> Bool {
+        guard let data = try? Data(contentsOf: file) else { return false }
+        do { try data.write(to: folder.appendingPathComponent(filename), options: .atomic); return true }
+        catch { return false }
+    }
 }

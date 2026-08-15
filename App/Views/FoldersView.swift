@@ -632,6 +632,7 @@ struct AxisSettingsView: View {
     @State private var showRestorePicker = false
     @State private var pendingRestore: URL?
     @State private var restoreMessage: String?
+    @State private var showAutoBackupPicker = false
     @State private var showHomePrompt = false
     @State private var homeDraft = ""
     @StateObject private var locator = LocationService()
@@ -671,8 +672,19 @@ struct AxisSettingsView: View {
                 }
 
                 Section {
+                    if model.isAutoBackupOn {
+                        Label("Auto‑backup: on\(model.autoBackupFolderName.map { " → \($0)" } ?? "")", systemImage: "checkmark.icloud")
+                            .foregroundStyle(.green)
+                        Button(role: .destructive) { model.disableAutoBackup() } label: {
+                            Label("Turn off auto‑backup", systemImage: "xmark")
+                        }
+                    } else {
+                        Button { showAutoBackupPicker = true } label: {
+                            Label("Turn on auto‑backup…", systemImage: "clock.arrow.circlepath")
+                        }
+                    }
                     if let backupURL {
-                        ShareLink(item: backupURL) { Label("Export a backup", systemImage: "square.and.arrow.up") }
+                        ShareLink(item: backupURL) { Label("Export a backup now", systemImage: "square.and.arrow.up") }
                     }
                     Button { showRestorePicker = true } label: {
                         Label("Restore from a backup", systemImage: "arrow.down.doc")
@@ -680,7 +692,7 @@ struct AxisSettingsView: View {
                 } header: {
                     Text("Backup")
                 } footer: {
-                    Text("Export your whole graph as a file to keep in Files or iCloud Drive. Restoring replaces everything currently in Numinous.")
+                    Text("Auto‑backup saves a copy of your data to a folder you pick (choose one in iCloud Drive) on every change — so it survives even if the app is deleted. You can also export once, or restore to replace everything currently in Numinous.")
                 }
 
                 Section {
@@ -734,6 +746,9 @@ struct AxisSettingsView: View {
             } message: { Text("Where do you live? Used to measure how far your travels take you.") }
             .fileImporter(isPresented: $showRestorePicker, allowedContentTypes: [.json]) { result in
                 if case .success(let url) = result { pendingRestore = url }
+            }
+            .fileImporter(isPresented: $showAutoBackupPicker, allowedContentTypes: [.folder]) { result in
+                if case .success(let url) = result { _ = model.enableAutoBackup(folder: url) }
             }
             .alert("Restore backup?", isPresented: Binding(get: { pendingRestore != nil }, set: { if !$0 { pendingRestore = nil } })) {
                 Button("Cancel", role: .cancel) { pendingRestore = nil }
