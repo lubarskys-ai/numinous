@@ -11,6 +11,9 @@ struct ImportedContact {
     /// A readable "City, State" from the contact's postal address, if any — the seed for
     /// location-based reconnection ("you're near Sam").
     let place: String?
+    /// Concierge dollar tiers found in the contact's fields (e.g. ["$5000"]) — each becomes
+    /// a `[[concierge/$X]]` link, grouping contacts by tier.
+    let conciergeTiers: [String]
 }
 
 /// Reads the device's contacts (with permission). Seeds the People folder so
@@ -55,8 +58,29 @@ enum ContactsImporter {
                 let a = pa.value
                 return [a.city, a.state].filter { !$0.isEmpty }.joined(separator: ", ")
             }.flatMap { $0.isEmpty ? nil : $0 }
-            out.append(ImportedContact(id: contact.identifier, name: name, phones: phones, emails: emails, place: place))
+            // Scan the WHOLE address (street, city, state, etc.) plus the name for concierge
+            // dollar tiers — the amount often sits in a street/address line, not city/state.
+            let addressText = contact.postalAddresses.map { pa -> String in
+                let a = pa.value
+                return [a.street, a.subLocality, a.city, a.subAdministrativeArea, a.state, a.postalCode, a.country]
+                    .filter { !$0.isEmpty }.joined(separator: " ")
+            }.joined(separator: " · ")
+            let tiers = conciergeTiers(in: name + " " + addressText)
+            out.append(ImportedContact(id: contact.identifier, name: name, phones: phones, emails: emails,
+                                       place: place, conciergeTiers: tiers))
         }
         return out
+    }
+
+    /// The concierge dollar tiers present in `text` — matches $2000 / $3,000 / $4000 / $5000
+    /// (the `$` is required so street numbers like "2000 Main St" aren't mistaken for a tier).
+    static func conciergeTiers(in text: String) -> [String] {
+        guard let re = try? NSRegularExpression(pattern: #"\$\s?([2345]),?000(?![0-9])"#) else { return [] }
+        let ns = text as NSString
+        var tiers = Set<String>()
+        for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            tiers.insert("$\(ns.substring(with: m.range(at: 1)))000")
+        }
+        return tiers.sorted()
     }
 }

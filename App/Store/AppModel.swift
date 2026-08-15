@@ -643,6 +643,8 @@ final class AppModel: ObservableObject {
             if let phone = contact.phones.first { lines.append("Phone: \(phone)") }
             if let email = contact.emails.first { lines.append("Email: \(email)") }
             if let place = contact.place { lines.append("📍 \(place)") }
+            // Group by concierge dollar tier: e.g. a contact with $5000 gets [[concierge/$5000]].
+            for tier in contact.conciergeTiers { lines.append("[[concierge/\(tier)]]") }
             return ImportedItem(folder: "contacts", name: name, body: lines.joined(separator: "\n"),
                                 origin: NoteOrigin(source: "contacts", externalID: contact.id),
                                 folderCategory: "Contacts", folderAxisID: "heart",
