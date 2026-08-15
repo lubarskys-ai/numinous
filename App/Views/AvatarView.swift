@@ -20,10 +20,9 @@ struct AvatarView: View {
             guard let axis = model.axis(for: note) else { return nil }
             return GraphNode(id: note.id, axis: axis.id, label: note.displayName)
         }
-        // Draw the ACTUAL link graph (every [[link]] between notes that have an axis) rather
-        // than only the growth-counted subset — so connections from dormant imports (a
-        // contact's concierge tier, say) still show. Growth scoring is unchanged; this is
-        // purely what the connectome renders.
+        // Keep the connectome gradual: draw the ENGAGED growth links (as before) plus, as a
+        // deliberate exception, concierge-tier links even from dormant contacts — so the CRM
+        // grouping shows without lighting up the whole graph at once.
         let axisOf: [UUID: String] = Dictionary(graphNodes.map { ($0.id, $0.axis) },
                                                 uniquingKeysWith: { a, _ in a })
         let idByTitle: [String: UUID] = Dictionary(
@@ -31,13 +30,20 @@ struct AvatarView: View {
             uniquingKeysWith: { a, _ in a })
         let graphLinks: [GraphEdge] = {
             var seen = Set<String>(); var edges: [GraphEdge] = []
+            func add(_ a: UUID, _ b: UUID) {
+                guard a != b, axisOf[a] != nil, axisOf[b] != nil else { return }
+                let key = [a.uuidString, b.uuidString].sorted().joined(separator: "~")
+                guard seen.insert(key).inserted else { return }
+                edges.append(GraphEdge(a: a, b: b, cross: axisOf[a] != axisOf[b]))
+            }
+            // The growth graph — engaged connections that build up over time.
+            for l in model.score.links where l.isCounted { add(l.a, l.b) }
+            // Plus concierge tier links (even from dormant contacts).
             for note in model.notes where axisOf[note.id] != nil {
-                for target in note.linkTargets {
-                    let key = target.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard let other = idByTitle[key], other != note.id, axisOf[other] != nil else { continue }
-                    let edgeKey = [note.id.uuidString, other.uuidString].sorted().joined(separator: "~")
-                    guard seen.insert(edgeKey).inserted else { continue }
-                    edges.append(GraphEdge(a: note.id, b: other, cross: axisOf[note.id] != axisOf[other]))
+                for target in note.linkTargets where target.lowercased().hasPrefix("concierge/") {
+                    if let other = idByTitle[target.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)] {
+                        add(note.id, other)
+                    }
                 }
             }
             return edges
