@@ -516,12 +516,18 @@ final class AppModel: ObservableObject {
     func save(_ note: Note) {
         if let i = notes.firstIndex(where: { $0.id == note.id }) { notes[i] = note }
         else { notes.append(note) }
+        var newPlaceStubs: [UUID] = []
         for target in note.linkTargets where !noteExists(titled: target) {
             // Give the linked folder an axis so this connection counts toward growth.
             ensureCategoryFolder(Self.folderPart(of: target))
-            notes.append(Note(title: target, date: note.date, isStub: true))
+            let stub = Note(title: target, date: note.date, isStub: true)
+            notes.append(stub)
+            if Self.isPlaceLikeFolder(Self.folderPart(of: target)) { newPlaceStubs.append(stub.id) }
         }
         persist()
+        // Auto-geocode a new place-type link (e.g. [[location/Eiffel Tower]]) from its name,
+        // so it lands on the map without you setting a location by hand.
+        for id in newPlaceStubs { Task { await autoLocatePlaceNote(id) } }
     }
 
     func delete(_ toDelete: [Note]) {
@@ -580,6 +586,22 @@ final class AppModel: ObservableObject {
     /// Insert or update notes from any import source, keyed by `origin` so
     /// re-importing updates instead of duplicating. Returns (added, updated).
     @discardableResult
+    /// Rewrite an imported body's `[[links]]` to point at a note you may have MOVED: if a
+    /// target no longer exists but a note with the same leaf name does, redirect to it — so a
+    /// re-import (autoSync on launch) can't resurrect the target's OLD folder after you moved
+    /// it. This is what stopped moved authors/links reverting when the app relaunched.
+    private func redirectImportedLinks(_ body: String) -> String {
+        guard body.contains("[[") else { return body }
+        return WikilinkParser.rewrite(in: body) { target in
+            if noteExists(titled: target) { return target }
+            let leaf = Self.norm(Self.leafName(target))
+            if let moved = notes.first(where: { Self.norm(Self.leafName($0.title)) == leaf }) {
+                return moved.title
+            }
+            return target
+        }
+    }
+
     func ingest(_ items: [ImportedItem]) -> (added: Int, updated: Int) {
         var added = 0, updated = 0
         for item in items {
@@ -587,17 +609,22 @@ final class AppModel: ObservableObject {
                 folders.append(Folder(name: item.folder, category: item.folderCategory, axisID: item.folderAxisID))
             }
             let title = item.folder + "/" + item.name
+            let body = redirectImportedLinks(item.body)
             if let i = notes.firstIndex(where: { $0.origin == item.origin }) {
-                notes[i].title = title
+                // Don't revert a folder you moved this note into: only refresh its title while
+                // it's still in the source folder.
+                if Self.norm(Self.folderPart(of: notes[i].title)) == Self.norm(item.folder) {
+                    notes[i].title = title
+                }
                 notes[i].details = Self.mergeDetails(notes[i].details, item.details)
                 if let loc = item.location, notes[i].location?.isEmpty != false { notes[i].location = loc }
                 if notes[i].body.isEmpty {
-                    notes[i].body = item.body
+                    notes[i].body = body
                     // Still un-engaged (no body of its own) → keep it dormant.
                     if item.isDormant { notes[i].isStub = true }
                 } else if item.mergeBody {
                     // Bring in new highlights without discarding your edits/links.
-                    notes[i].body = Self.mergeBodies(existing: notes[i].body, incoming: item.body)
+                    notes[i].body = Self.mergeBodies(existing: notes[i].body, incoming: body)
                 }
                 updated += 1
             } else if let i = notes.firstIndex(where: { Self.norm($0.title) == Self.norm(title) && $0.origin == nil }) {
@@ -611,7 +638,7 @@ final class AppModel: ObservableObject {
                 while notes.contains(where: { Self.norm($0.title) == Self.norm(uniqueTitle) }) {
                     uniqueTitle = "\(title) (\(n))"; n += 1
                 }
-                notes.append(Note(title: uniqueTitle, date: item.date, body: item.body,
+                notes.append(Note(title: uniqueTitle, date: item.date, body: body,
                                   intensity: item.intensity, location: item.location, details: item.details,
                                   origin: item.origin, isStub: item.isDormant))
                 added += 1
@@ -619,9 +646,10 @@ final class AppModel: ObservableObject {
         }
         // Auto-create stub notes for any [[links]] inside the imported bodies (e.g.
         // links you wrote in Readwise highlights), so their folders/files appear —
-        // exactly as saving a note by hand does.
+        // exactly as saving a note by hand does. Redirect first so a moved target isn't
+        // re-created in its old folder.
         for item in items {
-            for target in WikilinkParser.extract(from: item.body) where !noteExists(titled: target) {
+            for target in WikilinkParser.extract(from: redirectImportedLinks(item.body)) where !noteExists(titled: target) {
                 notes.append(Note(title: target, date: item.date, isStub: true))
             }
         }
