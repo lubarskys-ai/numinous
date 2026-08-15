@@ -690,6 +690,23 @@ final class AppModel: ObservableObject {
     /// backlinks). Idempotent: only appends a link that isn't already there.
     private func ensureConciergeLinks(_ contacts: [ImportedContact]) {
         var changed = false
+        // Give concierge its OWN axis + folder so its links actually appear in the avatar as
+        // a distinct cluster — an axis-less note is drawn nowhere in the connectome, so this
+        // is what makes the tiers show up (its own axis keeps it out of your LIFE axes).
+        if contacts.contains(where: { !$0.conciergeTiers.isEmpty }) {
+            if !axes.contains(where: { $0.id == "concierge" }) {
+                axes.append(Axis(id: "concierge", name: "Concierge", colorHex: "#C9A227"))
+                changed = true
+            }
+            if let fi = folders.firstIndex(where: { $0.id == Folder.normalize("concierge") }) {
+                if folders[fi].axisID != "concierge" {
+                    folders[fi].axisID = "concierge"; folders[fi].axisIDs = ["concierge"]; changed = true
+                }
+            } else {
+                folders.append(Folder(name: "concierge", category: "Concierge", axisID: "concierge"))
+                changed = true
+            }
+        }
         for contact in contacts where !contact.conciergeTiers.isEmpty {
             guard let i = notes.firstIndex(where: {
                 $0.origin?.source == "contacts" && $0.origin?.externalID == contact.id
