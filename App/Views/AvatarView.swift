@@ -20,9 +20,28 @@ struct AvatarView: View {
             guard let axis = model.axis(for: note) else { return nil }
             return GraphNode(id: note.id, axis: axis.id, label: note.displayName)
         }
-        let graphLinks: [GraphEdge] = model.score.links
-            .filter(\.isCounted)
-            .map { GraphEdge(a: $0.a, b: $0.b, cross: $0.isCrossAxis) }
+        // Draw the ACTUAL link graph (every [[link]] between notes that have an axis) rather
+        // than only the growth-counted subset — so connections from dormant imports (a
+        // contact's concierge tier, say) still show. Growth scoring is unchanged; this is
+        // purely what the connectome renders.
+        let axisOf: [UUID: String] = Dictionary(graphNodes.map { ($0.id, $0.axis) },
+                                                uniquingKeysWith: { a, _ in a })
+        let idByTitle: [String: UUID] = Dictionary(
+            model.notes.map { ($0.title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines), $0.id) },
+            uniquingKeysWith: { a, _ in a })
+        let graphLinks: [GraphEdge] = {
+            var seen = Set<String>(); var edges: [GraphEdge] = []
+            for note in model.notes where axisOf[note.id] != nil {
+                for target in note.linkTargets {
+                    let key = target.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard let other = idByTitle[key], other != note.id, axisOf[other] != nil else { continue }
+                    let edgeKey = [note.id.uuidString, other.uuidString].sorted().joined(separator: "~")
+                    guard seen.insert(edgeKey).inserted else { continue }
+                    edges.append(GraphEdge(a: note.id, b: other, cross: axisOf[note.id] != axisOf[other]))
+                }
+            }
+            return edges
+        }()
 
         NavigationStack(path: $path) {
             ZStack {
