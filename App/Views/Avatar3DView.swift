@@ -632,7 +632,7 @@ struct Avatar3DView: UIViewRepresentable {
             fx[id] = 1.2 * cos(a) * sin(b); fy[id] = 1.2 * cos(b); fz[id] = 1.2 * sin(a) * sin(b)
         }
         if fdIds.count > 1 {
-            let k = 0.85
+            let k = 0.62   // shorter spring length → tighter clusters, shorter links
             var temp = 0.5
             let iters = fdIds.count > 800 ? 18 : (fdIds.count > 400 ? 32 : 80)
             for _ in 0..<iters {
@@ -670,7 +670,7 @@ struct Avatar3DView: UIViewRepresentable {
             let cz = fdIds.map { fz[$0]! }.reduce(0, +) / n
             var maxR = 0.01
             for id in fdIds { maxR = max(maxR, ((fx[id]! - cx) * (fx[id]! - cx) + (fy[id]! - cy) * (fy[id]! - cy) + (fz[id]! - cz) * (fz[id]! - cz)).squareRoot()) }
-            let sc = 1.7 / maxR
+            let sc = 1.4 / maxR   // more compact groupings — a cluster shouldn't fill the screen
             for id in fdIds { fx[id] = (fx[id]! - cx) * sc; fy[id] = (fy[id]! - cy) * sc; fz[id] = (fz[id]! - cz) * sc }
         }
         // Unlinked files sit on a surrounding shell (fibonacci sphere).
@@ -821,10 +821,10 @@ struct Avatar3DView: UIViewRepresentable {
             let col = e.cross ? UIColor(red: 0.6, green: 0.85, blue: 1.0, alpha: 1) : UIColor(white: 0.78, alpha: 1)
             let mat = SCNMaterial(); mat.lightingModel = .constant
             mat.diffuse.contents = col; mat.emission.contents = col
-            mat.emission.intensity = (e.cross ? 0.5 : 0.32) * linksAppear
-            mat.transparency = CGFloat((e.cross ? 0.55 : 0.38) * linksAppear)   // the connections matter
+            mat.emission.intensity = (e.cross ? 0.38 : 0.24) * linksAppear   // lighter threads
+            mat.transparency = CGFloat((e.cross ? 0.42 : 0.28) * linksAppear)
             mat.writesToDepthBuffer = false
-            thread(a, b, e.cross ? 0.003 : 0.002, mat, name: "link:\(e.a.uuidString):\(e.b.uuidString)")
+            thread(a, b, e.cross ? 0.0026 : 0.0017, mat, name: "link:\(e.a.uuidString):\(e.b.uuidString)")
         }
 
         // The body and the connectome each gently float and tumble in space — a
