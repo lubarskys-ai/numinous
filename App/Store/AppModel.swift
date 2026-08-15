@@ -679,7 +679,34 @@ final class AppModel: ObservableObject {
                                 location: contact.place,
                                 isDormant: true)
         }
-        return ingest(items)
+        let result = ingest(items)
+        ensureConciergeLinks(contacts)
+        return result
+    }
+
+    /// Guarantee each contact with a detected dollar tier actually carries its
+    /// `[[concierge/$X]]` link — even on a re-sync, where ingest preserves an already-imported
+    /// contact's body (so the link would otherwise never land, leaving the tier notes with no
+    /// backlinks). Idempotent: only appends a link that isn't already there.
+    private func ensureConciergeLinks(_ contacts: [ImportedContact]) {
+        var changed = false
+        for contact in contacts where !contact.conciergeTiers.isEmpty {
+            guard let i = notes.firstIndex(where: {
+                $0.origin?.source == "contacts" && $0.origin?.externalID == contact.id
+            }) else { continue }
+            for tier in contact.conciergeTiers {
+                let title = "concierge/\(tier)"
+                if !notes[i].body.contains("[[\(title)]]") {
+                    notes[i].body += (notes[i].body.isEmpty ? "" : "\n") + "[[\(title)]]"
+                    changed = true
+                }
+                if !noteExists(titled: title) {
+                    notes.append(Note(title: title, date: notes[i].date, isStub: true))
+                    changed = true
+                }
+            }
+        }
+        if changed { persist() }
     }
 
     // MARK: - Reconnect (location-based reconnection)
