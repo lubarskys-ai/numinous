@@ -13,6 +13,7 @@ struct CabinetView: View {
     var onDeleteFolder: (String) -> Void
     var onRenameFolder: (String) -> Void
     var onMergeFolder: (String) -> Void
+    var onMoveNote: (UUID) -> Void
     @State private var openCategory: String?
 
     struct Cabinet: Identifiable {
@@ -57,7 +58,8 @@ struct CabinetView: View {
                                onBrowseFolder: onBrowseFolder,
                                onDeleteFolder: onDeleteFolder,
                                onRenameFolder: onRenameFolder,
-                               onMergeFolder: onMergeFolder)
+                               onMergeFolder: onMergeFolder,
+                               onMoveNote: onMoveNote)
                 }
             }
             .padding(.horizontal)
@@ -79,6 +81,7 @@ private struct DrawerView: View {
     let onDeleteFolder: (String) -> Void
     let onRenameFolder: (String) -> Void
     let onMergeFolder: (String) -> Void
+    let onMoveNote: (UUID) -> Void
     @State private var dropTarget: String?
 
     /// Above this many files a grid is unwieldy — show a peek + "Browse all".
@@ -217,6 +220,10 @@ private struct DrawerView: View {
                                 MiniFileCard(note: note, color: cabinet.color)
                                     .onTapGesture { onOpenNote(note.id) }
                                     .onDrag { NSItemProvider(object: note.id.uuidString as NSString) }
+                                    .contextMenu {
+                                        Button { onOpenNote(note.id) } label: { Label("Open", systemImage: "doc.text") }
+                                        Button { onMoveNote(note.id) } label: { Label("Move to folder…", systemImage: "folder") }
+                                    }
                             }
                         }
                         .padding(.top, 12)

@@ -53,7 +53,8 @@ struct FoldersView: View {
                                 onBrowseFolder: { path.append($0) },
                                 onDeleteFolder: { deleteFolderPath = $0 },
                                 onRenameFolder: { renameFolderPath = $0; folderNameDraft = $0 },
-                                onMergeFolder: { folderSheet = .merge($0) })
+                                onMergeFolder: { folderSheet = .merge($0) },
+                                onMoveNote: { folderSheet = .moveNote($0) })
                 } else {
                     List {
                         OutlineGroup(buildTree(), children: \.children) { node in
@@ -110,6 +111,11 @@ struct FoldersView: View {
                 case .merge(let p):
                     MergeFolderPicker(source: p) { destination in
                         model.renameFolder(from: p, to: destination)
+                        folderSheet = nil
+                    }
+                case .moveNote(let id):
+                    MoveNotePicker(noteID: id) { destination in
+                        model.moveNote(id, toFolder: destination)
                         folderSheet = nil
                     }
                 }
@@ -382,10 +388,12 @@ struct FolderRef: Identifiable { let id: String }
 enum FolderSheet: Identifiable {
     case axes(String)
     case merge(String)
+    case moveNote(UUID)
     var id: String {
         switch self {
         case .axes(let p): return "axes:" + p
         case .merge(let p): return "merge:" + p
+        case .moveNote(let id): return "move:" + id.uuidString
         }
     }
 }
@@ -455,6 +463,84 @@ struct MergeFolderPicker: View {
             }
             .searchable(text: $search, prompt: "Find a folder")
             .navigationTitle("Merge folder")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+        }
+        .presentationDetents([.medium, .large])
+    }
+}
+
+/// Pick a destination folder to move ONE note into — a reliable, no-drag way to refile a
+/// note (tap the note's ⋯ → "Move to folder…"). Lists every existing folder except the one
+/// it's already in; typing a name that doesn't exist offers to create it.
+struct MoveNotePicker: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let noteID: UUID
+    let onPick: (String) -> Void
+    @State private var search = ""
+
+    private var noteName: String { model.note(id: noteID)?.displayName ?? "note" }
+    private var currentFolder: String { model.note(id: noteID)?.folderName ?? "" }
+
+    private var destinations: [String] {
+        var paths = Set<String>()
+        func addPrefixes(_ p: String) {
+            guard !p.isEmpty else { return }
+            var acc = ""
+            for seg in p.split(separator: "/").map(String.init) {
+                acc = acc.isEmpty ? seg : acc + "/" + seg
+                paths.insert(acc)
+            }
+        }
+        for n in model.notes { addPrefixes(n.folderName) }
+        for f in model.folders { addPrefixes(f.name) }
+        let cur = currentFolder.lowercased()
+        return paths
+            .filter { $0.lowercased() != cur }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private var filtered: [String] {
+        let q = search.lowercased().trimmingCharacters(in: .whitespaces)
+        return q.isEmpty ? destinations : destinations.filter { $0.lowercased().contains(q) }
+    }
+
+    private func count(_ path: String) -> Int {
+        let p = path.lowercased()
+        return model.notes.filter { let fn = $0.folderName.lowercased(); return fn == p || fn.hasPrefix(p + "/") }.count
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(filtered, id: \.self) { dest in
+                        Button { onPick(dest) } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "folder.fill")
+                                    .foregroundStyle(model.axis(id: model.folder(named: dest)?.axisID)?.color ?? .secondary)
+                                Text(dest).foregroundStyle(.primary)
+                                Spacer()
+                                Text("\(count(dest))").font(.caption).foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                    // Let a typed name that isn't an existing folder create a new one.
+                    let q = search.trimmingCharacters(in: CharacterSet(charactersIn: " /"))
+                    if !q.isEmpty, !destinations.contains(where: { $0.caseInsensitiveCompare(q) == .orderedSame }) {
+                        Button { onPick(q) } label: {
+                            Label("Move to new folder “\(q)”", systemImage: "folder.badge.plus")
+                        }
+                    }
+                } header: {
+                    Text("Move “\(noteName)” to")
+                } footer: {
+                    Text("Refiles this note. All links to it update automatically.")
+                }
+            }
+            .searchable(text: $search, prompt: "Find or name a folder")
+            .navigationTitle("Move note")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
         }
