@@ -166,10 +166,14 @@ private struct LinkTextView: UIViewRepresentable {
         // writing keystrokes through the ORIGINAL (now stale) `text` binding, so the
         // text view and the @State drift apart and the caret jumps around wildly.
         context.coordinator.parent = self
-        // Sync external changes (e.g. found links) into the view, preserving the caret.
-        // The caret-snap-back on "[[" is prevented at the source: the delegate writes
-        // the binding BEFORE the autocomplete re-render, so `text` is never stale here.
+        // Sync external changes (Summarize, Find links) into the view, preserving the caret.
         guard uiView.markedTextRange == nil, uiView.text != text else { return }
+        // While the user is actively typing, the text view is the source of truth. The `[[`
+        // autocomplete triggers a SwiftUI re-render whose `text` binding can lag one keystroke
+        // behind; pushing that stale value back here dropped a character (e.g. "concierge" →
+        // "cncierge"). External edits happen only after the field resigns first responder, so
+        // they still flow through — but live typing is left alone.
+        guard !uiView.isFirstResponder else { return }
         let caretOffset = uiView.selectedTextRange.map {
             uiView.offset(from: uiView.beginningOfDocument, to: $0.start)
         }
