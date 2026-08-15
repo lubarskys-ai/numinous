@@ -24,6 +24,14 @@ struct CabinetView: View {
         let symbol: String
     }
 
+    /// When this app binary was built/installed — shown at the bottom of the cabinet so you
+    /// can confirm the device actually got the newest build.
+    static var buildStamp: String {
+        let date = (try? FileManager.default.attributesOfItem(atPath: Bundle.main.executablePath ?? "")[.modificationDate]) as? Date
+        let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .short
+        return "Build: " + (date.map { f.string(from: $0) } ?? "unknown")
+    }
+
     private var cabinets: [Cabinet] {
         var groups: [String: [Note]] = [:]
         for note in model.notes {
@@ -61,6 +69,12 @@ struct CabinetView: View {
                                onMergeFolder: onMergeFolder,
                                onMoveNote: onMoveNote)
                 }
+                // A visible build stamp so you can confirm your phone is running the
+                // latest install (if this doesn't change after a rebuild, the new build
+                // didn't reach the device).
+                Text(Self.buildStamp)
+                    .font(.caption2).foregroundStyle(.tertiary)
+                    .padding(.top, 10)
             }
             .padding(.horizontal)
             .padding(.top, 6)
