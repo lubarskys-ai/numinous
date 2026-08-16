@@ -684,6 +684,41 @@ final class AppModel: ObservableObject {
         return result
     }
 
+    /// One-time import of an Obsidian vault — a folder of markdown files. Each file
+    /// becomes a note whose folder mirrors its vault subfolder, and its `[[wikilinks]]`
+    /// resolve as usual. Idempotent by the file's path within the vault (re-running
+    /// updates rather than duplicates), and — per the safe default — it never
+    /// overwrites a Numinous note that already has a body you wrote: an empty note is
+    /// filled, but your own edits are left untouched.
+    ///
+    /// Imported folders arrive with no growth axis, so the notes float in the graph
+    /// until you map their folder to an axis in the Folders tab — keeping growth
+    /// tied to engagement, not to bulk-importing a vault.
+    @discardableResult
+    func importObsidianVault(at folderURL: URL) -> (added: Int, updated: Int, files: Int) {
+        let scoped = folderURL.startAccessingSecurityScopedResource()
+        defer { if scoped { folderURL.stopAccessingSecurityScopedResource() } }
+
+        let parsed = ObsidianMarkdownImporter.parse(vaultAt: folderURL)
+        let items: [ImportedItem] = parsed.compactMap { note in
+            let name = note.name.trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty else { return nil }
+            let folder = note.folder.isEmpty ? "notes" : note.folder
+            return ImportedItem(
+                folder: folder,
+                name: name,
+                body: note.body,
+                details: note.details,
+                date: note.date ?? Date(),
+                origin: NoteOrigin(source: "obsidian", externalID: note.relativePath),
+                folderCategory: "Obsidian",
+                folderAxisID: nil
+            )
+        }
+        let result = ingest(items)
+        return (result.added, result.updated, parsed.count)
+    }
+
     /// Guarantee each contact with a detected dollar tier actually carries its
     /// `[[concierge/$X]]` link — even on a re-sync, where ingest preserves an already-imported
     /// contact's body (so the link would otherwise never land, leaving the tier notes with no

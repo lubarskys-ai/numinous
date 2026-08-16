@@ -633,6 +633,8 @@ struct AxisSettingsView: View {
     @State private var pendingRestore: URL?
     @State private var restoreMessage: String?
     @State private var showAutoBackupPicker = false
+    @State private var showObsidianPicker = false
+    @State private var importMessage: String?
     @State private var showHomePrompt = false
     @State private var homeDraft = ""
     @StateObject private var locator = LocationService()
@@ -696,6 +698,16 @@ struct AxisSettingsView: View {
                 }
 
                 Section {
+                    Button { showObsidianPicker = true } label: {
+                        Label("Import from Obsidian…", systemImage: "square.and.arrow.down.on.square")
+                    }
+                } header: {
+                    Text("Import")
+                } footer: {
+                    Text("Pick your Obsidian vault folder (put a copy in iCloud Drive first). Every markdown file becomes a note, subfolders become folders, and [[wikilinks]] resolve as usual. Notes you've already written in Numinous are never overwritten — only empty ones are filled. Map the new folders to an axis afterward to grow along them.")
+                }
+
+                Section {
                     let learned = model.linkLearning.aliases.count + model.linkLearning.skips.count
                     if learned == 0 {
                         Text("Find links will learn from your Add / Skip / Edit-folder choices as you review.")
@@ -750,6 +762,19 @@ struct AxisSettingsView: View {
             .fileImporter(isPresented: $showAutoBackupPicker, allowedContentTypes: [.folder]) { result in
                 if case .success(let url) = result { _ = model.enableAutoBackup(folder: url) }
             }
+            .fileImporter(isPresented: $showObsidianPicker, allowedContentTypes: [.folder]) { result in
+                if case .success(let url) = result {
+                    let r = model.importObsidianVault(at: url)
+                    if r.files == 0 {
+                        importMessage = "No markdown files found in that folder."
+                    } else {
+                        importMessage = "Imported \(r.files) note\(r.files == 1 ? "" : "s") — \(r.added) new, \(r.updated) updated. Map the new folders to an axis to grow along them."
+                    }
+                }
+            }
+            .alert("Obsidian import", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: { Text(importMessage ?? "") }
             .alert("Restore backup?", isPresented: Binding(get: { pendingRestore != nil }, set: { if !$0 { pendingRestore = nil } })) {
                 Button("Cancel", role: .cancel) { pendingRestore = nil }
                 Button("Replace everything", role: .destructive) {
