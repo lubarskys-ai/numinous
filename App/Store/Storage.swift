@@ -56,6 +56,10 @@ struct ReflectionRecord: Codable, Identifiable, Equatable {
 /// cleanly). Markdown import/export via NuminousCore's parser/serializer can be
 /// layered back on later.
 struct Storage {
+    /// Serial background queue for all store writes. Encoding a large store to JSON and
+    /// writing it is far too slow to run on the main thread on every change — doing it
+    /// here keeps the UI responsive, and serial ordering means writes never interleave.
+    private static let ioQueue = DispatchQueue(label: "com.lubarskys.numinous.storage-io", qos: .utility)
     private let fm = FileManager.default
     private var root: URL {
         fm.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Numinous", isDirectory: true)
@@ -78,17 +82,51 @@ struct Storage {
         return nil
     }
 
+    /// Persist the store off the main thread. `data` is an immutable snapshot, so it's
+    /// safe to encode/write on the background queue while the app keeps mutating state.
     func save(_ data: StoredData) {
+        let file = self.file
+        Self.ioQueue.async {
+            guard let encoded = try? JSONEncoder().encode(data) else { return }
+            try? encoded.write(to: file, options: .atomic)
+        }
+    }
+
+    /// Synchronously encode + write the store (blocking). Used when the app is going to
+    /// the background, so a change made right before backgrounding can't be lost to an
+    /// in-flight async write.
+    func saveSync(_ data: StoredData) {
         guard let encoded = try? JSONEncoder().encode(data) else { return }
         try? encoded.write(to: file, options: .atomic)
     }
 
-    /// Copy the current store into `folder` under `filename` — used for automatic backups to
-    /// a user-chosen iCloud Drive folder, so a copy survives even if the app is deleted.
+    /// Encode `data` synchronously to a JSON file at `dest` (for user-initiated export,
+    /// where the file must exist immediately for sharing). Returns success.
     @discardableResult
-    func writeBackup(to folder: URL, filename: String) -> Bool {
-        guard let data = try? Data(contentsOf: file) else { return false }
-        do { try data.write(to: folder.appendingPathComponent(filename), options: .atomic); return true }
-        catch { return false }
+    func writeSnapshot(_ data: StoredData, to dest: URL) -> Bool {
+        guard let encoded = try? JSONEncoder().encode(data) else { return false }
+        do { try encoded.write(to: dest, options: .atomic); return true } catch { return false }
+    }
+
+    /// Write a store snapshot into a security-scoped backup folder (resolved from
+    /// `bookmark`) under each filename — all on the background queue, keeping the scoped
+    /// access alive for the whole write. `staleRefresh` is called on the main thread if
+    /// the bookmark needs refreshing. Used for automatic backups to a user-chosen iCloud
+    /// Drive folder, so a copy survives even if the app is deleted.
+    func backup(_ data: StoredData, resolving bookmark: Data, filenames: [String],
+                staleRefresh: @escaping (Data) -> Void) {
+        Self.ioQueue.async {
+            var stale = false
+            guard let url = try? URL(resolvingBookmarkData: bookmark, bookmarkDataIsStale: &stale) else { return }
+            let access = url.startAccessingSecurityScopedResource()
+            defer { if access { url.stopAccessingSecurityScopedResource() } }
+            guard let encoded = try? JSONEncoder().encode(data) else { return }
+            for name in filenames {
+                try? encoded.write(to: url.appendingPathComponent(name), options: .atomic)
+            }
+            if stale, let refreshed = try? url.bookmarkData() {
+                DispatchQueue.main.async { staleRefresh(refreshed) }
+            }
+        }
     }
 }

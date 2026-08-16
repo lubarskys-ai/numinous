@@ -71,7 +71,10 @@ struct RootView: View {
         // …and does a joyful, heart-popping cheer when a new connection forms.
         .onChange(of: model.spark?.id) { id in if id != nil { trigger(.cheer) } }
         // Refresh already-connected sources (contacts, Readwise) when returning to the app.
-        .onChange(of: scenePhase) { if $0 == .active { Task { await model.autoSync() } } }
+        .onChange(of: scenePhase) {
+            if $0 == .active { Task { await model.autoSync() } }
+            else { model.flush() }   // leaving the app → force-write any pending async save
+        }
         .onChange(of: quickCapture.requested) { if $0 { showCapture = true; quickCapture.requested = false } }
         .onChange(of: quickCapture.diaryRequested) { if $0 { showDiary = true; quickCapture.diaryRequested = false } }
         .onAppear {

@@ -1465,9 +1465,7 @@ final class AppModel: ObservableObject {
     private func persist() {
         score = engine.score(notes: notes, folders: folders, axes: axes)
         recomputeLastTended()
-        storage.save(StoredData(notes: notes, folders: folders, axes: axes,
-                                schemaVersion: Self.schemaVersion, reflections: reflectionLog,
-                                followUps: followUps, linkLearning: linkLearning))
+        storage.save(currentSnapshot())   // encodes + writes on a background queue
         runAutoBackup()
     }
 
@@ -1504,17 +1502,25 @@ final class AppModel: ObservableObject {
     func runAutoBackup(force: Bool = false) {
         guard let bookmark = UserDefaults.standard.data(forKey: Self.autoBackupKey) else { return }
         if !force, Date().timeIntervalSince(lastAutoBackup) < 20 { return }   // don't hammer iCloud
-        var stale = false
-        guard let url = try? URL(resolvingBookmarkData: bookmark, bookmarkDataIsStale: &stale) else { return }
-        let access = url.startAccessingSecurityScopedResource()
-        defer { if access { url.stopAccessingSecurityScopedResource() } }
-        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
-        storage.writeBackup(to: url, filename: "Numinous-backup-\(df.string(from: Date())).json")
-        storage.writeBackup(to: url, filename: "Numinous-latest.json")
         lastAutoBackup = Date()
-        if stale, let refreshed = try? url.bookmarkData() {
+        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
+        // Encode + write happen on a background queue (see Storage.backup) so a big store
+        // being copied to iCloud never freezes the UI.
+        storage.backup(currentSnapshot(), resolving: bookmark,
+                       filenames: ["Numinous-backup-\(df.string(from: Date())).json", "Numinous-latest.json"]) { refreshed in
             UserDefaults.standard.set(refreshed, forKey: Self.autoBackupKey)
         }
+    }
+
+    /// Force a synchronous write of the store now — call when the app backgrounds so a
+    /// just-made change can't be lost to an in-flight async save.
+    func flush() { storage.saveSync(currentSnapshot()) }
+
+    /// An immutable snapshot of everything persisted — safe to hand to a background queue.
+    private func currentSnapshot() -> StoredData {
+        StoredData(notes: notes, folders: folders, axes: axes,
+                   schemaVersion: Self.schemaVersion, reflections: reflectionLog,
+                   followUps: followUps, linkLearning: linkLearning)
     }
 
     // MARK: - Find-links learning (suggestions get better with your decisions)
@@ -1567,22 +1573,21 @@ final class AppModel: ObservableObject {
     private var lastTendedByAxis: [String: Date] = [:]
 
     private func recomputeLastTended() {
+        // Index titles once so resolving each link target is O(1). Previously this did a
+        // linear `note(titled:)` scan per link — O(n²) on every save, a real hitch once a
+        // vault import made the note count large.
+        let byTitle = Dictionary(notes.map { (Self.norm($0.title), $0) }, uniquingKeysWith: { a, _ in a })
         var map: [String: Date] = [:]
+        func bump(_ axis: String, _ date: Date) {
+            if let existing = map[axis] { if date > existing { map[axis] = date } } else { map[axis] = date }
+        }
         for n in notes where !n.isStub {
-            for a in axesTended(by: n) where map[a] == nil || n.date > map[a]! {
-                map[a] = n.date
+            for a in folder(named: n.folderName)?.growthAxes ?? [] { bump(a, n.date) }
+            for t in n.linkTargets {
+                if let other = byTitle[Self.norm(t)], let a = axis(for: other)?.id { bump(a, n.date) }
             }
         }
         lastTendedByAxis = map
-    }
-
-    /// The axes a note tends: its folder's growth axes plus the axes of what it links to.
-    private func axesTended(by n: Note) -> Set<String> {
-        var out = Set(folder(named: n.folderName)?.growthAxes ?? [])
-        for t in n.linkTargets {
-            if let other = note(titled: t), let a = axis(for: other)?.id { out.insert(a) }
-        }
-        return out
     }
 
     /// How alive an axis feels right now: 1 when recently tended, fading toward a
@@ -1599,14 +1604,14 @@ final class AppModel: ObservableObject {
 
     /// Write current data to a shareable, dated file and return its URL.
     func exportBackup() -> URL? {
-        persist()
-        let src = storage.fileURL
-        guard FileManager.default.fileExists(atPath: src.path) else { return nil }
+        // Encode the current state straight to the export file, rather than copying
+        // store.json — the on-disk file is now written asynchronously, so copying it
+        // could grab a slightly stale version.
         let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd-HHmm"
         let dest = FileManager.default.temporaryDirectory
             .appendingPathComponent("Numinous-backup-\(df.string(from: Date())).json")
         try? FileManager.default.removeItem(at: dest)
-        do { try FileManager.default.copyItem(at: src, to: dest); return dest } catch { return nil }
+        return storage.writeSnapshot(currentSnapshot(), to: dest) ? dest : nil
     }
 
     /// Replace all data with a backup file's contents. Returns whether it worked.
