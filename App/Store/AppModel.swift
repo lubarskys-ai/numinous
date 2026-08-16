@@ -1361,6 +1361,18 @@ final class AppModel: ObservableObject {
         retitle(pairs)
     }
 
+    /// Notes in `folderPath` (and its subfolders) that are completely unlinked — no
+    /// `[[links]]` in their own body AND not the target of a link from any other note.
+    /// These are the isolated imports (a contact you never wrote about, a book nothing
+    /// references) — the ones worth pruning to keep only connected notes.
+    func unlinkedNotes(inFolder folderPath: String) -> [Note] {
+        let p = folderPath.lowercased()
+        func within(_ n: Note) -> Bool { let f = n.folderName.lowercased(); return f == p || f.hasPrefix(p + "/") }
+        var linkedTargets = Set<String>()
+        for n in notes { for t in n.linkTargets { linkedTargets.insert(Self.norm(t)) } }
+        return notes.filter { within($0) && $0.linkTargets.isEmpty && !linkedTargets.contains(Self.norm($0.title)) }
+    }
+
     /// Delete several folders (and everything filed under them) in one save.
     func deleteFolders(_ paths: [String]) {
         guard !paths.isEmpty else { return }

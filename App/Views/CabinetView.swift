@@ -116,6 +116,7 @@ private struct DrawerView: View {
     @State private var renameID: UUID?
     @State private var renameDraft = ""
     @State private var deleteID: UUID?
+    @State private var cleanupConfirm = false
 
     /// The action menu shared by a note card's ⋯ button and its long-press — the same
     /// Open · Rename · Move · Delete offered in the folder browser.
@@ -351,6 +352,21 @@ private struct DrawerView: View {
         } message: {
             Text("This removes the note. It can't be undone.")
         }
+        .confirmationDialog("Remove unlinked notes?", isPresented: $cleanupConfirm, titleVisibility: .visible) {
+            let doomed = model.unlinkedNotes(inFolder: cabinet.id)
+            Button("Remove \(doomed.count) note\(doomed.count == 1 ? "" : "s")", role: .destructive) {
+                model.delete(doomed)
+            }
+            .disabled(doomed.isEmpty)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            let c = model.unlinkedNotes(inFolder: cabinet.id).count
+            if c == 0 {
+                Text("Every note in “\(cabinet.name)” is linked to something — nothing to remove.")
+            } else {
+                Text("\(c) note\(c == 1 ? "" : "s") in “\(cabinet.name)” link to nothing and nothing links to them. Keeps only connected notes. This can't be undone.")
+            }
+        }
     }
 
     private var folderMenu: some View {
@@ -358,6 +374,7 @@ private struct DrawerView: View {
             Button { onEditAxes(cabinet.id) } label: { Label("Grows…", systemImage: "circle.hexagongrid") }
             Button { onRenameFolder(cabinet.id) } label: { Label("Rename or move folder…", systemImage: "folder") }
             Button { onMergeFolder(cabinet.id) } label: { Label("Merge into…", systemImage: "arrow.triangle.merge") }
+            Button { cleanupConfirm = true } label: { Label("Remove unlinked notes…", systemImage: "sparkles") }
             Menu("Default intensity") {
                 let intensity = model.folder(named: cabinet.id)?.defaultIntensity
                 Button { model.setFolderIntensity(nil, forFolder: cabinet.id) } label: {
