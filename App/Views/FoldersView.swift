@@ -43,6 +43,9 @@ struct FoldersView: View {
     @State private var importMessage: String?
     @State private var path = NavigationPath()
     @State private var searchText = ""
+    @State private var selection = FolderSelection()
+    @State private var showBulkMove = false
+    @State private var bulkDeleteConfirm = false
     @AppStorage("foldersCabinetMode") private var cabinetMode = true
 
     var body: some View {
@@ -57,7 +60,8 @@ struct FoldersView: View {
                                 onDeleteFolder: { deleteFolderPath = $0 },
                                 onRenameFolder: { renameFolderPath = $0; folderNameDraft = $0 },
                                 onMergeFolder: { folderSheet = .merge($0) },
-                                onMoveNote: { folderSheet = .moveNote($0) })
+                                onMoveNote: { folderSheet = .moveNote($0) },
+                                selection: $selection)
                 } else {
                     List {
                         OutlineGroup(buildTree(), children: \.children) { node in
@@ -66,6 +70,24 @@ struct FoldersView: View {
                         .listRowSeparatorTint(Color.secondary.opacity(0.12))
                     }
                     .listStyle(.insetGrouped)
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if selection.active && cabinetMode && searchText.isEmpty {
+                    HStack(spacing: 0) {
+                        bulkActionButton("Move", "folder", enabled: !selection.isEmpty) { showBulkMove = true }
+                        bulkActionButton("Rename", "pencil", enabled: selection.count == 1) { startBulkRename() }
+                        bulkActionButton("Delete", "trash", enabled: !selection.isEmpty, destructive: true) { bulkDeleteConfirm = true }
+                        // Keep the buttons clear of the floating companion in the corner.
+                        Spacer().frame(width: 96)
+                    }
+                    .padding(.leading).padding(.vertical, 10)
+                    .background(.bar)
+                    .overlay(alignment: .topLeading) {
+                        Text(selection.isEmpty ? "Select notes or folders" : "\(selection.count) selected")
+                            .font(.caption2).foregroundStyle(.secondary)
+                            .padding(.leading).padding(.top, 2)
+                    }
                 }
             }
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic),
@@ -86,6 +108,16 @@ struct FoldersView: View {
                         Image(systemName: cabinetMode ? "list.bullet" : "archivebox")
                     }
                     .accessibilityLabel(cabinetMode ? "Show list" : "Show cabinet")
+                }
+                if cabinetMode && searchText.isEmpty {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(selection.active ? "Done" : "Select") {
+                            withAnimation(.easeInOut) {
+                                selection.active.toggle()
+                                if !selection.active { selection.clear() }
+                            }
+                        }
+                    }
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
@@ -165,6 +197,65 @@ struct FoldersView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: { Text("This removes the note. It can't be undone.") }
+            .sheet(isPresented: $showBulkMove) {
+                BulkFolderPicker(excluding: selection.folders) { destination in
+                    model.moveNotes(Array(selection.notes), toFolder: destination)
+                    for f in selection.folders where f.lowercased() != destination.lowercased() {
+                        _ = model.moveFolder(f, into: destination)
+                    }
+                    showBulkMove = false
+                    withAnimation { selection.clear() }
+                }
+            }
+            .confirmationDialog(bulkDeleteTitle,
+                                isPresented: $bulkDeleteConfirm, titleVisibility: .visible) {
+                Button("Delete", role: .destructive) {
+                    model.deleteFolders(Array(selection.folders))
+                    model.delete(model.notes.filter { selection.notes.contains($0.id) })
+                    withAnimation { selection.clear() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Are you sure? This permanently removes the selected item\(selection.count == 1 ? "" : "s")\(selection.folders.isEmpty ? "" : " (and every note inside a selected folder)"). This can't be undone.")
+            }
+        }
+    }
+
+    /// Are-you-sure title with the exact counts being deleted.
+    private var bulkDeleteTitle: String {
+        let n = selection.notes.count, f = selection.folders.count
+        var parts: [String] = []
+        if n > 0 { parts.append("\(n) note\(n == 1 ? "" : "s")") }
+        if f > 0 { parts.append("\(f) folder\(f == 1 ? "" : "s")") }
+        return "Delete " + (parts.joined(separator: " and ")) + "?"
+    }
+
+    /// One button in the multi-select action bar.
+    @ViewBuilder
+    private func bulkActionButton(_ title: String, _ icon: String, enabled: Bool,
+                                  destructive: Bool = false, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: icon).font(.body)
+                Text(title).font(.caption2)
+            }
+            .frame(maxWidth: .infinity)
+            .foregroundStyle(destructive ? Color.red : Color.accentColor)
+            .opacity(enabled ? 1 : 0.35)
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+    }
+
+    /// Rename the single selected item (a note or a folder) via the existing dialogs.
+    private func startBulkRename() {
+        guard selection.count == 1 else { return }
+        if let id = selection.notes.first {
+            noteNameDraft = model.note(id: id)?.displayName ?? ""
+            renameNoteID = id
+        } else if let folder = selection.folders.first {
+            folderNameDraft = folder
+            renameFolderPath = folder
         }
     }
 
@@ -572,6 +663,80 @@ struct MoveNotePicker: View {
             }
             .searchable(text: $search, prompt: "Find or name a folder")
             .navigationTitle("Move note")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+        }
+        .presentationDetents([.medium, .large])
+    }
+}
+
+/// Pick a destination folder to move a MULTI-SELECTION into (notes and/or whole folders).
+/// Lists every folder except the ones being moved; typing a new name creates it.
+struct BulkFolderPicker: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let excluding: Set<String>          // folders being moved — can't move into themselves
+    let onPick: (String) -> Void
+    @State private var search = ""
+
+    private var destinations: [String] {
+        var paths = Set<String>()
+        func addPrefixes(_ p: String) {
+            guard !p.isEmpty else { return }
+            var acc = ""
+            for seg in p.split(separator: "/").map(String.init) {
+                acc = acc.isEmpty ? seg : acc + "/" + seg
+                paths.insert(acc)
+            }
+        }
+        for n in model.notes { addPrefixes(n.folderName) }
+        for f in model.folders { addPrefixes(f.name) }
+        let ex = Set(excluding.map { $0.lowercased() })
+        // Exclude the moved folders themselves and anything nested under them.
+        return paths
+            .filter { p in !ex.contains(where: { p.lowercased() == $0 || p.lowercased().hasPrefix($0 + "/") }) }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private var filtered: [String] {
+        let q = search.lowercased().trimmingCharacters(in: .whitespaces)
+        return q.isEmpty ? destinations : destinations.filter { $0.lowercased().contains(q) }
+    }
+
+    private func count(_ path: String) -> Int {
+        let p = path.lowercased()
+        return model.notes.filter { let fn = $0.folderName.lowercased(); return fn == p || fn.hasPrefix(p + "/") }.count
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(filtered, id: \.self) { dest in
+                        Button { onPick(dest) } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "folder.fill")
+                                    .foregroundStyle(model.axis(id: model.folder(named: dest)?.axisID)?.color ?? .secondary)
+                                Text(dest).foregroundStyle(.primary)
+                                Spacer()
+                                Text("\(count(dest))").font(.caption).foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                    let q = search.trimmingCharacters(in: CharacterSet(charactersIn: " /"))
+                    if !q.isEmpty, !destinations.contains(where: { $0.caseInsensitiveCompare(q) == .orderedSame }) {
+                        Button { onPick(q) } label: {
+                            Label("Move to new folder “\(q)”", systemImage: "folder.badge.plus")
+                        }
+                    }
+                } header: {
+                    Text("Move selection to")
+                } footer: {
+                    Text("Refiles the selected notes and folders. All links update automatically.")
+                }
+            }
+            .searchable(text: $search, prompt: "Find or name a folder")
+            .navigationTitle("Move")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
         }

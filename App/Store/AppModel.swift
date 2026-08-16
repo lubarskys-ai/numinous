@@ -1344,6 +1344,34 @@ final class AppModel: ObservableObject {
         return true
     }
 
+    /// Move several notes into `folderPath` in one reflow (one save, one rescore) —
+    /// for multi-select. No-op for any note already there.
+    func moveNotes(_ ids: [UUID], toFolder folderPath: String) {
+        let dest = folderPath.trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        var pairs: [(old: String, new: String)] = []
+        for id in ids {
+            guard let note = notes.first(where: { $0.id == id }) else { continue }
+            let newTitle = dest.isEmpty ? note.displayName : dest + "/" + note.displayName
+            guard newTitle != note.title else { continue }
+            ensureFolderExists(for: newTitle, like: note.title)
+            pairs.append((old: note.title, new: newTitle))
+        }
+        guard !pairs.isEmpty else { return }
+        retitle(pairs)
+    }
+
+    /// Delete several folders (and everything filed under them) in one save.
+    func deleteFolders(_ paths: [String]) {
+        guard !paths.isEmpty else { return }
+        for path in paths {
+            let p = path.lowercased()
+            notes.removeAll { let l = $0.folderName.lowercased(); return l == p || l.hasPrefix(p + "/") }
+            folders.removeAll { let l = $0.name.lowercased(); return l == p || l.hasPrefix(p + "/") }
+        }
+        persist()
+    }
+
     /// Drop folder records that no longer have any note filed under them (after a move or
     /// merge empties a category). Otherwise an emptied folder lingers — and its stale casing
     /// could re-impose itself (via canonicalFolderCasing) on the next note you file there.

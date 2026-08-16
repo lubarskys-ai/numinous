@@ -2,6 +2,19 @@ import SwiftUI
 import UniformTypeIdentifiers
 import NuminousCore
 
+/// Multi-select state for the Folders tab: whether selection mode is on, and which
+/// notes and whole folders are picked. Shared by the tab and its drawers.
+struct FolderSelection {
+    var active = false
+    var notes: Set<UUID> = []
+    var folders: Set<String> = []
+    var isEmpty: Bool { notes.isEmpty && folders.isEmpty }
+    var count: Int { notes.count + folders.count }
+    mutating func toggleNote(_ id: UUID) { if !notes.insert(id).inserted { notes.remove(id) } }
+    mutating func toggleFolder(_ path: String) { if !folders.insert(path).inserted { folders.remove(path) } }
+    mutating func clear() { notes.removeAll(); folders.removeAll() }
+}
+
 /// A "virtual file cabinet": each top-level category is a drawer you pull open,
 /// then rifle through its files (notes) as a fanned, swipeable 2.5D deck — a
 /// tactile alternative to the flat folder list.
@@ -14,6 +27,7 @@ struct CabinetView: View {
     var onRenameFolder: (String) -> Void
     var onMergeFolder: (String) -> Void
     var onMoveNote: (UUID) -> Void
+    @Binding var selection: FolderSelection
     @State private var openCategory: String?
 
     struct Cabinet: Identifiable {
@@ -67,7 +81,8 @@ struct CabinetView: View {
                                onDeleteFolder: onDeleteFolder,
                                onRenameFolder: onRenameFolder,
                                onMergeFolder: onMergeFolder,
-                               onMoveNote: onMoveNote)
+                               onMoveNote: onMoveNote,
+                               selection: $selection)
                 }
                 // A visible build stamp so you can confirm your phone is running the
                 // latest install (if this doesn't change after a rebuild, the new build
@@ -96,6 +111,7 @@ private struct DrawerView: View {
     let onRenameFolder: (String) -> Void
     let onMergeFolder: (String) -> Void
     let onMoveNote: (UUID) -> Void
+    @Binding var selection: FolderSelection
     @State private var dropTarget: String?
     @State private var renameID: UUID?
     @State private var renameDraft = ""
@@ -175,9 +191,15 @@ private struct DrawerView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                folderMenu
-                Image(systemName: isOpen ? "chevron.up" : "chevron.down")
-                    .font(.body.weight(.semibold)).foregroundStyle(cabinet.color.opacity(0.7))
+                if selection.active {
+                    Image(systemName: selection.folders.contains(cabinet.id) ? "checkmark.circle.fill" : "circle")
+                        .font(.title2).symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(selection.folders.contains(cabinet.id) ? cabinet.color : Color.secondary)
+                } else {
+                    folderMenu
+                    Image(systemName: isOpen ? "chevron.up" : "chevron.down")
+                        .font(.body.weight(.semibold)).foregroundStyle(cabinet.color.opacity(0.7))
+                }
             }
             .padding(.horizontal, 16)
             .padding(.top, 16).padding(.bottom, 20)
@@ -200,7 +222,7 @@ private struct DrawerView: View {
             )
             .shadow(color: .black.opacity(0.06), radius: 5, y: 3)
             .contentShape(Rectangle())
-            .onTapGesture(perform: onToggle)
+            .onTapGesture { if selection.active { selection.toggleFolder(cabinet.id) } else { onToggle() } }
             // Drag a whole drawer onto another to move this category under it.
             .onDrag { NSItemProvider(object: cabinet.id as NSString) }
 
@@ -213,14 +235,20 @@ private struct DrawerView: View {
                     if !subfolders.isEmpty {
                         VStack(spacing: 2) {
                             ForEach(subfolders, id: \.self) { path in
-                                Button { onBrowseFolder(path) } label: {
+                                Button { if selection.active { selection.toggleFolder(path) } else { onBrowseFolder(path) } } label: {
                                     HStack(spacing: 10) {
                                         Image(systemName: "folder.fill").foregroundStyle(cabinet.color)
                                         Text(path.split(separator: "/").last.map(String.init) ?? path)
                                             .foregroundStyle(.primary)
                                         Spacer()
                                         Text("\(descendantCount(path))").font(.caption).foregroundStyle(.tertiary)
-                                        Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                                        if selection.active {
+                                            Image(systemName: selection.folders.contains(path) ? "checkmark.circle.fill" : "circle")
+                                                .symbolRenderingMode(.hierarchical)
+                                                .foregroundStyle(selection.folders.contains(path) ? cabinet.color : Color.secondary)
+                                        } else {
+                                            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                                        }
                                     }
                                     .padding(.vertical, 9).padding(.horizontal, 4).contentShape(Rectangle())
                                     .background(RoundedRectangle(cornerRadius: 8)
@@ -245,24 +273,34 @@ private struct DrawerView: View {
                         LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
                                             GridItem(.flexible(), spacing: 10)], spacing: 10) {
                             ForEach(shown) { note in
-                                MiniFileCard(note: note, color: cabinet.color)
-                                    .onTapGesture { onOpenNote(note.id) }
-                                    // A visible one-tap menu (no long-press needed) — the
-                                    // reliable way to move a note to a far folder without
-                                    // dragging through a slow scroll.
+                                MiniFileCard(note: note, color: cabinet.color,
+                                             selected: selection.active && selection.notes.contains(note.id))
+                                    .onTapGesture {
+                                        if selection.active { selection.toggleNote(note.id) } else { onOpenNote(note.id) }
+                                    }
+                                    // In select mode: a checkmark. Otherwise a one-tap menu
+                                    // (no long-press needed) — the reliable way to move a note
+                                    // to a far folder without dragging through a slow scroll.
                                     .overlay(alignment: .topTrailing) {
-                                        Menu { noteMenu(note) } label: {
-                                            Image(systemName: "ellipsis.circle.fill")
-                                                .font(.body)
-                                                .symbolRenderingMode(.hierarchical)
-                                                .foregroundStyle(cabinet.color.opacity(0.7))
+                                        if selection.active {
+                                            Image(systemName: selection.notes.contains(note.id) ? "checkmark.circle.fill" : "circle")
+                                                .font(.title3).symbolRenderingMode(.hierarchical)
+                                                .foregroundStyle(selection.notes.contains(note.id) ? cabinet.color : Color.secondary)
                                                 .padding(6)
-                                                .contentShape(Rectangle())
+                                        } else {
+                                            Menu { noteMenu(note) } label: {
+                                                Image(systemName: "ellipsis.circle.fill")
+                                                    .font(.body)
+                                                    .symbolRenderingMode(.hierarchical)
+                                                    .foregroundStyle(cabinet.color.opacity(0.7))
+                                                    .padding(6)
+                                                    .contentShape(Rectangle())
+                                            }
+                                            .accessibilityLabel("Note actions")
                                         }
-                                        .accessibilityLabel("Note actions")
                                     }
                                     .onDrag { NSItemProvider(object: note.id.uuidString as NSString) }
-                                    .contextMenu { noteMenu(note) }
+                                    .contextMenu { if !selection.active { noteMenu(note) } }
                             }
                         }
                         .padding(.top, 12)
@@ -346,6 +384,7 @@ private struct DrawerView: View {
 private struct MiniFileCard: View {
     let note: Note
     let color: Color
+    var selected: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -365,8 +404,10 @@ private struct MiniFileCard: View {
         .padding(10)
         .frame(height: 92, alignment: .topLeading)
         .frame(maxWidth: .infinity)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(uiColor: .systemBackground)))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(color.opacity(0.16)))
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(selected ? color.opacity(0.12) : Color(uiColor: .systemBackground)))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(selected ? color : color.opacity(0.16), lineWidth: selected ? 2 : 1))
         .shadow(color: .black.opacity(0.06), radius: 3, y: 2)
         .contentShape(Rectangle())
     }
