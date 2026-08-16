@@ -15,6 +15,7 @@ struct AvatarView: View {
 
     var body: some View {
         let balance = model.score.axisBalance(over: model.axes)
+        let _graphT0 = CFAbsoluteTimeGetCurrent()
         // Every file is a node (Obsidian-style) — unlinked ones just float unconnected.
         let graphNodes: [GraphNode] = model.notes.compactMap { note in
             guard let axis = model.axis(for: note) else { return nil }
@@ -48,6 +49,8 @@ struct AvatarView: View {
             }
             return edges
         }()
+        let _ = { let ms = (CFAbsoluteTimeGetCurrent() - _graphT0) * 1000
+            if ms > 20 { print("⏱️[perf] avatar graph \(Int(ms))ms nodes=\(graphNodes.count) links=\(graphLinks.count)") } }()
 
         NavigationStack(path: $path) {
             ZStack {

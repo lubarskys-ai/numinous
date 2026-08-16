@@ -73,7 +73,7 @@ struct RootView: View {
         // Refresh already-connected sources (contacts, Readwise) when returning to the app.
         .onChange(of: scenePhase) {
             if $0 == .active { Task { await model.autoSync() } }
-            else { model.flush() }   // leaving the app → force-write any pending async save
+            else if $0 == .background { model.flush() }   // truly leaving → force-write pending save
         }
         .onChange(of: quickCapture.requested) { if $0 { showCapture = true; quickCapture.requested = false } }
         .onChange(of: quickCapture.diaryRequested) { if $0 { showDiary = true; quickCapture.diaryRequested = false } }

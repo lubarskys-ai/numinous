@@ -531,8 +531,12 @@ final class AppModel: ObservableObject {
 
     /// Notes that link *to* the given note (Obsidian-style backlinks).
     func backlinks(to note: Note) -> [Note] {
+        let t0 = CFAbsoluteTimeGetCurrent()
         let key = Self.norm(note.title)
-        return notes.filter { $0.id != note.id && $0.linkTargets.contains { Self.norm($0) == key } }
+        let result = notes.filter { $0.id != note.id && $0.linkTargets.contains { Self.norm($0) == key } }
+        let ms = (CFAbsoluteTimeGetCurrent() - t0) * 1000
+        if ms > 20 { print("⏱️[perf] backlinks \(Int(ms))ms over \(notes.count) notes") }
+        return result
     }
 
     // MARK: - Mutations
@@ -1488,11 +1492,20 @@ final class AppModel: ObservableObject {
     // MARK: - Internals
 
     private func persist() {
+        let t0 = CFAbsoluteTimeGetCurrent()
         score = engine.score(notes: notes, folders: folders, axes: axes)
+        let t1 = CFAbsoluteTimeGetCurrent()
         recomputeLastTended()
+        let t2 = CFAbsoluteTimeGetCurrent()
         recomputeCabinetGroups()          // cache the Folders-tab grouping once, not per render
+        let t3 = CFAbsoluteTimeGetCurrent()
         storage.save(currentSnapshot())   // encodes + writes on a background queue
         runAutoBackup()
+        let total = (CFAbsoluteTimeGetCurrent() - t0) * 1000
+        if total > 20 {
+            print(String(format: "⏱️[perf] persist %.0fms (score %.0f · tended %.0f · cabinets %.0f) notes=%d links=%d",
+                         total, (t1 - t0) * 1000, (t2 - t1) * 1000, (t3 - t2) * 1000, notes.count, score.links.count))
+        }
     }
 
     // MARK: - Automatic backup (survives deleting the app)

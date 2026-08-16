@@ -60,6 +60,14 @@ struct Storage {
     /// writing it is far too slow to run on the main thread on every change — doing it
     /// here keeps the UI responsive, and serial ordering means writes never interleave.
     private static let ioQueue = DispatchQueue(label: "com.lubarskys.numinous.storage-io", qos: .utility)
+    // Coalescing: rapid saves (e.g. during import/sync) must NOT pile up a backlog of
+    // whole-store encodes on the background queue — that saturates a CPU core and makes
+    // the app feel slow. We keep only the *latest* pending snapshot and run at most one
+    // encode at a time; intermediate saves are dropped (each write is the full store, so
+    // only the last one matters).
+    private static let pendingLock = NSLock()
+    private static var pendingSnapshot: StoredData?
+    private static var isWriting = false
     private let fm = FileManager.default
     private var root: URL {
         fm.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Numinous", isDirectory: true)
@@ -82,13 +90,27 @@ struct Storage {
         return nil
     }
 
-    /// Persist the store off the main thread. `data` is an immutable snapshot, so it's
-    /// safe to encode/write on the background queue while the app keeps mutating state.
+    /// Persist the store off the main thread, coalescing bursts. `data` is an immutable
+    /// snapshot; only the latest pending one is written, and at most one encode runs at a
+    /// time — so a flurry of saves can't back up a queue of whole-store encodes.
     func save(_ data: StoredData) {
         let file = self.file
+        Self.pendingLock.lock()
+        Self.pendingSnapshot = data
+        let shouldStart = !Self.isWriting
+        if shouldStart { Self.isWriting = true }
+        Self.pendingLock.unlock()
+        guard shouldStart else { return }
         Self.ioQueue.async {
-            guard let encoded = try? JSONEncoder().encode(data) else { return }
-            try? encoded.write(to: file, options: .atomic)
+            while true {
+                Self.pendingLock.lock()
+                guard let next = Self.pendingSnapshot else { Self.isWriting = false; Self.pendingLock.unlock(); return }
+                Self.pendingSnapshot = nil
+                Self.pendingLock.unlock()
+                if let encoded = try? JSONEncoder().encode(next) {
+                    try? encoded.write(to: file, options: .atomic)
+                }
+            }
         }
     }
 
