@@ -704,7 +704,7 @@ struct AxisSettingsView: View {
                 } header: {
                     Text("Import")
                 } footer: {
-                    Text("Pick your Obsidian vault folder (put a copy in iCloud Drive first). Every markdown file becomes a note, subfolders become folders, and [[wikilinks]] resolve as usual. Notes you've already written in Numinous are never overwritten — only empty ones are filled. Recognized folders (People, Books, Workouts…) are mapped to an axis automatically; map any others by hand to grow along them.")
+                    Text("Pick your Obsidian vault folder (put a copy in iCloud Drive first). Every markdown file becomes a note, subfolders become folders, and [[wikilinks]] resolve as usual. Notes you've already written in Numinous are never overwritten — only empty ones are filled. Recognized folders (People, Books, Workouts…) are mapped to an axis automatically; map any others by hand. Imported notes start dormant — they grant no growth until you open one and add to it.")
                 }
 
                 Section {

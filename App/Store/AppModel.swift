@@ -712,7 +712,12 @@ final class AppModel: ObservableObject {
                 date: note.date ?? Date(),
                 origin: NoteOrigin(source: "obsidian", externalID: note.relativePath),
                 folderCategory: "Obsidian",
-                folderAxisID: guessAxis(forFolderPath: folder)
+                folderAxisID: guessAxis(forFolderPath: folder),
+                // Start dormant: a big import brings your whole vault in as linkable,
+                // searchable notes but grants zero growth until you actually engage.
+                // Opening a note and editing its body un-dormants it (see updateBody),
+                // so the avatar grows from what you return to, not from bulk volume.
+                isDormant: true
             )
         }
         let result = ingest(items)
@@ -1198,6 +1203,57 @@ final class AppModel: ObservableObject {
         if let note = note(id: id), Self.isPlaceLikeFolder(note.folderName) {
             Task { await setPlaceFromName(id) }
         }
+    }
+
+    /// Folders whose notes are things you *evaluate* — so a 1–5 star rating makes sense.
+    /// Matched against any component of the folder path (so `travel/restaurant` counts).
+    static let rateableFolders: Set<String> = [
+        "books", "book", "restaurants", "restaurant", "wine", "wines",
+        "entertainment", "movies", "movie", "film", "films", "shows", "tv",
+        "podcasts", "music", "albums", "bars", "bar", "cafes", "cafe", "coffee",
+        "hotels", "hotel", "games", "game",
+    ]
+
+    /// True when a note lives in a rateable folder (a book, restaurant, wine, film…),
+    /// so the detail view offers stars.
+    static func isRateableFolder(_ folderName: String) -> Bool {
+        folderName.lowercased().split(separator: "/").contains { rateableFolders.contains(String($0)) }
+    }
+
+    /// Set (or clear, with nil) a note's 1–5 star rating.
+    func setRating(_ id: UUID, to rating: Int?) {
+        guard let i = notes.firstIndex(where: { $0.id == id }) else { return }
+        let clamped = rating.map { min(5, max(1, $0)) }
+        guard notes[i].rating != clamped else { return }
+        notes[i].rating = clamped
+        persist()
+    }
+
+    /// True when a note's name begins with a date (`2026-08-15 …`) — i.e. a diary/journal
+    /// entry that's titled by its date rather than a person or place.
+    static func isDateTitled(_ name: String) -> Bool {
+        name.range(of: #"^\d{4}-\d{2}-\d{2}"#, options: .regularExpression) != nil
+    }
+
+    /// Change a note's date — the value the Notes stream and Calendar order by — so a
+    /// backdated entry sorts under the day it happened, not the day you wrote it. For a
+    /// date-titled diary/journal entry the title stamp is regenerated to match (and any
+    /// links to it follow), and it re-checks trip auto-linking for its new date.
+    func setNoteDate(_ id: UUID, to newDate: Date) {
+        guard let i = notes.firstIndex(where: { $0.id == id }), notes[i].date != newDate else { return }
+        notes[i].date = newDate
+        addTripLinkIfNeeded(i)   // a trip may now (or no longer) cover this date
+
+        if Self.isDateTitled(notes[i].displayName) {
+            let folder = notes[i].folderName
+            let newTitle = (folder.isEmpty ? "" : folder + "/") + Self.dateTimeStamp(newDate)
+            if Self.norm(newTitle) != Self.norm(notes[i].title),
+               !notes.contains(where: { $0.id != id && Self.norm($0.title) == Self.norm(newTitle) }) {
+                retitle([(notes[i].title, newTitle)])   // moves the note + rewrites links, then persists
+                return
+            }
+        }
+        persist()
     }
 
     /// Set a place note's pin from its NAME (geocoded, biased to nearby), replacing an
