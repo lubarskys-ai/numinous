@@ -3,12 +3,12 @@ import MapKit
 import NuminousCore
 
 /// A map of where your life happened: every note place that has coordinates, plotted
-/// and colored by its axis. Tap a pin to open the note. The dataset is narrowed by
-/// pre-selected filters — a folder and a time period — so you can look at just your
-/// travels, just this year, just people, etc. Older text-only locations are geocoded
-/// in the background so they show up too.
+/// and colored by its axis. Tap a pin to open the note. Search a place by name to jump
+/// there, or tap the location button to center on where you are now. Filters narrow the
+/// dataset by folder and time period.
 struct MapView: View {
     @EnvironmentObject var model: AppModel
+    @StateObject private var locator = LocationService()
 
     /// The time windows you can slice the map by.
     enum Period: String, CaseIterable, Identifiable {
@@ -34,13 +34,14 @@ struct MapView: View {
     @State private var openNote: NoteRef?
     @State private var selection: String?             // tapped marker's stable id
     @State private var geocodedOnce = false
+    @State private var searchText = ""
+    @State private var searchResult: CLLocationCoordinate2D?
+    @State private var searching = false
+    @State private var searchFailed = false
 
     private struct NoteRef: Identifiable { let id: UUID }
 
     private struct Pin: Identifiable {
-        /// STABLE across re-renders (note id + place) — a fresh UUID each render made
-        /// SwiftUI mismatch annotations, so a pin's tap opened a different note and stale
-        /// pins lingered. Derive identity from the data instead.
         let id: String
         let noteID: UUID
         let title: String
@@ -48,78 +49,124 @@ struct MapView: View {
         let color: Color
     }
 
-    /// Notes matching the current filters, expanded to one pin per coordinate-bearing place.
+    /// Plottable places matching the current filters — built from the model's cached
+    /// `mappablePlaces`, so this no longer rescans every note on every render.
     private var pins: [Pin] {
-        let _t0 = CFAbsoluteTimeGetCurrent()
-        defer { let ms = (CFAbsoluteTimeGetCurrent() - _t0) * 1000
-            if ms > 20 { print("⏱️[perf] map pins \(Int(ms))ms over \(model.notes.count) notes") } }
-        var out: [Pin] = []
-        for n in model.notes {
-            guard folderMatches(n), period.contains(n.date) else { continue }
-            let color = model.axis(for: n)?.color ?? .red
-            // Skip places whose name isn't plausibly a location (a reminder / amount that
-            // got geocoded once and stored) so junk pins don't show even after the fact.
-            for p in n.allPlaces where p.hasCoordinate && LocationService.looksLikePlace(p.name) {
-                out.append(Pin(id: "\(n.id.uuidString)|\(p.name.lowercased())",
-                               noteID: n.id, title: n.displayName,
-                               coordinate: CLLocationCoordinate2D(latitude: p.latitude!, longitude: p.longitude!),
-                               color: color))
-            }
+        model.mappablePlaces.compactMap { mp in
+            guard folderMatches(mp.folderName), period.contains(mp.date) else { return nil }
+            return Pin(id: mp.id, noteID: mp.noteID, title: mp.title,
+                       coordinate: CLLocationCoordinate2D(latitude: mp.latitude, longitude: mp.longitude),
+                       color: model.axis(id: mp.axisID)?.color ?? .red)
         }
-        return out
     }
 
-    private func folderMatches(_ n: Note) -> Bool {
+    private func folderMatches(_ folderName: String) -> Bool {
         guard let folder else { return true }
-        let f = n.folderName.lowercased(), sel = folder.lowercased()
+        let f = folderName.lowercased(), sel = folder.lowercased()
         return f == sel || f.hasPrefix(sel + "/")
     }
 
     /// Distinct top-level folders that actually contain notes, for the folder filter.
     private var topFolders: [String] {
         var seen = Set<String>(); var out: [String] = []
-        for n in model.notes {
-            let top = n.folderName.split(separator: "/").first.map(String.init) ?? ""
+        for mp in model.mappablePlaces {
+            let top = mp.folderName.split(separator: "/").first.map(String.init) ?? ""
             if !top.isEmpty, seen.insert(top.lowercased()).inserted { out.append(top) }
         }
         return out.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
     var body: some View {
+        let currentPins = pins
         NavigationStack {
-            // Native Marker + tag + Map(selection:) — MapKit binds each marker's
-            // coordinate and selection to its stable tag itself, so a marker can't render
-            // at another note's spot or open the wrong note (the custom-annotation Button
-            // approach did both). Tapping sets `selection`; we resolve it to the note.
             Map(position: $position, selection: $selection) {
-                ForEach(pins) { pin in
+                UserAnnotation()            // the blue "you are here" dot (when authorized)
+                ForEach(currentPins) { pin in
                     Marker(pin.title, systemImage: "mappin", coordinate: pin.coordinate)
                         .tint(pin.color)
                         .tag(pin.id)
                 }
+                if let searchResult {
+                    Marker("Search result", systemImage: "magnifyingglass", coordinate: searchResult)
+                        .tint(.blue)
+                }
             }
             .mapStyle(.standard(pointsOfInterest: .excludingAll))
+            .mapControls { MapUserLocationButton(); MapCompass() }
             .onChange(of: selection) { _, id in
-                guard let id, let pin = pins.first(where: { $0.id == id }) else { return }
-                openNote = NoteRef(id: pin.noteID)
+                guard let id, let mp = model.mappablePlaces.first(where: { $0.id == id }) else { return }
+                openNote = NoteRef(id: mp.noteID)
                 selection = nil
             }
-            .overlay(alignment: .top) { filterBar }
-            .overlay { if pins.isEmpty { emptyState } }
+            .overlay(alignment: .top) {
+                VStack(spacing: 8) {
+                    searchBar
+                    filterBar(count: currentPins.count)
+                }
+            }
+            .overlay { if currentPins.isEmpty && searchResult == nil { emptyState } }
             .navigationTitle("Map")
             .navigationBarTitleDisplayMode(.inline)
             .sheet(item: $openNote) { ref in
                 NavigationStack { NoteDetailView(noteID: ref.id) }
             }
-            .task { await backfillGeocoding() }
+            .task {
+                _ = await locator.currentCoordinate()   // prompt for permission so the dot/button work
+                await backfillGeocoding()
+            }
             .onChange(of: folder) { position = .automatic }
             .onChange(of: period) { position = .automatic }
+            .alert("Couldn’t find that place", isPresented: $searchFailed) {
+                Button("OK", role: .cancel) {}
+            } message: { Text("No location matched “\(searchText)”. Try a city, address, or landmark.") }
         }
+    }
+
+    // MARK: - Search
+
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Search a place — city, address, landmark", text: $searchText)
+                .textFieldStyle(.plain)
+                .submitLabel(.search)
+                .onSubmit { Task { await runSearch() } }
+            if searching { ProgressView().controlSize(.small) }
+            else if !searchText.isEmpty {
+                Button { searchText = ""; searchResult = nil } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(.secondary.opacity(0.2)))
+        .padding(.horizontal, 12)
+        .padding(.top, 6)
+    }
+
+    private func runSearch() async {
+        let q = searchText.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return }
+        searching = true
+        let near = await locator.currentCoordinate()
+        if let c = await LocationService.coordinate(for: q, near: near) {
+            let coord = CLLocationCoordinate2D(latitude: c.latitude, longitude: c.longitude)
+            searchResult = coord
+            withAnimation {
+                position = .region(MKCoordinateRegion(
+                    center: coord, span: MKCoordinateSpan(latitudeDelta: 0.15, longitudeDelta: 0.15)))
+            }
+        } else {
+            searchFailed = true
+        }
+        searching = false
     }
 
     // MARK: - Filter bar
 
-    private var filterBar: some View {
+    private func filterBar(count: Int) -> some View {
         HStack(spacing: 8) {
             Menu {
                 Button { folder = nil } label: { filterCheck("All folders", folder == nil) }
@@ -136,14 +183,13 @@ struct MapView: View {
             } label: { chip(period.rawValue, system: "calendar") }
 
             Spacer(minLength: 0)
-            Text("\(pins.count)")
+            Text("\(count)")
                 .font(.caption.weight(.semibold).monospacedDigit())
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 9).padding(.vertical, 6)
                 .background(.ultraThinMaterial, in: Capsule())
         }
         .padding(.horizontal, 12)
-        .padding(.top, 6)
     }
 
     private func chip(_ text: String, system: String) -> some View {

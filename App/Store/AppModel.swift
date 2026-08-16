@@ -130,6 +130,7 @@ final class AppModel: ObservableObject {
         self.score = ScoreEngine().score(notes: n, folders: f, axes: a)
         recomputeLastTended()
         recomputeCabinetGroups()
+        recomputeMappablePlaces()
         if loaded == nil || didMigrate || version < Self.schemaVersion {
             storage.save(StoredData(notes: n, folders: f, axes: a, schemaVersion: Self.schemaVersion,
                                     reflections: reflectionLog, followUps: followUps,
@@ -450,6 +451,37 @@ final class AppModel: ObservableObject {
         cabinetGroups = groups.keys
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
             .map { key in CabinetGroup(id: key, notes: (groups[key] ?? []).sorted { $0.date > $1.date }) }
+    }
+
+    /// A note's place with real coordinates, ready to plot — precomputed so the Map tab
+    /// never rescans every note (which was O(notes) × several times per render).
+    struct MappablePlace: Identifiable, Equatable {
+        let id: String            // noteID|placename, stable across renders
+        let noteID: UUID
+        let title: String
+        let folderName: String
+        let date: Date
+        let axisID: String?
+        let latitude: Double
+        let longitude: Double
+    }
+
+    /// Cached list of every coordinate-bearing, plausibly-real place. Recomputed only when
+    /// notes change (persist/init), not on every Map render. Almost all notes have no place,
+    /// so this list stays small and the Map filters it cheaply.
+    @Published private(set) var mappablePlaces: [MappablePlace] = []
+
+    private func recomputeMappablePlaces() {
+        var out: [MappablePlace] = []
+        for n in notes {
+            for p in n.allPlaces where p.hasCoordinate && LocationService.looksLikePlace(p.name) {
+                out.append(MappablePlace(id: "\(n.id.uuidString)|\(p.name.lowercased())",
+                                         noteID: n.id, title: n.displayName, folderName: n.folderName,
+                                         date: n.date, axisID: folder(named: n.folderName)?.axisID,
+                                         latitude: p.latitude!, longitude: p.longitude!))
+            }
+        }
+        mappablePlaces = out
     }
 
     /// Notes grouped by folder path, folders alphabetized, "Unfiled" last.
@@ -1498,6 +1530,7 @@ final class AppModel: ObservableObject {
         recomputeLastTended()
         let t2 = CFAbsoluteTimeGetCurrent()
         recomputeCabinetGroups()          // cache the Folders-tab grouping once, not per render
+        recomputeMappablePlaces()         // cache the Map's plottable places once, not per render
         let t3 = CFAbsoluteTimeGetCurrent()
         storage.save(currentSnapshot())   // encodes + writes on a background queue
         runAutoBackup()
