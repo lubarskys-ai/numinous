@@ -131,6 +131,7 @@ final class AppModel: ObservableObject {
         recomputeLastTended()
         recomputeCabinetGroups()
         recomputeMappablePlaces()
+        recomputeBacklinkIndex()
         if loaded == nil || didMigrate || version < Self.schemaVersion {
             storage.save(StoredData(notes: n, folders: f, axes: a, schemaVersion: Self.schemaVersion,
                                     reflections: reflectionLog, followUps: followUps,
@@ -561,14 +562,27 @@ final class AppModel: ObservableObject {
         return Array(out.prefix(5))
     }
 
-    /// Notes that link *to* the given note (Obsidian-style backlinks).
+    /// Reverse link index: normalized note title → ids of notes whose body links to it.
+    /// Built once per data change (in persist/init) so `backlinks` is an O(1) lookup
+    /// instead of re-parsing every note's `[[links]]` with regex on every render — which,
+    /// with a large imported vault, made viewing/typing in a note sticky.
+    private var backlinkIndex: [String: [UUID]] = [:]
+
+    private func recomputeBacklinkIndex() {
+        var index: [String: [UUID]] = [:]
+        for n in notes {
+            for target in n.linkTargets {   // the one place we pay the regex cost, once per note
+                index[Self.norm(target), default: []].append(n.id)
+            }
+        }
+        backlinkIndex = index
+    }
+
+    /// Notes that link *to* the given note (Obsidian-style backlinks) — from the cached index.
     func backlinks(to note: Note) -> [Note] {
-        let t0 = CFAbsoluteTimeGetCurrent()
-        let key = Self.norm(note.title)
-        let result = notes.filter { $0.id != note.id && $0.linkTargets.contains { Self.norm($0) == key } }
-        let ms = (CFAbsoluteTimeGetCurrent() - t0) * 1000
-        if ms > 20 { print("⏱️[perf] backlinks \(Int(ms))ms over \(notes.count) notes") }
-        return result
+        let ids = Set(backlinkIndex[Self.norm(note.title)] ?? [])
+        guard !ids.isEmpty else { return [] }
+        return notes.filter { $0.id != note.id && ids.contains($0.id) }
     }
 
     // MARK: - Mutations
@@ -1531,6 +1545,7 @@ final class AppModel: ObservableObject {
         let t2 = CFAbsoluteTimeGetCurrent()
         recomputeCabinetGroups()          // cache the Folders-tab grouping once, not per render
         recomputeMappablePlaces()         // cache the Map's plottable places once, not per render
+        recomputeBacklinkIndex()          // cache backlinks once, so note views don't re-parse all links
         let t3 = CFAbsoluteTimeGetCurrent()
         storage.save(currentSnapshot())   // encodes + writes on a background queue
         runAutoBackup()
