@@ -1502,7 +1502,7 @@ final class AppModel: ObservableObject {
         storage.save(currentSnapshot())   // encodes + writes on a background queue
         runAutoBackup()
         let total = (CFAbsoluteTimeGetCurrent() - t0) * 1000
-        if total > 20 {
+        if total > 150 {   // only flag a genuinely slow persist; ~25ms is fine and shouldn't spam
             print(String(format: "⏱️[perf] persist %.0fms (score %.0f · tended %.0f · cabinets %.0f) notes=%d links=%d",
                          total, (t1 - t0) * 1000, (t2 - t1) * 1000, (t3 - t2) * 1000, notes.count, score.links.count))
         }

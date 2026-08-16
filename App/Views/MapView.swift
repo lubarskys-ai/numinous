@@ -50,6 +50,9 @@ struct MapView: View {
 
     /// Notes matching the current filters, expanded to one pin per coordinate-bearing place.
     private var pins: [Pin] {
+        let _t0 = CFAbsoluteTimeGetCurrent()
+        defer { let ms = (CFAbsoluteTimeGetCurrent() - _t0) * 1000
+            if ms > 20 { print("⏱️[perf] map pins \(Int(ms))ms over \(model.notes.count) notes") } }
         var out: [Pin] = []
         for n in model.notes {
             guard folderMatches(n), period.contains(n.date) else { continue }

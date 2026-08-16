@@ -242,7 +242,7 @@ private struct DrawerView: View {
                 } else {
                     // Subfolders first (tap to drill into the hierarchical browser)…
                     if !subfolderRows.isEmpty {
-                        VStack(spacing: 2) {
+                        LazyVStack(spacing: 2) {
                             ForEach(subfolderRows, id: \.path) { row in
                                 let path = row.path
                                 Button { if selection.active { selection.toggleFolder(path) } else { onBrowseFolder(path) } } label: {
