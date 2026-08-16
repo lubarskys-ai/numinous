@@ -35,6 +35,9 @@ struct FoldersView: View {
     @State private var renameFolderPath: String?
     @State private var folderNameDraft = ""
     @State private var deleteFolderPath: String?
+    @State private var renameNoteID: UUID?
+    @State private var noteNameDraft = ""
+    @State private var deleteNoteID: UUID?
     @State private var dropHighlight: String?
     @State private var showReadwise = false
     @State private var importMessage: String?
@@ -142,6 +145,26 @@ struct FoldersView: View {
             .alert("Import", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(importMessage ?? "") }
+            .alert("Rename note", isPresented: Binding(get: { renameNoteID != nil }, set: { if !$0 { renameNoteID = nil } })) {
+                TextField("Name", text: $noteNameDraft)
+                Button("Cancel", role: .cancel) {}
+                Button("Save") {
+                    if let id = renameNoteID, let n = model.note(id: id) {
+                        let leaf = noteNameDraft.trimmingCharacters(in: .whitespaces)
+                        if !leaf.isEmpty {
+                            model.renameNote(id, to: n.folderName.isEmpty ? leaf : n.folderName + "/" + leaf)
+                        }
+                    }
+                }
+            }
+            .confirmationDialog("Delete this note?",
+                                isPresented: Binding(get: { deleteNoteID != nil }, set: { if !$0 { deleteNoteID = nil } }),
+                                titleVisibility: .visible) {
+                Button("Delete", role: .destructive) {
+                    if let id = deleteNoteID, let n = model.note(id: id) { model.delete([n]) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("This removes the note. It can't be undone.") }
         }
     }
 
@@ -213,6 +236,14 @@ struct FoldersView: View {
         if let note = node.note {
             NavigationLink(value: note.id) { NoteRow(note: note) }
                 .onDrag { NSItemProvider(object: note.id.uuidString as NSString) }
+                .contextMenu {
+                    noteActionButtons(
+                        open: nil,
+                        rename: { noteNameDraft = note.displayName; renameNoteID = note.id },
+                        move: { folderSheet = .moveNote(note.id) },
+                        delete: { deleteNoteID = note.id }
+                    )
+                }
         } else {
             folderRow(node)
         }

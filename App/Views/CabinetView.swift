@@ -97,6 +97,20 @@ private struct DrawerView: View {
     let onMergeFolder: (String) -> Void
     let onMoveNote: (UUID) -> Void
     @State private var dropTarget: String?
+    @State private var renameID: UUID?
+    @State private var renameDraft = ""
+    @State private var deleteID: UUID?
+
+    /// The action menu shared by a note card's ⋯ button and its long-press — the same
+    /// Open · Rename · Move · Delete offered in the folder browser.
+    @ViewBuilder private func noteMenu(_ note: Note) -> some View {
+        noteActionButtons(
+            open: { onOpenNote(note.id) },
+            rename: { renameDraft = note.displayName; renameID = note.id },
+            move: { onMoveNote(note.id) },
+            delete: { deleteID = note.id }
+        )
+    }
 
     /// Above this many files a grid is unwieldy — show a peek + "Browse all".
     private let gridLimit = 18
@@ -233,11 +247,22 @@ private struct DrawerView: View {
                             ForEach(shown) { note in
                                 MiniFileCard(note: note, color: cabinet.color)
                                     .onTapGesture { onOpenNote(note.id) }
-                                    .onDrag { NSItemProvider(object: note.id.uuidString as NSString) }
-                                    .contextMenu {
-                                        Button { onOpenNote(note.id) } label: { Label("Open", systemImage: "doc.text") }
-                                        Button { onMoveNote(note.id) } label: { Label("Move to folder…", systemImage: "folder") }
+                                    // A visible one-tap menu (no long-press needed) — the
+                                    // reliable way to move a note to a far folder without
+                                    // dragging through a slow scroll.
+                                    .overlay(alignment: .topTrailing) {
+                                        Menu { noteMenu(note) } label: {
+                                            Image(systemName: "ellipsis.circle.fill")
+                                                .font(.body)
+                                                .symbolRenderingMode(.hierarchical)
+                                                .foregroundStyle(cabinet.color.opacity(0.7))
+                                                .padding(6)
+                                                .contentShape(Rectangle())
+                                        }
+                                        .accessibilityLabel("Note actions")
                                     }
+                                    .onDrag { NSItemProvider(object: note.id.uuidString as NSString) }
+                                    .contextMenu { noteMenu(note) }
                             }
                         }
                         .padding(.top, 12)
@@ -265,6 +290,28 @@ private struct DrawerView: View {
             set: { dropTarget = $0 ? cabinet.id : (dropTarget == cabinet.id ? nil : dropTarget) }
         )) { providers in
             handleDrop(providers, into: cabinet.id)
+        }
+        .alert("Rename note", isPresented: Binding(get: { renameID != nil }, set: { if !$0 { renameID = nil } })) {
+            TextField("Name", text: $renameDraft)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                if let id = renameID, let n = model.note(id: id) {
+                    let leaf = renameDraft.trimmingCharacters(in: .whitespaces)
+                    if !leaf.isEmpty {
+                        model.renameNote(id, to: n.folderName.isEmpty ? leaf : n.folderName + "/" + leaf)
+                    }
+                }
+            }
+        }
+        .confirmationDialog("Delete this note?",
+                            isPresented: Binding(get: { deleteID != nil }, set: { if !$0 { deleteID = nil } }),
+                            titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                if let id = deleteID, let n = model.note(id: id) { model.delete([n]) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the note. It can't be undone.")
         }
     }
 
@@ -307,6 +354,7 @@ private struct MiniFileCard: View {
                 Text(note.displayName)
                     .font(.caption.weight(.semibold)).lineLimit(1).foregroundStyle(.primary)
             }
+            .padding(.trailing, 18)   // leave room for the actions menu in the corner
             if let snippet {
                 Text(snippet).font(.caption2).foregroundStyle(.secondary).lineLimit(3)
             } else if note.isStub {

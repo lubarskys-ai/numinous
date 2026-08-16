@@ -10,6 +10,20 @@ struct FolderBrowserView: View {
     let category: String            // full folder path, e.g. "health" or "health/workouts"
     @State private var search = ""
     @State private var dropHighlight: String?
+    @State private var moveID: UUID?
+    @State private var renameID: UUID?
+    @State private var renameDraft = ""
+    @State private var deleteID: UUID?
+
+    /// The long-press menu shared by every note row here (and matching the Folders grid).
+    @ViewBuilder private func rowMenu(_ note: Note) -> some View {
+        noteActionButtons(
+            open: nil,
+            rename: { renameDraft = note.displayName; renameID = note.id },
+            move: { moveID = note.id },
+            delete: { deleteID = note.id }
+        )
+    }
 
     /// Move any dropped note ids into `folder`. Returns true if at least one moved.
     private func handleNoteDrop(_ providers: [NSItemProvider], into folder: String) -> Bool {
@@ -97,6 +111,7 @@ struct FolderBrowserView: View {
                         ForEach(directNotes) { note in
                             NavigationLink(value: note.id) { NoteRow(note: note) }
                                 .onDrag { NSItemProvider(object: note.id.uuidString as NSString) }
+                                .contextMenu { rowMenu(note) }
                         }
                     }
                 }
@@ -106,6 +121,35 @@ struct FolderBrowserView: View {
         .searchable(text: $search, prompt: "Search \(leaf(category)) (\(descendants.count))")
         .navigationTitle(leaf(category))
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: Binding(get: { moveID.map { NoteID(id: $0) } },
+                             set: { moveID = $0?.id })) { box in
+            MoveNotePicker(noteID: box.id) { destination in
+                model.moveNote(box.id, toFolder: destination)
+                moveID = nil
+            }
+        }
+        .alert("Rename note", isPresented: Binding(get: { renameID != nil }, set: { if !$0 { renameID = nil } })) {
+            TextField("Name", text: $renameDraft)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                if let id = renameID, let n = model.note(id: id) {
+                    let leaf = renameDraft.trimmingCharacters(in: .whitespaces)
+                    if !leaf.isEmpty {
+                        model.renameNote(id, to: n.folderName.isEmpty ? leaf : n.folderName + "/" + leaf)
+                    }
+                }
+            }
+        }
+        .confirmationDialog("Delete this note?",
+                            isPresented: Binding(get: { deleteID != nil }, set: { if !$0 { deleteID = nil } }),
+                            titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                if let id = deleteID, let n = model.note(id: id) { model.delete([n]) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the note. It can't be undone.")
+        }
     }
 
     /// Flat A–Z search across the whole subtree.
@@ -124,9 +168,28 @@ struct FolderBrowserView: View {
                     ForEach(grouped[key]!.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }) { note in
                         NavigationLink(value: note.id) { NoteRow(note: note) }
                             .draggable(note.id.uuidString)
+                            .contextMenu { rowMenu(note) }
                     }
                 }
             }
         }
     }
+}
+
+/// Wraps a note id so it can drive a `.sheet(item:)`.
+struct NoteID: Identifiable { let id: UUID }
+
+/// The note action-menu items shared by every note card and row — so a long-press
+/// (or the visible ⋯ button) offers the same Rename · Move · Delete everywhere.
+/// `open` is optional: rows that already open on tap pass nil to omit it.
+@ViewBuilder
+func noteActionButtons(open: (() -> Void)?,
+                       rename: @escaping () -> Void,
+                       move: @escaping () -> Void,
+                       delete: @escaping () -> Void) -> some View {
+    if let open { Button { open() } label: { Label("Open", systemImage: "doc.text") } }
+    Button { rename() } label: { Label("Rename…", systemImage: "pencil") }
+    Button { move() } label: { Label("Move to folder…", systemImage: "folder") }
+    Divider()
+    Button(role: .destructive) { delete() } label: { Label("Delete", systemImage: "trash") }
 }
