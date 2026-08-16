@@ -224,6 +224,9 @@ private struct DrawerView: View {
             .shadow(color: .black.opacity(0.06), radius: 5, y: 3)
             .contentShape(Rectangle())
             .onTapGesture { if selection.active { selection.toggleFolder(cabinet.id) } else { onToggle() } }
+            // Long-press the folder header for the same Rename / Move / Merge / Delete
+            // actions as the ⋯ button (only outside select mode).
+            .contextMenu { if !selection.active { folderMenuContent } }
             // Drag a whole drawer onto another to move this category under it.
             .onDrag { NSItemProvider(object: cabinet.id as NSString) }
 
@@ -256,6 +259,7 @@ private struct DrawerView: View {
                                         .fill(dropTarget == path ? Color.accentColor.opacity(0.15) : .clear))
                                 }
                                 .buttonStyle(.plain)
+                                .contextMenu { if !selection.active { subfolderMenu(path) } }
                                 .onDrag { NSItemProvider(object: path as NSString) }
                                 .onDrop(of: [.text], isTargeted: Binding(
                                     get: { dropTarget == path },
@@ -369,30 +373,43 @@ private struct DrawerView: View {
         }
     }
 
+    /// Actions for a whole folder — shown both from the ⋯ button and by long-pressing
+    /// the folder header, so a click-and-hold gives Rename / Move / Merge / Delete.
+    @ViewBuilder private var folderMenuContent: some View {
+        Button { onRenameFolder(cabinet.id) } label: { Label("Rename or move folder…", systemImage: "pencil") }
+        Button { onMergeFolder(cabinet.id) } label: { Label("Merge into…", systemImage: "arrow.triangle.merge") }
+        Button { onEditAxes(cabinet.id) } label: { Label("Grows…", systemImage: "circle.hexagongrid") }
+        Button { cleanupConfirm = true } label: { Label("Remove unlinked notes…", systemImage: "sparkles") }
+        Menu("Default intensity") {
+            let intensity = model.folder(named: cabinet.id)?.defaultIntensity
+            Button { model.setFolderIntensity(nil, forFolder: cabinet.id) } label: {
+                if intensity == nil { Label("Neutral (3)", systemImage: "checkmark") } else { Text("Neutral (3)") }
+            }
+            ForEach(1...5, id: \.self) { level in
+                Button { model.setFolderIntensity(level, forFolder: cabinet.id) } label: {
+                    if intensity == level { Label("⚡ \(level)", systemImage: "checkmark") } else { Text("⚡ \(level)") }
+                }
+            }
+        }
+        Divider()
+        Button(role: .destructive) { onDeleteFolder(cabinet.id) } label: {
+            Label("Delete folder…", systemImage: "trash")
+        }
+    }
+
     private var folderMenu: some View {
-        Menu {
-            Button { onEditAxes(cabinet.id) } label: { Label("Grows…", systemImage: "circle.hexagongrid") }
-            Button { onRenameFolder(cabinet.id) } label: { Label("Rename or move folder…", systemImage: "folder") }
-            Button { onMergeFolder(cabinet.id) } label: { Label("Merge into…", systemImage: "arrow.triangle.merge") }
-            Button { cleanupConfirm = true } label: { Label("Remove unlinked notes…", systemImage: "sparkles") }
-            Menu("Default intensity") {
-                let intensity = model.folder(named: cabinet.id)?.defaultIntensity
-                Button { model.setFolderIntensity(nil, forFolder: cabinet.id) } label: {
-                    if intensity == nil { Label("Neutral (3)", systemImage: "checkmark") } else { Text("Neutral (3)") }
-                }
-                ForEach(1...5, id: \.self) { level in
-                    Button { model.setFolderIntensity(level, forFolder: cabinet.id) } label: {
-                        if intensity == level { Label("⚡ \(level)", systemImage: "checkmark") } else { Text("⚡ \(level)") }
-                    }
-                }
-            }
-            Divider()
-            Button(role: .destructive) { onDeleteFolder(cabinet.id) } label: {
-                Label("Delete folder…", systemImage: "trash")
-            }
-        } label: {
+        Menu { folderMenuContent } label: {
             Image(systemName: "ellipsis.circle").font(.title3).foregroundStyle(cabinet.color.opacity(0.7))
         }
+    }
+
+    /// Long-press actions for a subfolder row (a folder nested inside this drawer).
+    @ViewBuilder private func subfolderMenu(_ path: String) -> some View {
+        Button { onBrowseFolder(path) } label: { Label("Open", systemImage: "folder") }
+        Button { onRenameFolder(path) } label: { Label("Rename or move folder…", systemImage: "pencil") }
+        Button { onMergeFolder(path) } label: { Label("Merge into…", systemImage: "arrow.triangle.merge") }
+        Divider()
+        Button(role: .destructive) { onDeleteFolder(path) } label: { Label("Delete folder…", systemImage: "trash") }
     }
 }
 

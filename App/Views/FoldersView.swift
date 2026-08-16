@@ -384,6 +384,11 @@ struct FoldersView: View {
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
+        .contextMenu {
+            if !path.isEmpty {
+                folderMenuContent(path, growthAxes: folder?.growthAxes ?? [], intensity: folder?.defaultIntensity)
+            }
+        }
         .listRowBackground(dropHighlight == path && !path.isEmpty ? Color.accentColor.opacity(0.15) : nil)
         .onDrop(of: [.text], isTargeted: Binding(
             get: { dropHighlight == path && !path.isEmpty },
@@ -401,32 +406,35 @@ struct FoldersView: View {
         return parts.joined(separator: " · ")
     }
 
+    @ViewBuilder
+    private func folderMenuContent(_ path: String, growthAxes: [String], intensity: Int?) -> some View {
+        Button { renameFolderPath = path; folderNameDraft = path } label: {
+            Label("Rename or move folder…", systemImage: "pencil")
+        }
+        Button { folderSheet = .merge(path) } label: {
+            Label("Merge into…", systemImage: "arrow.triangle.merge")
+        }
+        Button { folderSheet = .axes(path) } label: {
+            Label(growthAxes.isEmpty ? "Grows…" : "Grows: \(growthAxes.count) axes", systemImage: "circle.hexagongrid")
+        }
+        Menu("Default intensity") {
+            Button { model.setFolderIntensity(nil, forFolder: path) } label: {
+                if intensity == nil { Label("Neutral (3)", systemImage: "checkmark") } else { Text("Neutral (3)") }
+            }
+            ForEach(1...5, id: \.self) { level in
+                Button { model.setFolderIntensity(level, forFolder: path) } label: {
+                    if intensity == level { Label("⚡ \(level)", systemImage: "checkmark") } else { Text("⚡ \(level)") }
+                }
+            }
+        }
+        Divider()
+        Button(role: .destructive) { deleteFolderPath = path } label: {
+            Label("Delete folder…", systemImage: "trash")
+        }
+    }
+
     private func folderMenu(_ path: String, growthAxes: [String], intensity: Int?) -> some View {
-        Menu {
-            Button { folderSheet = .axes(path) } label: {
-                Label(growthAxes.isEmpty ? "Grows…" : "Grows: \(growthAxes.count) axes", systemImage: "circle.hexagongrid")
-            }
-            Button { renameFolderPath = path; folderNameDraft = path } label: {
-                Label("Rename or move folder…", systemImage: "folder")
-            }
-            Button { folderSheet = .merge(path) } label: {
-                Label("Merge into…", systemImage: "arrow.triangle.merge")
-            }
-            Menu("Default intensity") {
-                Button { model.setFolderIntensity(nil, forFolder: path) } label: {
-                    if intensity == nil { Label("Neutral (3)", systemImage: "checkmark") } else { Text("Neutral (3)") }
-                }
-                ForEach(1...5, id: \.self) { level in
-                    Button { model.setFolderIntensity(level, forFolder: path) } label: {
-                        if intensity == level { Label("⚡ \(level)", systemImage: "checkmark") } else { Text("⚡ \(level)") }
-                    }
-                }
-            }
-            Divider()
-            Button(role: .destructive) { deleteFolderPath = path } label: {
-                Label("Delete folder…", systemImage: "trash")
-            }
-        } label: {
+        Menu { folderMenuContent(path, growthAxes: growthAxes, intensity: intensity) } label: {
             Image(systemName: "ellipsis.circle").foregroundStyle(.secondary)
         }
     }
