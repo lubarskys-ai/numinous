@@ -712,11 +712,36 @@ final class AppModel: ObservableObject {
                 date: note.date ?? Date(),
                 origin: NoteOrigin(source: "obsidian", externalID: note.relativePath),
                 folderCategory: "Obsidian",
-                folderAxisID: nil
+                folderAxisID: guessAxis(forFolderPath: folder)
             )
         }
         let result = ingest(items)
         return (result.added, result.updated, parsed.count)
+    }
+
+    /// Best-guess growth axis for a freshly-imported folder, from its name (e.g.
+    /// `People/` → Heart, `Books/` → Mind). Only *new* folders take this guess —
+    /// ingest never re-maps a folder you've already set — and a folder that matches
+    /// nothing stays axis-less until you map it by hand. First match wins, so the
+    /// order below is the priority when a name could fit two axes.
+    private func guessAxis(forFolderPath path: String) -> String? {
+        let table: [(axis: String, words: [String])] = [
+            ("influences", ["author", "mentor", "inspiration", "quote", "influence", "hero", "teacher"]),
+            ("heart",      ["people", "contact", "friend", "family", "relationship", "love", "partner"]),
+            ("body",       ["workout", "fitness", "health", "exercise", "run", "gym", "training", "body", "sport"]),
+            ("gut",        ["food", "meal", "diet", "nutrition", "recipe", "cook", "eat", "restaurant"]),
+            ("spirit",     ["spirit", "faith", "medit", "prayer", "gratitude", "mindful", "religion", "soul"]),
+            ("mind",       ["book", "read", "idea", "learn", "study", "knowledge", "thought", "note", "research", "concept"]),
+            ("meaning",    ["travel", "trip", "place", "work", "career", "project", "goal", "purpose", "journal", "diary", "mission"]),
+        ]
+        let components = path.lowercased().split(separator: "/").map(String.init)
+        guard !components.isEmpty else { return nil }
+        for (axis, words) in table where axes.contains(where: { $0.id == axis }) {
+            if components.contains(where: { comp in words.contains(where: comp.contains) }) {
+                return axis
+            }
+        }
+        return nil
     }
 
     /// Guarantee each contact with a detected dollar tier actually carries its
