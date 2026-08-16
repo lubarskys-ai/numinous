@@ -635,6 +635,7 @@ struct AxisSettingsView: View {
     @State private var showAutoBackupPicker = false
     @State private var showObsidianPicker = false
     @State private var importMessage: String?
+    @State private var importing = false
     @State private var showHomePrompt = false
     @State private var homeDraft = ""
     @StateObject private var locator = LocationService()
@@ -701,6 +702,14 @@ struct AxisSettingsView: View {
                     Button { showObsidianPicker = true } label: {
                         Label("Import from Obsidian…", systemImage: "square.and.arrow.down.on.square")
                     }
+                    .disabled(importing)
+                    if importing {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("Importing your vault… (large or iCloud vaults can take a minute)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                 } header: {
                     Text("Import")
                 } footer: {
@@ -764,11 +773,15 @@ struct AxisSettingsView: View {
             }
             .fileImporter(isPresented: $showObsidianPicker, allowedContentTypes: [.folder]) { result in
                 if case .success(let url) = result {
-                    let r = model.importObsidianVault(at: url)
-                    if r.files == 0 {
-                        importMessage = "No markdown files found in that folder."
-                    } else {
-                        importMessage = "Imported \(r.files) note\(r.files == 1 ? "" : "s") — \(r.added) new, \(r.updated) updated. Map the new folders to an axis to grow along them."
+                    importing = true
+                    Task {
+                        let r = await model.importObsidianVault(at: url)
+                        importing = false
+                        if r.files == 0 {
+                            importMessage = "No markdown files found in that folder."
+                        } else {
+                            importMessage = "Imported \(r.files) note\(r.files == 1 ? "" : "s") — \(r.added) new, \(r.updated) updated. Map the new folders to an axis to grow along them."
+                        }
                     }
                 }
             }

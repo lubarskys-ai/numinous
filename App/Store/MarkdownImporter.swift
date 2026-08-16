@@ -12,7 +12,7 @@ import NuminousCore
 /// whole block is stripped from the body so it doesn't clutter the note.
 enum ObsidianMarkdownImporter {
 
-    struct ParsedNote {
+    struct ParsedNote: Sendable {
         /// Vault subfolder path, e.g. "People" or "Work/Projects" ("" = vault root).
         var folder: String
         /// Filename without its extension.

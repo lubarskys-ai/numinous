@@ -695,11 +695,16 @@ final class AppModel: ObservableObject {
     /// until you map their folder to an axis in the Folders tab — keeping growth
     /// tied to engagement, not to bulk-importing a vault.
     @discardableResult
-    func importObsidianVault(at folderURL: URL) -> (added: Int, updated: Int, files: Int) {
+    func importObsidianVault(at folderURL: URL) async -> (added: Int, updated: Int, files: Int) {
+        // Reading a whole vault — potentially thousands of files, some not yet
+        // downloaded from iCloud — must NOT run on the main actor, or the UI freezes
+        // until it finishes. Parse off-main, then ingest (a model mutation) back here.
         let scoped = folderURL.startAccessingSecurityScopedResource()
-        defer { if scoped { folderURL.stopAccessingSecurityScopedResource() } }
+        let parsed = await Task.detached(priority: .userInitiated) {
+            ObsidianMarkdownImporter.parse(vaultAt: folderURL)
+        }.value
+        if scoped { folderURL.stopAccessingSecurityScopedResource() }
 
-        let parsed = ObsidianMarkdownImporter.parse(vaultAt: folderURL)
         let items: [ImportedItem] = parsed.compactMap { note in
             let name = note.name.trimmingCharacters(in: .whitespaces)
             guard !name.isEmpty else { return nil }
