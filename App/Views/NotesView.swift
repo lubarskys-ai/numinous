@@ -273,6 +273,9 @@ struct NoteRow: View {
                 HStack(spacing: 6) {
                     Text(note.folderName.isEmpty ? "unfiled" : note.folderName)
                         .font(.caption2).foregroundStyle(.tertiary)
+                    if let r = note.rating {
+                        Text(String(repeating: "★", count: r)).font(.caption2).foregroundStyle(.yellow)
+                    }
                     if !note.isStub {
                         Text("⚡ \(note.intensity)").font(.caption2).foregroundStyle(.secondary)
                         if let loc = note.location, !loc.isEmpty {

@@ -176,6 +176,34 @@ struct NoteDetailView: View {
                 }
             }
             if isEntity(note) && !isRecord(note) { entitySummary(note) }
+            // A 1–5 star rating for things you evaluate (books, restaurants, wine, films).
+            if AppModel.isRateableFolder(note.folderName) {
+                StarRating(rating: note.rating) { model.setRating(note.id, to: $0) }
+            }
+            // Date the entry actually belongs to — change it to backdate a diary entry so
+            // it sorts under the day it happened, not the day you typed it. Shown for
+            // journal entries and logged records, not for people/places/books.
+            if !isEntity(note) {
+                DatePicker(
+                    "Date",
+                    selection: Binding(
+                        get: { note.date },
+                        set: { newDate in
+                            // Flush any in-progress body edit first, so re-syncing below
+                            // (a backdate can retitle the note and add a trip link) can't
+                            // clobber unsaved text.
+                            if editedBody != note.body { model.updateBody(note.id, body: editedBody) }
+                            model.setNoteDate(note.id, to: newDate)
+                            if let fresh = model.note(id: note.id) {
+                                titleDraft = fresh.title
+                                editedBody = fresh.body
+                            }
+                        }
+                    ),
+                    displayedComponents: [.date, .hourAndMinute]
+                )
+                .font(.subheadline)
+            }
             if note.origin?.source != "readwise" { locationRows(note) }
             if note.origin?.source == "readwise" {
                 Toggle(isOn: Binding(get: { !note.isStub },
@@ -635,6 +663,31 @@ struct NoteDetailView: View {
             Spacer(minLength: 0)
         }
         .padding(.vertical, 4)
+    }
+}
+
+/// A tappable 1–5 star row. Tapping a star sets that rating; tapping the current
+/// rating again clears it back to unrated.
+struct StarRating: View {
+    let rating: Int?
+    var onChange: (Int?) -> Void
+
+    var body: some View {
+        HStack {
+            Label("Rating", systemImage: "star.leadinghalf.filled")
+                .font(.subheadline).foregroundStyle(.secondary)
+            Spacer()
+            HStack(spacing: 4) {
+                ForEach(1...5, id: \.self) { i in
+                    Image(systemName: (rating ?? 0) >= i ? "star.fill" : "star")
+                        .font(.body)
+                        .foregroundStyle((rating ?? 0) >= i ? Color.yellow : Color.secondary.opacity(0.4))
+                        .contentShape(Rectangle())
+                        .onTapGesture { onChange(rating == i ? nil : i) }
+                        .accessibilityLabel("\(i) star\(i == 1 ? "" : "s")")
+                }
+            }
+        }
     }
 }
 

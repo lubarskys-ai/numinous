@@ -83,6 +83,9 @@ public struct Note: Identifiable, Hashable, Codable, Sendable {
     public var sessionID: String?
     /// True for placeholder notes auto-created by a link to a missing note.
     public var isStub: Bool
+    /// Optional 1–5 star rating for things you evaluate — a book, restaurant, wine,
+    /// a film. `nil` means unrated. Optional so notes saved before ratings decode cleanly.
+    public var rating: Int?
 
     public init(
         id: UUID = UUID(),
@@ -97,7 +100,8 @@ public struct Note: Identifiable, Hashable, Codable, Sendable {
         source: NoteSource = .manual,
         origin: NoteOrigin? = nil,
         sessionID: String? = nil,
-        isStub: Bool = false
+        isStub: Bool = false,
+        rating: Int? = nil
     ) {
         self.id = id
         self.title = title
@@ -112,6 +116,7 @@ public struct Note: Identifiable, Hashable, Codable, Sendable {
         self.origin = origin
         self.sessionID = sessionID
         self.isStub = isStub
+        self.rating = rating
     }
 
     /// The folder path prefix (`people/Sam` → `people`; `Loose` → `""`).
