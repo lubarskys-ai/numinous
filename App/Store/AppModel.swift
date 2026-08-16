@@ -129,6 +129,7 @@ final class AppModel: ObservableObject {
             .flatMap { try? JSONDecoder().decode(Place.self, from: $0) }
         self.score = ScoreEngine().score(notes: n, folders: f, axes: a)
         recomputeLastTended()
+        recomputeCabinetGroups()
         if loaded == nil || didMigrate || version < Self.schemaVersion {
             storage.save(StoredData(notes: n, folders: f, axes: a, schemaVersion: Self.schemaVersion,
                                     reflections: reflectionLog, followUps: followUps,
@@ -425,6 +426,30 @@ final class AppModel: ObservableObject {
 
     func noteID(forCalendarEvent eventID: String) -> UUID? {
         notes.first { $0.origin?.source == "calendar" && $0.origin?.externalID == eventID }?.id
+    }
+
+    /// One top-level cabinet: a category name and the notes under it (and its subfolders).
+    struct CabinetGroup: Identifiable, Equatable {
+        let id: String              // top-level folder name, e.g. "books"
+        let notes: [Note]
+    }
+
+    /// Cached grouping of notes into top-level cabinets, recomputed only when notes change
+    /// (in `persist`/`init`) — NOT on every view render. The Folders tab re-renders on many
+    /// signals (selection, opening a drawer, any @Published change); regrouping every note
+    /// each time was the post-import slowdown. Reading this cache is O(1).
+    @Published private(set) var cabinetGroups: [CabinetGroup] = []
+
+    private func recomputeCabinetGroups() {
+        var groups: [String: [Note]] = [:]
+        for note in notes {
+            let top = note.folderName.split(separator: "/").first.map(String.init) ?? ""
+            guard !top.isEmpty else { continue }
+            groups[top, default: []].append(note)
+        }
+        cabinetGroups = groups.keys
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            .map { key in CabinetGroup(id: key, notes: (groups[key] ?? []).sorted { $0.date > $1.date }) }
     }
 
     /// Notes grouped by folder path, folders alphabetized, "Unfiled" last.
@@ -1465,6 +1490,7 @@ final class AppModel: ObservableObject {
     private func persist() {
         score = engine.score(notes: notes, folders: folders, axes: axes)
         recomputeLastTended()
+        recomputeCabinetGroups()          // cache the Folders-tab grouping once, not per render
         storage.save(currentSnapshot())   // encodes + writes on a background queue
         runAutoBackup()
     }

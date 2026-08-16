@@ -46,23 +46,17 @@ struct CabinetView: View {
         return "Build: " + (date.map { f.string(from: $0) } ?? "unknown")
     }
 
+    /// Reads the model's cached grouping (recomputed only when notes change, not per
+    /// render) and just decorates each group with its axis color/symbol — cheap, since
+    /// there are only a handful of top-level cabinets.
     private var cabinets: [Cabinet] {
-        var groups: [String: [Note]] = [:]
-        for note in model.notes {
-            let top = note.folderName.split(separator: "/").first.map(String.init) ?? ""
-            guard !top.isEmpty else { continue }
-            groups[top, default: []].append(note)
+        model.cabinetGroups.map { group in
+            let folder = model.folder(named: group.id)
+            let axis = model.axis(id: folder?.axisID) ?? group.notes.lazy.compactMap { model.axis(for: $0) }.first
+            return Cabinet(id: group.id, notes: group.notes,
+                           color: axis?.color ?? .secondary,
+                           symbol: folderSymbol(group.id, folder?.category))
         }
-        return groups.keys
-            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-            .map { key in
-                let notes = (groups[key] ?? []).sorted { $0.date > $1.date }
-                let folder = model.folder(named: key)
-                let axis = model.axis(id: folder?.axisID) ?? notes.lazy.compactMap { model.axis(for: $0) }.first
-                return Cabinet(id: key, notes: notes,
-                               color: axis?.color ?? .secondary,
-                               symbol: folderSymbol(key, folder?.category))
-            }
     }
 
     var body: some View {
@@ -157,27 +151,29 @@ private struct DrawerView: View {
         return true
     }
 
-    /// Immediate subfolder paths under this drawer's top category.
-    private var subfolders: [String] {
-        var seen = Set<String>(); var out: [String] = []
+    /// Immediate subfolders under this drawer's top category, each with its descendant
+    /// count — computed in ONE pass over the drawer's notes (was O(subfolders × notes)
+    /// because the count was recomputed per row every render).
+    private var subfolderRows: [(path: String, count: Int)] {
         let base = cabinet.id.lowercased() + "/"
+        var counts: [String: Int] = [:]      // lowercased subfolder path → count
+        var casing: [String: String] = [:]   // lowercased → original casing
         for n in cabinet.notes where n.folderName.lowercased().hasPrefix(base) {
             let rest = n.folderName.dropFirst(cabinet.id.count + 1)
             guard let seg = rest.split(separator: "/").first.map(String.init), !seg.isEmpty else { continue }
             let path = cabinet.id + "/" + seg
-            if seen.insert(path.lowercased()).inserted { out.append(path) }
+            let key = path.lowercased()
+            if casing[key] == nil { casing[key] = path }
+            counts[key, default: 0] += 1
         }
-        return out.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        return counts.keys
+            .sorted { casing[$0]!.localizedCaseInsensitiveCompare(casing[$1]!) == .orderedAscending }
+            .map { (path: casing[$0]!, count: counts[$0]!) }
     }
 
     /// Notes filed directly in this drawer (not in a subfolder).
     private var directNotes: [Note] {
         cabinet.notes.filter { $0.folderName.lowercased() == cabinet.id.lowercased() }
-    }
-
-    private func descendantCount(_ path: String) -> Int {
-        let p = path.lowercased()
-        return cabinet.notes.filter { let fn = $0.folderName.lowercased(); return fn == p || fn.hasPrefix(p + "/") }.count
     }
 
     var body: some View {
@@ -236,16 +232,17 @@ private struct DrawerView: View {
                         .frame(maxWidth: .infinity).padding(.vertical, 20)
                 } else {
                     // Subfolders first (tap to drill into the hierarchical browser)…
-                    if !subfolders.isEmpty {
+                    if !subfolderRows.isEmpty {
                         VStack(spacing: 2) {
-                            ForEach(subfolders, id: \.self) { path in
+                            ForEach(subfolderRows, id: \.path) { row in
+                                let path = row.path
                                 Button { if selection.active { selection.toggleFolder(path) } else { onBrowseFolder(path) } } label: {
                                     HStack(spacing: 10) {
                                         Image(systemName: "folder.fill").foregroundStyle(cabinet.color)
                                         Text(path.split(separator: "/").last.map(String.init) ?? path)
                                             .foregroundStyle(.primary)
                                         Spacer()
-                                        Text("\(descendantCount(path))").font(.caption).foregroundStyle(.tertiary)
+                                        Text("\(row.count)").font(.caption).foregroundStyle(.tertiary)
                                         if selection.active {
                                             Image(systemName: selection.folders.contains(path) ? "checkmark.circle.fill" : "circle")
                                                 .symbolRenderingMode(.hierarchical)
@@ -311,7 +308,7 @@ private struct DrawerView: View {
                         .padding(.top, 12)
                         .transition(.opacity)
                     }
-                    if directNotes.count > gridLimit || !subfolders.isEmpty {
+                    if directNotes.count > gridLimit || !subfolderRows.isEmpty {
                         Button { onBrowseFolder(cabinet.id) } label: {
                             Label("Browse all \(cabinet.notes.count), A–Z", systemImage: "list.bullet.indent")
                                 .font(.callout.weight(.medium))
