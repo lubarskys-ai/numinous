@@ -50,18 +50,24 @@ struct CabinetView: View {
     /// render) and just decorates each group with its axis color/symbol — cheap, since
     /// there are only a handful of top-level cabinets.
     private var cabinets: [Cabinet] {
-        model.cabinetGroups.map { group in
+        let t0 = CFAbsoluteTimeGetCurrent()
+        let result = model.cabinetGroups.map { group in
             let folder = model.folder(named: group.id)
             let axis = model.axis(id: folder?.axisID) ?? group.notes.lazy.compactMap { model.axis(for: $0) }.first
             return Cabinet(id: group.id, notes: group.notes,
                            color: axis?.color ?? .secondary,
                            symbol: folderSymbol(group.id, folder?.category))
         }
+        let ms = (CFAbsoluteTimeGetCurrent() - t0) * 1000
+        if ms > 20 { print("⏱️[perf] cabinets \(Int(ms))ms count=\(result.count)") }
+        return result
     }
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 12) {
+            // Lazy so off-screen drawers (each with a context menu, drag & drop targets)
+            // don't all render eagerly — matters when a big import creates many folders.
+            LazyVStack(spacing: 12) {
                 ForEach(cabinets) { cab in
                     DrawerView(cabinet: cab, isOpen: openCategory == cab.id,
                                onToggle: {
@@ -155,6 +161,9 @@ private struct DrawerView: View {
     /// count — computed in ONE pass over the drawer's notes (was O(subfolders × notes)
     /// because the count was recomputed per row every render).
     private var subfolderRows: [(path: String, count: Int)] {
+        let _t0 = CFAbsoluteTimeGetCurrent()
+        defer { let ms = (CFAbsoluteTimeGetCurrent() - _t0) * 1000
+            if ms > 20 { print("⏱️[perf] subfolderRows \(Int(ms))ms cabinet=\(cabinet.id) notes=\(cabinet.notes.count)") } }
         let base = cabinet.id.lowercased() + "/"
         var counts: [String: Int] = [:]      // lowercased subfolder path → count
         var casing: [String: String] = [:]   // lowercased → original casing

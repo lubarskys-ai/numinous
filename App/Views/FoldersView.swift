@@ -301,6 +301,9 @@ struct FoldersView: View {
     /// Any note whose title, folder path, body, or `[[links]]` match — so you can
     /// jump straight to a note (or find everything that links to it).
     private func matchingNotes(_ query: String) -> [Note] {
+        let _t0 = CFAbsoluteTimeGetCurrent()
+        defer { let ms = (CFAbsoluteTimeGetCurrent() - _t0) * 1000
+            if ms > 20 { print("⏱️[perf] search \(Int(ms))ms over \(model.notes.count) notes") } }
         let q = query.lowercased().trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return [] }
         func rank(_ n: Note) -> Int {
@@ -442,6 +445,9 @@ struct FoldersView: View {
     // MARK: - Tree
 
     private func buildTree() -> [FolderNode] {
+        let _t0 = CFAbsoluteTimeGetCurrent()
+        defer { let ms = (CFAbsoluteTimeGetCurrent() - _t0) * 1000
+            if ms > 20 { print("⏱️[perf] buildTree \(Int(ms))ms notes=\(model.notes.count)") } }
         var notesByPath: [String: [Note]] = [:]
         for group in model.groupedByFolder { notesByPath[group.id] = group.notes }
 
