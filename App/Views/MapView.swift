@@ -101,6 +101,7 @@ struct MapView: View {
             .overlay(alignment: .top) {
                 VStack(spacing: 8) {
                     searchBar
+                    if searchResult != nil { saveSearchedBar }
                     filterBar(count: currentPins.count)
                 }
             }
@@ -145,6 +146,46 @@ struct MapView: View {
         .padding(.horizontal, 12)
         .padding(.top, 6)
     }
+
+    /// When a search has landed on a place, offer to attach it to a note — either as its
+    /// own place note or onto today's diary entry.
+    private var saveSearchedBar: some View {
+        Menu {
+            Button { saveSearchedAsNote() } label: {
+                Label("Save as a place note", systemImage: "mappin.and.ellipse")
+            }
+            Button { addSearchedToDiary() } label: {
+                Label("Add to today's diary", systemImage: "calendar.badge.plus")
+            }
+        } label: {
+            Label("Add “\(searchText)” to a note", systemImage: "plus.circle.fill")
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 14).padding(.vertical, 9)
+                .frame(maxWidth: .infinity)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(.secondary.opacity(0.25)))
+        }
+        .padding(.horizontal, 12)
+    }
+
+    private func saveSearchedAsNote() {
+        guard let c = searchResult else { return }
+        let name = searchText.trimmingCharacters(in: .whitespaces)
+        let id = model.createPlaceNote(name: name, latitude: c.latitude, longitude: c.longitude)
+        clearSearch()
+        openNote = NoteRef(id: id)
+    }
+
+    private func addSearchedToDiary() {
+        guard let c = searchResult else { return }
+        let name = searchText.trimmingCharacters(in: .whitespaces)
+        let diaryID = model.openTodayDiary()
+        model.addPlace(diaryID, name: name, latitude: c.latitude, longitude: c.longitude)
+        clearSearch()
+        openNote = NoteRef(id: diaryID)
+    }
+
+    private func clearSearch() { searchText = ""; searchResult = nil }
 
     private func runSearch() async {
         let q = searchText.trimmingCharacters(in: .whitespaces)
@@ -232,14 +273,18 @@ struct MapView: View {
         let targets: [(UUID, String)] = model.notes.flatMap { n in
             n.allPlaces.filter { !$0.hasCoordinate }.map { (n.id, $0.name) }
         }
+        var results: [(id: UUID, name: String, latitude: Double, longitude: Double)] = []
         var done = 0
         for (id, name) in targets {
             guard done < 30 else { break }        // cap per open — stays well under geocoder limits
             if let c = await LocationService.coordinate(for: name) {
-                model.addPlace(id, name: name, latitude: c.latitude, longitude: c.longitude)
+                results.append((id, name, c.latitude, c.longitude))
             }
             done += 1
             try? await Task.sleep(nanoseconds: 250_000_000)
         }
+        // Apply all at once — one save, one map refresh, instead of 30 (which made the map
+        // sticky while it geocoded in the background).
+        if !results.isEmpty { model.addPlaces(results) }
     }
 }

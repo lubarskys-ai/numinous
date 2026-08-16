@@ -1831,6 +1831,50 @@ final class AppModel: ObservableObject {
     /// Store the places list (nil when empty) and mirror the first name into the legacy
     /// `location` field so back-compat readers and serialization keep working. Persists
     /// only when something actually changed.
+    /// Apply several geocoded coordinates in ONE save — used by the Map's background
+    /// backfill so it doesn't persist (and re-render the whole map) once per place, which
+    /// made the map sticky right after opening it.
+    func addPlaces(_ items: [(id: UUID, name: String, latitude: Double, longitude: Double)]) {
+        var changed = false
+        for item in items {
+            guard let i = notes.firstIndex(where: { $0.id == item.id }) else { continue }
+            let n = item.name.trimmingCharacters(in: .whitespaces)
+            guard !n.isEmpty else { continue }
+            var places = notes[i].allPlaces
+            if let j = places.firstIndex(where: { $0.name.caseInsensitiveCompare(n) == .orderedSame }) {
+                places[j].latitude = item.latitude; places[j].longitude = item.longitude
+            } else {
+                places.append(Place(name: n, latitude: item.latitude, longitude: item.longitude))
+            }
+            let newPlaces = places.isEmpty ? nil : places
+            if notes[i].places != newPlaces {
+                notes[i].places = newPlaces
+                notes[i].location = places.first?.name
+                applyTravelValue(i)
+                changed = true
+            }
+        }
+        if changed { persist() }
+    }
+
+    /// Create a note for a place you searched on the map (name + coordinate), filed under
+    /// `places`. Returns its id so the caller can open it.
+    @discardableResult
+    func createPlaceNote(name: String, latitude: Double, longitude: Double) -> UUID {
+        let leaf = name.trimmingCharacters(in: .whitespaces)
+        if folder(named: "places") == nil {
+            folders.append(Folder(name: "places", category: "Places", axisID: "meaning"))
+        }
+        var title = "places/" + leaf, k = 2
+        while noteExists(titled: title) { title = "places/\(leaf) (\(k))"; k += 1 }
+        let note = Note(title: title, date: Date(),
+                        location: leaf,
+                        places: [Place(name: leaf, latitude: latitude, longitude: longitude)])
+        notes.append(note)
+        persist()
+        return note.id
+    }
+
     private func commitPlaces(_ places: [Place], to i: Int) {
         let newPlaces = places.isEmpty ? nil : places
         let newLocation = places.first?.name
