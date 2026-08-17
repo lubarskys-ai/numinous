@@ -10,13 +10,13 @@ struct NoteDetailView: View {
 
     @State private var editedBody = ""
     @State private var loadedBodyFor: UUID?
-    @State private var editingBody = false           // reading (rendered links) vs raw editing
     @State private var openLinkTarget: LinkTarget?   // a tapped rendered link to open
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var showFollowUp = false
     @State private var followUpMessage: String?
     @State private var titleDraft = ""
-    @State private var findLinksNote: Note?          // presents the composer's Find-links flow
+    @State private var fullEditNote: Note?           // presents the full-screen composer for editing / find-links
+    @State private var editAutofocus = false         // put the keyboard up when opened by tapping to edit
     @State private var hasTripRange = false          // travel notes: is a trip date range set?
     @State private var tripStart = Date()
     @State private var tripEnd = Date()
@@ -71,7 +71,6 @@ struct NoteDetailView: View {
             .onAppear {
                 if loadedBodyFor != note.id {
                     editedBody = note.body; titleDraft = note.title; loadedBodyFor = note.id
-                    editingBody = note.body.isEmpty   // start reading unless there's nothing yet
                     if let range = model.tripRange(note.id) {
                         hasTripRange = true; tripStart = range.start; tripEnd = range.end
                     } else {
@@ -82,10 +81,11 @@ struct NoteDetailView: View {
             .sheet(item: $openLinkTarget) { t in
                 NavigationStack { NoteDetailView(noteID: t.id) }
             }
-            .fullScreenCover(item: $findLinksNote, onDismiss: {
+            .fullScreenCover(item: $fullEditNote, onDismiss: {
+                editAutofocus = false
                 if let fresh = model.note(id: noteID) { editedBody = fresh.body }
             }) { n in
-                ComposeView(editing: n)
+                ComposeView(editing: n, autofocus: editAutofocus)
             }
             .onDisappear {
                 // Autosave on leave so edits (and links) persist without a manual Save.
@@ -360,42 +360,39 @@ struct NoteDetailView: View {
     @ViewBuilder
     private func bodySection(_ note: Note, label: String, minHeight: CGFloat) -> some View {
         Section {
-            if editingBody {
-                LinkingEditor(text: $editedBody, minHeight: minHeight,
-                              onCommit: { model.updateBody(note.id, body: $0) })
-                HStack {
-                    Text("Type [[ or tap Link to connect a note.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Done") {
-                        model.updateBody(note.id, body: editedBody)
-                        editingBody = false
-                    }.font(.callout.weight(.medium))
-                }
+            if editedBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text("Tap to write…")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: minHeight * 0.5, alignment: .topLeading)
+                    .contentShape(Rectangle())
+                    .onTapGesture { openFullEditor(note) }
             } else {
+                // Reading mode: tappable links; tapping the text opens the full-screen editor.
                 Text(renderedBody(editedBody))
                     .frame(maxWidth: .infinity, minHeight: minHeight * 0.5, alignment: .topLeading)
                     .fixedSize(horizontal: false, vertical: true)
                     .environment(\.openURL, OpenURLAction { url in openBodyLink(url); return .handled })
                     .contentShape(Rectangle())
-                    .onTapGesture { editingBody = true }   // tap the text to edit (cursor)
+                    .onTapGesture { openFullEditor(note) }
             }
         } header: {
             HStack(spacing: 14) {
                 Text(label)
                 Spacer()
                 if editedBody.trimmingCharacters(in: .whitespaces).count >= 3 {
-                    Button {
-                        // Save any in-progress edits first so the scan sees the latest text.
-                        if editedBody != note.body { model.updateBody(note.id, body: editedBody) }
-                        findLinksNote = model.note(id: note.id)
-                    } label: { Label("Find links", systemImage: "sparkles").font(.caption) }
+                    Button { openFullEditor(note) } label: { Label("Find links", systemImage: "sparkles").font(.caption) }
                 }
-                if !editingBody {
-                    Button { editingBody = true } label: { Label("Edit", systemImage: "pencil").font(.caption) }
-                }
+                Button { openFullEditor(note) } label: { Label("Edit", systemImage: "pencil").font(.caption) }
             }
         }
+    }
+
+    /// Editing the substance of a note happens in the full-screen composer (roomy editor +
+    /// linking), not a cramped inline box — opened by tapping the body, Edit, or Find links.
+    private func openFullEditor(_ note: Note) {
+        if editedBody != note.body { model.updateBody(note.id, body: editedBody) }
+        editAutofocus = true
+        fullEditNote = model.note(id: note.id)
     }
 
     /// The body with `[[folder/Name]]` rendered as bracket-less, axis-colored, underlined

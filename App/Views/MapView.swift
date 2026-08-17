@@ -36,6 +36,7 @@ struct MapView: View {
     @State private var geocodedOnce = false
     @State private var searchText = ""
     @State private var searchResult: CLLocationCoordinate2D?
+    @State private var searchResultName: String?      // the resolved place/business name
     @State private var searching = false
     @State private var searchFailed = false
 
@@ -87,11 +88,14 @@ struct MapView: View {
                         .tag(pin.id)
                 }
                 if let searchResult {
-                    Marker("Search result", systemImage: "magnifyingglass", coordinate: searchResult)
+                    Marker(searchResultName ?? "Search result", systemImage: "mappin", coordinate: searchResult)
                         .tint(.blue)
                 }
             }
-            .mapStyle(.standard(pointsOfInterest: .excludingAll))
+            // Show map POIs (restaurants, cafés, shops…) so you can find a place by browsing too.
+            .mapStyle(.standard(pointsOfInterest: .including([
+                .restaurant, .cafe, .bakery, .brewery, .winery, .nightlife,
+                .hotel, .store, .park, .museum, .movieTheater, .fitnessCenter])))
             .mapControls { MapUserLocationButton(); MapCompass() }
             .onChange(of: selection) { _, id in
                 guard let id, let mp = model.mappablePlaces.first(where: { $0.id == id }) else { return }
@@ -158,8 +162,9 @@ struct MapView: View {
                 Label("Add to today's diary", systemImage: "calendar.badge.plus")
             }
         } label: {
-            Label("Add “\(searchText)” to a note", systemImage: "plus.circle.fill")
+            Label("Add “\(resolvedName)” to a note", systemImage: "plus.circle.fill")
                 .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
                 .padding(.horizontal, 14).padding(.vertical, 9)
                 .frame(maxWidth: .infinity)
                 .background(.ultraThinMaterial, in: Capsule())
@@ -168,41 +173,61 @@ struct MapView: View {
         .padding(.horizontal, 12)
     }
 
+    /// The name to save — the resolved business/place name when we have one, else the query.
+    private var resolvedName: String {
+        (searchResultName ?? searchText).trimmingCharacters(in: .whitespaces)
+    }
+
     private func saveSearchedAsNote() {
         guard let c = searchResult else { return }
-        let name = searchText.trimmingCharacters(in: .whitespaces)
-        let id = model.createPlaceNote(name: name, latitude: c.latitude, longitude: c.longitude)
+        let id = model.createPlaceNote(name: resolvedName, latitude: c.latitude, longitude: c.longitude)
         clearSearch()
         openNote = NoteRef(id: id)
     }
 
     private func addSearchedToDiary() {
         guard let c = searchResult else { return }
-        let name = searchText.trimmingCharacters(in: .whitespaces)
         let diaryID = model.openTodayDiary()
-        model.addPlace(diaryID, name: name, latitude: c.latitude, longitude: c.longitude)
+        model.addPlace(diaryID, name: resolvedName, latitude: c.latitude, longitude: c.longitude)
         clearSearch()
         openNote = NoteRef(id: diaryID)
     }
 
-    private func clearSearch() { searchText = ""; searchResult = nil }
+    private func clearSearch() { searchText = ""; searchResult = nil; searchResultName = nil }
 
     private func runSearch() async {
         let q = searchText.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return }
         searching = true
+        defer { searching = false }
         let near = await locator.currentCoordinate()
+
+        // MKLocalSearch understands businesses/POIs (restaurants, cafés, shops), which a
+        // plain geocoder does not — so "Blue Bottle" or "Tartine" actually resolves.
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = q
+        if let near {
+            request.region = MKCoordinateRegion(center: near, latitudinalMeters: 60_000, longitudinalMeters: 60_000)
+        }
+        if let item = try? await MKLocalSearch(request: request).start().mapItems.first {
+            centerOnResult(item.placemark.coordinate, name: item.name ?? q, zoom: 0.04)
+            return
+        }
+        // Fallback: a plain address/city via the geocoder.
         if let c = await LocationService.coordinate(for: q, near: near) {
-            let coord = CLLocationCoordinate2D(latitude: c.latitude, longitude: c.longitude)
-            searchResult = coord
-            withAnimation {
-                position = .region(MKCoordinateRegion(
-                    center: coord, span: MKCoordinateSpan(latitudeDelta: 0.15, longitudeDelta: 0.15)))
-            }
+            centerOnResult(CLLocationCoordinate2D(latitude: c.latitude, longitude: c.longitude), name: q, zoom: 0.15)
         } else {
             searchFailed = true
         }
-        searching = false
+    }
+
+    private func centerOnResult(_ coord: CLLocationCoordinate2D, name: String, zoom: Double) {
+        searchResult = coord
+        searchResultName = name
+        withAnimation {
+            position = .region(MKCoordinateRegion(
+                center: coord, span: MKCoordinateSpan(latitudeDelta: zoom, longitudeDelta: zoom)))
+        }
     }
 
     // MARK: - Filter bar

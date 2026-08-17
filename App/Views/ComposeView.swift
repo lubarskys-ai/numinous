@@ -78,9 +78,9 @@ struct ComposeView: View {
     /// Edit an EXISTING note in place — used by "Find links" from the note detail view, so
     /// you get the full scan/review flow over a note you've already written. Save weaves
     /// the kept links into that note's body (it doesn't create a new note).
-    init(editing note: Note, onSaved: ((UUID) -> Void)? = nil) {
+    init(editing note: Note, autofocus: Bool = false, onSaved: ((UUID) -> Void)? = nil) {
         self.onSaved = onSaved
-        self.autofocus = false
+        self.autofocus = autofocus
         self.diaryMode = false
         _category = State(initialValue: note.folderName.isEmpty ? "notes" : note.folderName)
         _text = State(initialValue: note.body)
