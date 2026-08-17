@@ -222,30 +222,51 @@ private struct LinkTextView: UIViewRepresentable {
         var parent: LinkTextView
         weak var textView: UITextView?
         var hiddenRanges: [NSRange] = []
+        /// Fingerprint of the last applied fold/color state. Restyle mutates the whole text
+        /// storage and invalidates every glyph — far too heavy to run on each keystroke and
+        /// caret move (it was jittering the caret). We only pay that cost when this changes.
+        private var lastStyleSignature: String?
         init(_ parent: LinkTextView) { self.parent = parent }
 
         private func isHidden(_ i: Int) -> Bool { hiddenRanges.contains { NSLocationInRange(i, $0) } }
 
         /// Recompute which links fold vs. stay raw (the one the cursor is in), restyle the
-        /// visible names, and re-run glyph generation so the hiding takes effect.
+        /// visible names, and re-run glyph generation so the hiding takes effect. Skips the
+        /// expensive storage rewrite whenever the fold/color state is unchanged — i.e. plain
+        /// typing, or a caret move that doesn't cross a link edge — which is what stops the
+        /// caret from bouncing.
         func restyle() {
             guard let tv = textView, tv.markedTextRange == nil else { return }
             let ns = tv.text as NSString
             let sel = tv.selectedRange
-            let storage = tv.textStorage
             let full = NSRange(location: 0, length: ns.length)
             let font = tv.font ?? UIFont.preferredFont(forTextStyle: .body)
-            storage.beginEditing()
-            storage.setAttributes([.font: font, .foregroundColor: UIColor.label], range: full)
+
             var hidden: [NSRange] = []
+            var names: [(range: NSRange, color: UIColor)] = []
             for p in LinkTextView.linkPieces(in: ns) {
                 // The link the cursor is inside (or touching) stays raw & editable.
                 let expanded = NSRange(location: p.full.location, length: p.full.length + 1)
                 if NSLocationInRange(sel.location, expanded) || NSIntersectionRange(sel, expanded).length > 0 { continue }
                 hidden.append(contentsOf: p.hidden)
-                let color = parent.colorForTarget?(p.target) ?? .tintColor
-                storage.addAttribute(.foregroundColor, value: color, range: p.name)
-                storage.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: p.name)
+                names.append((p.name, parent.colorForTarget?(p.target) ?? .tintColor))
+            }
+
+            // Nothing about folding/coloring changed → don't touch the text storage or glyphs.
+            // (Newly typed plain text already inherits `typingAttributes`, so it looks right
+            // without a rewrite.) This early-out is the whole fix for the bouncing caret.
+            var sig = ""
+            for r in hidden { sig += "h\(r.location).\(r.length)" }
+            for n in names { sig += "n\(n.range.location).\(n.range.length).\(n.color.hashValue)" }
+            if sig == lastStyleSignature { return }
+            lastStyleSignature = sig
+
+            let storage = tv.textStorage
+            storage.beginEditing()
+            storage.setAttributes([.font: font, .foregroundColor: UIColor.label], range: full)
+            for n in names {
+                storage.addAttribute(.foregroundColor, value: n.color, range: n.range)
+                storage.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: n.range)
             }
             storage.endEditing()
             hiddenRanges = hidden

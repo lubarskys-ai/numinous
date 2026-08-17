@@ -2539,16 +2539,19 @@ final class AppModel: ObservableObject {
     /// Append a line to today's most recent diary entry (creating one if there isn't
     /// one yet). Any `[[links]]` in the line become real connections, as usual.
     @discardableResult
-    func appendToTodayDiary(_ line: String) -> UUID {
-        let cal = Calendar.current
-        if let i = notes.indices
-            .filter({ Folder.normalize(notes[$0].folderName).contains("diary") && cal.isDateInToday(notes[$0].date) })
-            .max(by: { notes[$0].date < notes[$1].date }) {
-            let sep = notes[i].body.isEmpty ? "" : "\n"
-            updateBody(notes[i].id, body: notes[i].body + sep + line)
-            return notes[i].id
+    func appendToTodayDiary(_ line: String) -> UUID { appendToDiary(on: Date(), line) }
+
+    /// Append a line to the diary entry for a SPECIFIC day (creating that day's entry if
+    /// there isn't one yet), dated to that day so it sorts chronologically. Used by the
+    /// Calendar tab to file an event into the diary of its own date, not just today.
+    @discardableResult
+    func appendToDiary(on day: Date, _ line: String) -> UUID {
+        let id = openDiary(on: day)   // the most recent entry for that day, or a fresh one
+        if let note = self.note(id: id) {
+            let sep = note.body.isEmpty ? "" : "\n"
+            updateBody(id, body: note.body + sep + line)
         }
-        return createCapturedNote(body: line, folder: "notes/diary")
+        return id
     }
 
     /// Delete a folder and every note filed under it (and its subfolders).
