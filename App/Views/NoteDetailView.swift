@@ -148,6 +148,8 @@ struct NoteDetailView: View {
     private func isEntity(_ note: Note) -> Bool { !Self.isDateTitled(note.displayName) }
     /// A logged health record — gets a stripped-down detail view, not the CRM layout.
     private func isRecord(_ note: Note) -> Bool { note.origin?.source == "healthkit" }
+    /// A `books/genre/…` note — a shelf whose books link to it; shown as a plain book list.
+    private func isGenreNote(_ note: Note) -> Bool { Folder.normalize(note.folderName) == "books/genre" }
     /// A travel note — can carry a trip date range that auto-links diary entries.
     private func isTrip(_ note: Note) -> Bool { AppModel.isTravelNote(note.folderName) }
     private static func isDateTitled(_ name: String) -> Bool {
@@ -529,7 +531,16 @@ struct NoteDetailView: View {
     @ViewBuilder
     private func linkedFromSection(_ note: Note) -> some View {
         let back = model.backlinks(to: note)
-        if isEntity(note) {
+        if isGenreNote(note) {
+            // A genre note is a shelf: list the books tagged with it, plainly.
+            Section(back.isEmpty ? "Books" : "^[\(back.count) book](inflect: true) in this genre") {
+                if back.isEmpty {
+                    Text("No books tagged with this genre yet.").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ForEach(back) { b in NavigationLink(value: b.id) { linkLabel(b) } }
+                }
+            }
+        } else if isEntity(note) {
             if back.isEmpty {
                 Section("Mentioned in") {
                     Text("Nothing links here yet.").font(.caption).foregroundStyle(.secondary)
