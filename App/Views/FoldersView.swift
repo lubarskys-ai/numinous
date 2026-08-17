@@ -49,32 +49,33 @@ struct FoldersView: View {
     @State private var debouncedQuery = ""
     @State private var showNewFolder = false
     @State private var newFolderName = ""
+    @State private var showFixNames = false
     @AppStorage("foldersCabinetMode") private var cabinetMode = true
+
+    @ViewBuilder private var folderContent: some View {
+        if !searchText.isEmpty {
+            searchResults(debouncedQuery)
+        } else if cabinetMode {
+            CabinetView(onOpenNote: { path.append($0) },
+                        onEditAxes: { folderSheet = .axes($0) },
+                        onBrowseFolder: { path.append($0) },
+                        onDeleteFolder: { deleteFolderPath = $0 },
+                        onRenameFolder: { renameFolderPath = $0; folderNameDraft = $0 },
+                        onMergeFolder: { folderSheet = .merge($0) },
+                        onMoveNote: { folderSheet = .moveNote($0) },
+                        selection: $selection)
+        } else {
+            List {
+                OutlineGroup(buildTree(), children: \.children) { node in row(node) }
+                    .listRowSeparatorTint(Color.secondary.opacity(0.12))
+            }
+            .listStyle(.insetGrouped)
+        }
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
-            Group {
-                if !searchText.isEmpty {
-                    searchResults(debouncedQuery)
-                } else if cabinetMode {
-                    CabinetView(onOpenNote: { path.append($0) },
-                                onEditAxes: { folderSheet = .axes($0) },
-                                onBrowseFolder: { path.append($0) },
-                                onDeleteFolder: { deleteFolderPath = $0 },
-                                onRenameFolder: { renameFolderPath = $0; folderNameDraft = $0 },
-                                onMergeFolder: { folderSheet = .merge($0) },
-                                onMoveNote: { folderSheet = .moveNote($0) },
-                                selection: $selection)
-                } else {
-                    List {
-                        OutlineGroup(buildTree(), children: \.children) { node in
-                            row(node)
-                        }
-                        .listRowSeparatorTint(Color.secondary.opacity(0.12))
-                    }
-                    .listStyle(.insetGrouped)
-                }
-            }
+            folderContent
             .safeAreaInset(edge: .bottom) { bulkActionBar }
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic),
                         prompt: "Search notes & links")
@@ -114,29 +115,7 @@ struct FoldersView: View {
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Menu {
-                        Button { compose = ComposeRequest() } label: { Label("New note", systemImage: "square.and.pencil") }
-                        Button { newFolderName = ""; showNewFolder = true } label: { Label("New folder", systemImage: "folder.badge.plus") }
-                        Button { compose = ComposeRequest(diary: true) } label: { Label("Add to today's diary", systemImage: "calendar.badge.plus") }
-                        Divider()
-                        Button { importContacts() } label: { Label("Sync contacts", systemImage: "person.crop.circle.badge.plus") }
-                        if model.isReadwiseConnected {
-                            Button { Task { importMessage = await model.syncReadwiseNow() } } label: { Label("Sync Readwise now", systemImage: "arrow.triangle.2.circlepath") }
-                        }
-                        Button { showReadwise = true } label: { Label(model.isReadwiseConnected ? "Readwise settings" : "Import from Readwise", systemImage: "books.vertical") }
-                        Button {
-                            Task {
-                                let n = await model.backfillBookGenres()
-                                importMessage = n == 0 ? "No new genres found (books may already be tagged, or none matched)."
-                                                       : "Tagged \(n) book\(n == 1 ? "" : "s") with a genre → books/genre/…"
-                            }
-                        } label: { Label("Look up book genres", systemImage: "text.book.closed") }
-                        #if DEBUG
-                        Button { let (a, u) = model.importReadwise(ReadwiseService.sampleBooks); importMessage = "Readwise (sample): \(a) new, \(u) updated." } label: { Label("Readwise sample (debug)", systemImage: "ladybug") }
-                        #endif
-                    } label: {
-                        Image(systemName: "plus")
-                    }
+                    Menu { addMenuContent } label: { Image(systemName: "plus") }
                 }
             }
             // One sheet driven by an enum — stacking several `.sheet(item:)` on one view
@@ -179,6 +158,19 @@ struct FoldersView: View {
             .alert("Import", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(importMessage ?? "") }
+            .confirmationDialog("Fix imported note names?", isPresented: $showFixNames, titleVisibility: .visible) {
+                let n = model.obsidianArtifactCount()
+                Button("Fix \(n) name\(n == 1 ? "" : "s")") {
+                    let fixed = model.cleanupObsidianTitles()
+                    importMessage = "Cleaned \(fixed) note name\(fixed == 1 ? "" : "s")."
+                }
+                .disabled(n == 0)
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                let n = model.obsidianArtifactCount()
+                Text(n == 0 ? "No mangled names found."
+                            : "\(n) note\(n == 1 ? "" : "s") have Obsidian import junk in the name (a “.md” or a “#…” block reference, e.g. “Hamnet.md#tr-…”). This strips it back to the clean name (e.g. “Hamnet”); links follow and duplicates merge.")
+            }
             .alert("New folder", isPresented: $showNewFolder) {
                 TextField("Folder name", text: $newFolderName)
                     .autocorrectionDisabled()
@@ -332,6 +324,30 @@ struct FoldersView: View {
             a.rank != b.rank ? a.rank < b.rank
                 : a.note.displayName.localizedCaseInsensitiveCompare(b.note.displayName) == .orderedAscending
         }.map(\.note)
+    }
+
+    /// The "+" menu. Extracted to keep the main body under the type-checker's limit.
+    @ViewBuilder private var addMenuContent: some View {
+        Button { compose = ComposeRequest() } label: { Label("New note", systemImage: "square.and.pencil") }
+        Button { newFolderName = ""; showNewFolder = true } label: { Label("New folder", systemImage: "folder.badge.plus") }
+        Button { compose = ComposeRequest(diary: true) } label: { Label("Add to today's diary", systemImage: "calendar.badge.plus") }
+        Divider()
+        Button { importContacts() } label: { Label("Sync contacts", systemImage: "person.crop.circle.badge.plus") }
+        if model.isReadwiseConnected {
+            Button { Task { importMessage = await model.syncReadwiseNow() } } label: { Label("Sync Readwise now", systemImage: "arrow.triangle.2.circlepath") }
+        }
+        Button { showReadwise = true } label: { Label(model.isReadwiseConnected ? "Readwise settings" : "Import from Readwise", systemImage: "books.vertical") }
+        Button {
+            Task {
+                let n = await model.backfillBookGenres()
+                importMessage = n == 0 ? "No new genres found (books may already be tagged, or none matched)."
+                                       : "Tagged \(n) book\(n == 1 ? "" : "s") with a genre → books/genre/…"
+            }
+        } label: { Label("Look up book genres", systemImage: "text.book.closed") }
+        Button { showFixNames = true } label: { Label("Fix imported note names", systemImage: "character.cursor.ibeam") }
+        #if DEBUG
+        Button { let (a, u) = model.importReadwise(ReadwiseService.sampleBooks); importMessage = "Readwise (sample): \(a) new, \(u) updated." } label: { Label("Readwise sample (debug)", systemImage: "ladybug") }
+        #endif
     }
 
     /// The multi-select action bar pinned to the bottom in cabinet mode. Extracted from

@@ -1009,6 +1009,39 @@ final class AppModel: ObservableObject {
     /// `books/genre/<Genre>` note, so your library groups by genre. Skips books already
     /// tagged; throttled to be polite; applies all results in one save. Returns how many
     /// were tagged.
+    /// Strip Obsidian link artifacts from a name — a trailing ".md" and any "#heading" /
+    /// "#^block" reference — so "Hamnet.md#tr-nj9gce2d2" reads as "Hamnet".
+    static func cleanObsidianName(_ name: String) -> String {
+        var s = name
+        if let hash = s.firstIndex(of: "#") { s = String(s[..<hash]) }
+        if s.lowercased().hasSuffix(".md") { s = String(s.dropLast(3)) }
+        return s.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Fix note names mangled by an Obsidian import — a trailing ".md" or a "#…" block/heading
+    /// reference in the title (e.g. "Hamnet.md#tr-nj9gce2d2" → "Hamnet"). Renames them; links
+    /// follow and collisions merge. Returns how many were fixed.
+    @discardableResult
+    func cleanupObsidianTitles() -> Int {
+        var pairs: [(old: String, new: String)] = []
+        for n in notes {
+            let cleaned = Self.cleanObsidianName(n.displayName)
+            guard cleaned != n.displayName, !cleaned.isEmpty else { continue }
+            let folder = n.folderName
+            let newTitle = folder.isEmpty ? cleaned : folder + "/" + cleaned
+            guard Self.norm(newTitle) != Self.norm(n.title) else { continue }
+            pairs.append((n.title, newTitle))
+        }
+        guard !pairs.isEmpty else { return 0 }
+        retitle(pairs)
+        return pairs.count
+    }
+
+    /// How many notes have Obsidian-artifact names to fix (for the confirmation prompt).
+    func obsidianArtifactCount() -> Int {
+        notes.filter { Self.cleanObsidianName($0.displayName) != $0.displayName }.count
+    }
+
     func backfillBookGenres(limit: Int = 80) async -> Int {
         let books = notes.filter {
             $0.origin?.source == "readwise" && Folder.normalize($0.folderName) == "books"
@@ -1017,7 +1050,8 @@ final class AppModel: ObservableObject {
         var results: [(id: UUID, genre: String)] = []
         for book in books.prefix(limit) {
             let author = book.details.first { $0.key.caseInsensitiveCompare("Author") == .orderedSame }?.value
-            if let genre = await GoogleBooksService.genre(title: book.displayName, author: author) {
+            // Query with a cleaned title so a mangled "Hamnet.md#…" still matches "Hamnet".
+            if let genre = await GoogleBooksService.genre(title: Self.cleanObsidianName(book.displayName), author: author) {
                 results.append((book.id, genre))
             }
             try? await Task.sleep(nanoseconds: 250_000_000)   // ~4/sec, gentle on the API
@@ -1660,16 +1694,38 @@ final class AppModel: ObservableObject {
         for i in notes.indices {
             let key = Self.norm(notes[i].title)
             guard let kept = keptIndexByTitle[key] else { keptIndexByTitle[key] = i; continue }
-            if Self.richer(notes[i], than: notes[kept]) {
-                dropIDs.append(notes[kept].id); keptIndexByTitle[key] = i
-            } else {
-                dropIDs.append(notes[i].id)
-            }
+            // Two notes now share a title (e.g. after merging folders). Keep the richer one
+            // but MERGE the other's content into it first, so nothing is lost.
+            let winner: Int, loser: Int
+            if Self.richer(notes[i], than: notes[kept]) { winner = i; loser = kept; keptIndexByTitle[key] = i }
+            else { winner = kept; loser = i }
+            mergeContent(from: notes[loser], into: winner)
+            dropIDs.append(notes[loser].id)
         }
         if !dropIDs.isEmpty {
             let drop = Set(dropIDs)
             notes.removeAll { drop.contains($0.id) }
         }
+    }
+
+    /// Fold one note's content (body lines, details, places, photos) into another at index
+    /// `into`, without duplicating. Used when two notes collapse to the same title.
+    private func mergeContent(from other: Note, into i: Int) {
+        guard notes.indices.contains(i) else { return }
+        notes[i].body = Self.mergeBodies(existing: notes[i].body, incoming: other.body)
+        notes[i].details = Self.mergeDetails(notes[i].details, other.details)
+        var places = notes[i].allPlaces
+        for p in other.allPlaces where !places.contains(where: { $0.name.caseInsensitiveCompare(p.name) == .orderedSame }) {
+            places.append(p)
+        }
+        if !places.isEmpty { notes[i].places = places }
+        if let otherPhotos = other.photos, !otherPhotos.isEmpty {
+            var photos = notes[i].photos ?? []
+            for ph in otherPhotos where !photos.contains(ph) { photos.append(ph) }
+            notes[i].photos = photos
+        }
+        if notes[i].isStub && !other.isStub { notes[i].isStub = false }
+        if notes[i].rating == nil { notes[i].rating = other.rating }
     }
 
     private static func richer(_ a: Note, than b: Note) -> Bool {
