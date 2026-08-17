@@ -351,7 +351,12 @@ struct NoteDetailView: View {
         guard !trimmed.isEmpty else { return }
         model.addPlace(id, name: trimmed)
         Task {
-            if let c = await LocationService.coordinate(for: trimmed) {
+            let near = await locator.currentCoordinate()
+            // MKLocalSearch first so a restaurant/business name resolves ("Blue Bottle",
+            // "Tartine") — the address geocoder is the fallback. Keeps YOUR typed label.
+            if let hit = await LocationService.searchPlace(trimmed, near: near) {
+                model.addPlace(id, name: trimmed, latitude: hit.latitude, longitude: hit.longitude)
+            } else if let c = await LocationService.coordinate(for: trimmed, near: near) {
                 model.addPlace(id, name: trimmed, latitude: c.latitude, longitude: c.longitude)
             }
         }
@@ -761,12 +766,20 @@ struct PlaceEditorView: View {
         }
     }
 
-    /// Geocode the typed name and center the pin there.
+    /// Find the typed name (business/restaurant via MKLocalSearch, else a plain address)
+    /// and center the pin there.
     private func search() async {
-        guard let c = await LocationService.coordinate(for: name) else { return }
-        let cc = CLLocationCoordinate2D(latitude: c.latitude, longitude: c.longitude)
+        var near = coord
+        if near == nil { near = await locator.currentCoordinate() }
+        var cc: CLLocationCoordinate2D?
+        if let hit = await LocationService.searchPlace(name, near: near) {
+            cc = CLLocationCoordinate2D(latitude: hit.latitude, longitude: hit.longitude)
+        } else if let c = await LocationService.coordinate(for: name, near: near) {
+            cc = CLLocationCoordinate2D(latitude: c.latitude, longitude: c.longitude)
+        }
+        guard let cc else { return }
         coord = cc
-        position = .region(MKCoordinateRegion(center: cc, latitudinalMeters: 4000, longitudinalMeters: 4000))
+        position = .region(MKCoordinateRegion(center: cc, latitudinalMeters: 2000, longitudinalMeters: 2000))
     }
 
     private func useCurrent() async {
