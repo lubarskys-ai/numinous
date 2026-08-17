@@ -1455,6 +1455,26 @@ final class AppModel: ObservableObject {
         return notes.filter { within($0) && $0.linkTargets.isEmpty && !linkedTargets.contains(Self.norm($0.title)) }
     }
 
+    /// Notes whose name is a disambiguated duplicate — "Sam Davey (2)", "… (3)" — of
+    /// another note that already exists in the same folder. These are the accidental
+    /// re-import duplicates. The base note (without the suffix) is kept.
+    func duplicateNotes(inFolder folderPath: String? = nil) -> [Note] {
+        let existing = Set(notes.map { Self.norm($0.title) })
+        let regex = try? NSRegularExpression(pattern: #"^(.+) \(\d+\)$"#)
+        return notes.filter { n in
+            if let folderPath {
+                let f = n.folderName.lowercased(), p = folderPath.lowercased()
+                guard f == p || f.hasPrefix(p + "/") else { return false }
+            }
+            let name = n.displayName as NSString
+            guard let m = regex?.firstMatch(in: n.displayName, range: NSRange(location: 0, length: name.length)),
+                  m.numberOfRanges >= 2 else { return false }
+            let base = name.substring(with: m.range(at: 1))
+            let baseTitle = n.folderName.isEmpty ? base : n.folderName + "/" + base
+            return existing.contains(Self.norm(baseTitle))   // only if the original still exists
+        }
+    }
+
     /// Delete several folders (and everything filed under them) in one save.
     func deleteFolders(_ paths: [String]) {
         guard !paths.isEmpty else { return }

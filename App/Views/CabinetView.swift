@@ -117,6 +117,7 @@ private struct DrawerView: View {
     @State private var renameDraft = ""
     @State private var deleteID: UUID?
     @State private var cleanupConfirm = false
+    @State private var dupConfirm = false
 
     /// The action menu shared by a note card's ⋯ button and its long-press — the same
     /// Open · Rename · Move · Delete offered in the folder browser.
@@ -377,6 +378,21 @@ private struct DrawerView: View {
                 Text("\(c) note\(c == 1 ? "" : "s") in “\(cabinet.name)” link to nothing and nothing links to them. Keeps only connected notes. This can't be undone.")
             }
         }
+        .confirmationDialog("Remove duplicates?", isPresented: $dupConfirm, titleVisibility: .visible) {
+            let dups = model.duplicateNotes(inFolder: cabinet.id)
+            Button("Remove \(dups.count) duplicate\(dups.count == 1 ? "" : "s")", role: .destructive) {
+                model.delete(dups)
+            }
+            .disabled(dups.isEmpty)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            let c = model.duplicateNotes(inFolder: cabinet.id).count
+            if c == 0 {
+                Text("No duplicates found in “\(cabinet.name)”.")
+            } else {
+                Text("\(c) note\(c == 1 ? "" : "s") in “\(cabinet.name)” named like “… (2)” duplicate an existing note. Removes the copies, keeps the originals. This can't be undone.")
+            }
+        }
     }
 
     /// Actions for a whole folder — shown both from the ⋯ button and by long-pressing
@@ -386,6 +402,7 @@ private struct DrawerView: View {
         Button { onMergeFolder(cabinet.id) } label: { Label("Merge into…", systemImage: "arrow.triangle.merge") }
         Button { onEditAxes(cabinet.id) } label: { Label("Grows…", systemImage: "circle.hexagongrid") }
         Button { cleanupConfirm = true } label: { Label("Remove unlinked notes…", systemImage: "sparkles") }
+        Button { dupConfirm = true } label: { Label("Remove duplicates…", systemImage: "doc.on.doc") }
         Menu("Default intensity") {
             let intensity = model.folder(named: cabinet.id)?.defaultIntensity
             Button { model.setFolderIntensity(nil, forFolder: cabinet.id) } label: {

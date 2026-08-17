@@ -8,6 +8,7 @@ import NuminousCore
 struct NotesView: View {
     @EnvironmentObject var model: AppModel
     @State private var searchText = ""
+    @State private var debouncedQuery = ""
     @State private var categoryFilter: String?
     @State private var compose: ComposeRequest?
     @State private var showReconnect = false
@@ -21,6 +22,11 @@ struct NotesView: View {
                 .navigationDestination(for: UUID.self) { NoteDetailView(noteID: $0) }
                 .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always),
                             prompt: "Search notes, text, links")
+                .task(id: searchText) {   // debounce: don't scan every note on each keystroke
+                    if searchText.isEmpty { debouncedQuery = ""; return }
+                    try? await Task.sleep(nanoseconds: 220_000_000)
+                    if !Task.isCancelled { debouncedQuery = searchText }
+                }
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Menu {
@@ -71,7 +77,7 @@ struct NotesView: View {
             let sections = streamSections
             if sections.isEmpty { emptyStream } else { streamList(sections) }
         } else {
-            let hits = matchingNotes(searchText)
+            let hits = matchingNotes(debouncedQuery)
             if hits.isEmpty { emptyResults } else { resultsList(hits) }
         }
     }
@@ -146,25 +152,21 @@ struct NotesView: View {
     /// Any note whose name, folder path, body, or `[[links]]` match — ranked so a
     /// name hit beats a body hit, newest first within a rank.
     private func matchingNotes(_ query: String) -> [Note] {
-        let q = query.lowercased().trimmingCharacters(in: .whitespaces)
+        let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return [] }
-        func rank(_ n: Note) -> Int {
-            if n.displayName.lowercased().hasPrefix(q) { return 0 }
-            if n.displayName.lowercased().contains(q) { return 1 }
-            if n.folderName.lowercased().contains(q) { return 2 }
-            if n.body.lowercased().contains(q) { return 3 }
-            return 4
+        // Case-insensitive match without allocating a lowercased copy of every body, ranked
+        // in one pass. Link text is already in the body, so no separate regex link parse.
+        func has(_ s: String) -> Bool { s.range(of: q, options: .caseInsensitive) != nil }
+        var scored: [(note: Note, rank: Int)] = []
+        for n in model.notes {
+            if n.displayName.range(of: q, options: [.caseInsensitive, .anchored]) != nil { scored.append((n, 0)) }
+            else if has(n.displayName) { scored.append((n, 1)) }
+            else if has(n.folderName) { scored.append((n, 2)) }
+            else if has(n.body) { scored.append((n, 3)) }
         }
-        return model.notes.filter { n in
-            n.displayName.lowercased().contains(q)
-                || n.folderName.lowercased().contains(q)
-                || n.body.lowercased().contains(q)
-                || n.linkTargets.contains { $0.lowercased().contains(q) }
-        }
-        .sorted { a, b in
-            let ra = rank(a), rb = rank(b)
-            return ra != rb ? ra < rb : a.date > b.date
-        }
+        return scored.sorted { a, b in
+            a.rank != b.rank ? a.rank < b.rank : a.note.date > b.note.date
+        }.map(\.note)
     }
 
     // MARK: - Empty states

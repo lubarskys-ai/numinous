@@ -46,13 +46,14 @@ struct FoldersView: View {
     @State private var selection = FolderSelection()
     @State private var showBulkMove = false
     @State private var bulkDeleteConfirm = false
+    @State private var debouncedQuery = ""
     @AppStorage("foldersCabinetMode") private var cabinetMode = true
 
     var body: some View {
         NavigationStack(path: $path) {
             Group {
                 if !searchText.isEmpty {
-                    searchResults(searchText)
+                    searchResults(debouncedQuery)
                 } else if cabinetMode {
                     CabinetView(onOpenNote: { path.append($0) },
                                 onEditAxes: { folderSheet = .axes($0) },
@@ -93,6 +94,14 @@ struct FoldersView: View {
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic),
                         prompt: "Search notes & links")
             .autocorrectionDisabled()
+            // Debounce: searching 5,000+ notes is too slow to run on every keystroke. Wait
+            // for a brief pause in typing, so the keyboard stays smooth. `.task(id:)`
+            // cancels the pending run each time the text changes.
+            .task(id: searchText) {
+                if searchText.isEmpty { debouncedQuery = ""; return }
+                try? await Task.sleep(nanoseconds: 220_000_000)
+                if !Task.isCancelled { debouncedQuery = searchText }
+            }
             .navigationTitle("Folders")
             .navigationDestination(for: UUID.self) { id in NoteDetailView(noteID: id) }
             .navigationDestination(for: String.self) { category in FolderBrowserView(category: category) }
@@ -304,25 +313,24 @@ struct FoldersView: View {
         let _t0 = CFAbsoluteTimeGetCurrent()
         defer { let ms = (CFAbsoluteTimeGetCurrent() - _t0) * 1000
             if ms > 20 { print("⏱️[perf] search \(Int(ms))ms over \(model.notes.count) notes") } }
-        let q = query.lowercased().trimmingCharacters(in: .whitespaces)
+        let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return [] }
-        func rank(_ n: Note) -> Int {
-            if n.displayName.lowercased().hasPrefix(q) { return 0 }
-            if n.displayName.lowercased().contains(q) { return 1 }
-            if n.folderName.lowercased().contains(q) { return 2 }
-            if n.linkTargets.contains(where: { $0.lowercased().contains(q) }) { return 3 }
-            return 4
+        // Match case-insensitively WITHOUT allocating a lowercased copy of every note's
+        // body (the old `.lowercased().contains` did, ×5,000 per keystroke), and drop the
+        // regex link parse — a note's [[links]] are already in its body text. Rank in the
+        // same pass so the sort doesn't recompute string matches.
+        func has(_ s: String) -> Bool { s.range(of: q, options: .caseInsensitive) != nil }
+        var scored: [(note: Note, rank: Int)] = []
+        for n in model.notes {
+            if n.displayName.range(of: q, options: [.caseInsensitive, .anchored]) != nil { scored.append((n, 0)) }
+            else if has(n.displayName) { scored.append((n, 1)) }
+            else if has(n.folderName) { scored.append((n, 2)) }
+            else if has(n.body) { scored.append((n, 3)) }
         }
-        return model.notes.filter { n in
-            n.displayName.lowercased().contains(q)
-                || n.folderName.lowercased().contains(q)
-                || n.body.lowercased().contains(q)
-                || n.linkTargets.contains { $0.lowercased().contains(q) }
-        }
-        .sorted { a, b in
-            let ra = rank(a), rb = rank(b)
-            return ra != rb ? ra < rb : a.displayName.localizedCaseInsensitiveCompare(b.displayName) == .orderedAscending
-        }
+        return scored.sorted { a, b in
+            a.rank != b.rank ? a.rank < b.rank
+                : a.note.displayName.localizedCaseInsensitiveCompare(b.note.displayName) == .orderedAscending
+        }.map(\.note)
     }
 
     @ViewBuilder
