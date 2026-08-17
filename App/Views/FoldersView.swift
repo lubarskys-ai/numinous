@@ -47,6 +47,8 @@ struct FoldersView: View {
     @State private var showBulkMove = false
     @State private var bulkDeleteConfirm = false
     @State private var debouncedQuery = ""
+    @State private var showNewFolder = false
+    @State private var newFolderName = ""
     @AppStorage("foldersCabinetMode") private var cabinetMode = true
 
     var body: some View {
@@ -73,24 +75,7 @@ struct FoldersView: View {
                     .listStyle(.insetGrouped)
                 }
             }
-            .safeAreaInset(edge: .bottom) {
-                if selection.active && cabinetMode && searchText.isEmpty {
-                    HStack(spacing: 0) {
-                        bulkActionButton("Move", "folder", enabled: !selection.isEmpty) { showBulkMove = true }
-                        bulkActionButton("Rename", "pencil", enabled: selection.count == 1) { startBulkRename() }
-                        bulkActionButton("Delete", "trash", enabled: !selection.isEmpty, destructive: true) { bulkDeleteConfirm = true }
-                        // Keep the buttons clear of the floating companion in the corner.
-                        Spacer().frame(width: 96)
-                    }
-                    .padding(.leading).padding(.vertical, 10)
-                    .background(.bar)
-                    .overlay(alignment: .topLeading) {
-                        Text(selection.isEmpty ? "Select notes or folders" : "\(selection.count) selected")
-                            .font(.caption2).foregroundStyle(.secondary)
-                            .padding(.leading).padding(.top, 2)
-                    }
-                }
-            }
+            .safeAreaInset(edge: .bottom) { bulkActionBar }
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic),
                         prompt: "Search notes & links")
             .autocorrectionDisabled()
@@ -131,6 +116,7 @@ struct FoldersView: View {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         Button { compose = ComposeRequest() } label: { Label("New note", systemImage: "square.and.pencil") }
+                        Button { newFolderName = ""; showNewFolder = true } label: { Label("New folder", systemImage: "folder.badge.plus") }
                         Button { compose = ComposeRequest(diary: true) } label: { Label("Add to today's diary", systemImage: "calendar.badge.plus") }
                         Divider()
                         Button { importContacts() } label: { Label("Sync contacts", systemImage: "person.crop.circle.badge.plus") }
@@ -186,6 +172,14 @@ struct FoldersView: View {
             .alert("Import", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(importMessage ?? "") }
+            .alert("New folder", isPresented: $showNewFolder) {
+                TextField("Folder name", text: $newFolderName)
+                    .autocorrectionDisabled()
+                Button("Cancel", role: .cancel) {}
+                Button("Create") { model.createFolder(newFolderName) }
+            } message: {
+                Text("Create an empty folder now — you can move notes into it and map it to an axis afterward. Use “parent/child” for a subfolder.")
+            }
             .alert("Rename note", isPresented: Binding(get: { renameNoteID != nil }, set: { if !$0 { renameNoteID = nil } })) {
                 TextField("Name", text: $noteNameDraft)
                 Button("Cancel", role: .cancel) {}
@@ -331,6 +325,26 @@ struct FoldersView: View {
             a.rank != b.rank ? a.rank < b.rank
                 : a.note.displayName.localizedCaseInsensitiveCompare(b.note.displayName) == .orderedAscending
         }.map(\.note)
+    }
+
+    /// The multi-select action bar pinned to the bottom in cabinet mode. Extracted from
+    /// the main body to keep it under the SwiftUI type-checker's complexity limit.
+    @ViewBuilder private var bulkActionBar: some View {
+        if selection.active && cabinetMode && searchText.isEmpty {
+            HStack(spacing: 0) {
+                bulkActionButton("Move", "folder", enabled: !selection.isEmpty) { showBulkMove = true }
+                bulkActionButton("Rename", "pencil", enabled: selection.count == 1) { startBulkRename() }
+                bulkActionButton("Delete", "trash", enabled: !selection.isEmpty, destructive: true) { bulkDeleteConfirm = true }
+                Spacer().frame(width: 96)   // clear of the floating companion in the corner
+            }
+            .padding(.leading).padding(.vertical, 10)
+            .background(.bar)
+            .overlay(alignment: .topLeading) {
+                Text(selection.isEmpty ? "Select notes or folders" : "\(selection.count) selected")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .padding(.leading).padding(.top, 2)
+            }
+        }
     }
 
     @ViewBuilder

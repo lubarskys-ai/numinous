@@ -124,6 +124,7 @@ final class AppModel: ObservableObject {
         self.reflectionLog = loaded?.reflections ?? []
         self.followUps = loaded?.followUps ?? []
         self.linkLearning = loaded?.linkLearning ?? LinkLearning()
+        self.manualFolders = Set(loaded?.manualFolders ?? [])
         self.readwiseToken = UserDefaults.standard.string(forKey: Self.readwiseTokenKey)
         self.homeLocation = UserDefaults.standard.data(forKey: Self.homeKey)
             .flatMap { try? JSONDecoder().decode(Place.self, from: $0) }
@@ -135,7 +136,7 @@ final class AppModel: ObservableObject {
         if loaded == nil || didMigrate || version < Self.schemaVersion {
             storage.save(StoredData(notes: n, folders: f, axes: a, schemaVersion: Self.schemaVersion,
                                     reflections: reflectionLog, followUps: followUps,
-                                    linkLearning: linkLearning))
+                                    linkLearning: linkLearning, manualFolders: Array(manualFolders)))
         }
         // Reward any follow-ups you've since completed in iOS Reminders.
         Task { await checkFollowUps() }
@@ -455,6 +456,14 @@ final class AppModel: ObservableObject {
             let top = note.folderName.split(separator: "/").first.map(String.init) ?? ""
             guard !top.isEmpty else { continue }
             groups[top, default: []].append(note)
+        }
+        // Show user-created top-level folders even when they hold no notes yet, so a folder
+        // you made to organize into actually appears (and can be a drop target).
+        for f in folders {
+            let top = f.name.split(separator: "/").first.map(String.init) ?? ""
+            guard !top.isEmpty, groups[top] == nil,
+                  manualFolders.contains(Folder.normalize(top)) else { continue }
+            groups[top] = []
         }
         cabinetGroups = groups.keys
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
@@ -1302,17 +1311,19 @@ final class AppModel: ObservableObject {
 
     /// Folders whose notes are things you *evaluate* — so a 1–5 star rating makes sense.
     /// Matched against any component of the folder path (so `travel/restaurant` counts).
-    static let rateableFolders: Set<String> = [
-        "books", "book", "restaurants", "restaurant", "wine", "wines",
-        "entertainment", "movies", "movie", "film", "films", "shows", "tv",
-        "podcasts", "music", "albums", "bars", "bar", "cafes", "cafe", "coffee",
-        "hotels", "hotel", "games", "game",
+    /// Folders where a 1–5 star rating doesn't belong — journals, people, and activity
+    /// logs. Everything else (books, wine, golf clubs, gear, restaurants, whatever you
+    /// collect or evaluate) shows stars, so you're never blocked by a hardcoded list.
+    static let nonRateableFolders: Set<String> = [
+        "notes", "diary", "journal", "people", "contacts", "health", "workouts",
+        "calendar", "concierge",
     ]
 
-    /// True when a note lives in a rateable folder (a book, restaurant, wine, film…),
-    /// so the detail view offers stars.
+    /// True when a note's folder can carry a star rating — i.e. it isn't a journal, a
+    /// person, or an activity log. Judged by the top-level folder.
     static func isRateableFolder(_ folderName: String) -> Bool {
-        folderName.lowercased().split(separator: "/").contains { rateableFolders.contains(String($0)) }
+        let top = folderName.lowercased().split(separator: "/").first.map(String.init) ?? ""
+        return !top.isEmpty && !nonRateableFolders.contains(top)
     }
 
     /// Set (or clear, with nil) a note's 1–5 star rating.
@@ -1542,6 +1553,8 @@ final class AppModel: ObservableObject {
             let p = path.lowercased()
             notes.removeAll { let l = $0.folderName.lowercased(); return l == p || l.hasPrefix(p + "/") }
             folders.removeAll { let l = $0.name.lowercased(); return l == p || l.hasPrefix(p + "/") }
+            let pn = Folder.normalize(path)
+            manualFolders = manualFolders.filter { $0 != pn && !$0.hasPrefix(pn + "/") }
         }
         persist()
     }
@@ -1560,7 +1573,8 @@ final class AppModel: ObservableObject {
                 used.insert(Folder.normalize(acc))
             }
         }
-        folders.removeAll { !used.contains($0.id) }
+        // Keep folders the user made on purpose (may be empty) — only prune truly stale ones.
+        folders.removeAll { !used.contains($0.id) && !manualFolders.contains($0.id) }
     }
 
     /// Apply a set of title changes, rewrite all links, then merge any collisions.
@@ -1694,13 +1708,33 @@ final class AppModel: ObservableObject {
     private func currentSnapshot() -> StoredData {
         StoredData(notes: notes, folders: folders, axes: axes,
                    schemaVersion: Self.schemaVersion, reflections: reflectionLog,
-                   followUps: followUps, linkLearning: linkLearning)
+                   followUps: followUps, linkLearning: linkLearning, manualFolders: Array(manualFolders))
     }
 
     // MARK: - Find-links learning (suggestions get better with your decisions)
 
     /// What Find-links has learned. Persisted; consulted on every scan.
     @Published private(set) var linkLearning = LinkLearning()
+
+    /// Folder paths (normalized ids) the user created explicitly — kept even when empty,
+    /// so a folder you make to organize into doesn't vanish before you file anything in it.
+    @Published private(set) var manualFolders: Set<String> = []
+
+    /// Create an empty folder now (no note required). It persists and survives the
+    /// empty-folder prune until you file notes in it. Returns false if the name is blank.
+    @discardableResult
+    func createFolder(_ name: String, category: String = "Notes", axisID: String? = nil) -> Bool {
+        let path = name.trimmingCharacters(in: CharacterSet(charactersIn: " /"))
+            .trimmingCharacters(in: .whitespaces)
+        guard !path.isEmpty else { return false }
+        let canonical = canonicalFolderCasing(path)
+        manualFolders.insert(Folder.normalize(canonical))
+        if folder(named: canonical) == nil {
+            folders.append(Folder(name: canonical, category: category, axisID: axisID))
+        }
+        persist()
+        return true
+    }
 
     private static func learnKey(_ s: String) -> String {
         s.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1739,7 +1773,7 @@ final class AppModel: ObservableObject {
     private func persistLearning() {
         storage.save(StoredData(notes: notes, folders: folders, axes: axes,
                                 schemaVersion: Self.schemaVersion, reflections: reflectionLog,
-                                followUps: followUps, linkLearning: linkLearning))
+                                followUps: followUps, linkLearning: linkLearning, manualFolders: Array(manualFolders)))
     }
 
     // MARK: - Vitality (gentle decay of untended areas — never subtracts real growth)
@@ -2290,6 +2324,8 @@ final class AppModel: ObservableObject {
         func under(_ s: String) -> Bool { let l = s.lowercased(); return l == p || l.hasPrefix(p + "/") }
         notes.removeAll { under($0.folderName) }
         folders.removeAll { under($0.name) }
+        let pn = Folder.normalize(path)
+        manualFolders = manualFolders.filter { $0 != pn && !$0.hasPrefix(pn + "/") }
         persist()
     }
 

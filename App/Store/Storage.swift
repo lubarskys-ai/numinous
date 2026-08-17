@@ -15,6 +15,9 @@ struct StoredData: Codable {
     /// What Find-links has learned from your Add/Edit/Skip decisions. Optional =
     /// backward-compatible with stores written before learning existed.
     var linkLearning: LinkLearning? = nil
+    /// Folder paths the user created explicitly (empty), so they're kept even with no notes
+    /// yet — otherwise the empty-folder prune would remove them. Optional = back-compat.
+    var manualFolders: [String]? = nil
 }
 
 /// What the app has learned from your Find-links decisions, so suggestions get

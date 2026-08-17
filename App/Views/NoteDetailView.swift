@@ -15,6 +15,7 @@ struct NoteDetailView: View {
     @State private var showFollowUp = false
     @State private var followUpMessage: String?
     @State private var titleDraft = ""
+    @State private var showPlacePicker = false        // presents the searchable place-list picker
     @State private var fullEditNote: Note?           // presents the full-screen composer for editing / find-links
     @State private var editAutofocus = false         // put the keyboard up when opened by tapping to edit
     @State private var hasTripRange = false          // travel notes: is a trip date range set?
@@ -67,6 +68,11 @@ struct NoteDetailView: View {
             } message: { Text("Add a place to this note. You can add more than one.") }
             .sheet(item: $editingPlace) { ref in
                 PlaceEditorView(noteID: note.id, place: ref.place)
+            }
+            .sheet(isPresented: $showPlacePicker) {
+                PlacePickerView { r in
+                    model.addPlace(note.id, name: r.name, latitude: r.latitude, longitude: r.longitude)
+                }
             }
             .onAppear {
                 if loadedBodyFor != note.id {
@@ -325,8 +331,11 @@ struct NoteDetailView: View {
             }
         }
         Menu {
+            Button { showPlacePicker = true } label: {
+                Label("Search for a place…", systemImage: "magnifyingglass")
+            }
             Button { locationDraft = ""; editingLocation = true } label: {
-                Label("Enter a place", systemImage: "mappin")
+                Label("Enter a place name", systemImage: "mappin")
             }
             Button {
                 Task {
@@ -794,5 +803,74 @@ struct PlaceEditorView: View {
         model.updatePlace(noteID, original: place.name, name: name,
                           latitude: coord?.latitude, longitude: coord?.longitude)
         dismiss()
+    }
+}
+
+/// One result in the place picker.
+struct PlaceSearchResult: Identifiable {
+    let id = UUID()
+    let name: String
+    let subtitle: String
+    let latitude: Double
+    let longitude: Double
+}
+
+/// A searchable LIST of matching places (name or address) to choose from — so an ambiguous
+/// name (many "Starbucks") resolves to the right one instead of auto-taking the nearest.
+struct PlacePickerView: View {
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var locator = LocationService()
+    let onPick: (PlaceSearchResult) -> Void
+
+    @State private var query = ""
+    @State private var results: [PlaceSearchResult] = []
+    @State private var searching = false
+    @State private var didSearch = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if searching {
+                    HStack(spacing: 10) { ProgressView(); Text("Searching…").foregroundStyle(.secondary) }
+                }
+                ForEach(results) { r in
+                    Button { onPick(r); dismiss() } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "mappin.circle.fill").foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(r.name).foregroundStyle(.primary)
+                                if !r.subtitle.isEmpty {
+                                    Text(r.subtitle).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+                if didSearch, !searching, results.isEmpty {
+                    Text("No places found for “\(query)”. Try a different name, or add it by address.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+            }
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
+                        prompt: "Search a place — name or address")
+            .autocorrectionDisabled()
+            .task(id: query) {
+                let q = query.trimmingCharacters(in: .whitespaces)
+                guard q.count >= 2 else { results = []; didSearch = false; return }
+                try? await Task.sleep(nanoseconds: 350_000_000)   // debounce
+                guard !Task.isCancelled else { return }
+                searching = true; didSearch = true
+                let near = await locator.currentCoordinate()
+                let hits = await LocationService.searchPlaces(q, near: near)
+                guard !Task.isCancelled else { return }
+                results = hits.map { PlaceSearchResult(name: $0.name, subtitle: $0.subtitle,
+                                                       latitude: $0.latitude, longitude: $0.longitude) }
+                searching = false
+            }
+            .navigationTitle("Add location")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+        }
+        .presentationDetents([.medium, .large])
     }
 }

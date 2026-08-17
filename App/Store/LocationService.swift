@@ -88,6 +88,30 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
         return (item.name ?? trimmed, c.latitude, c.longitude)
     }
 
+    /// Several matching places for a query (name or address), so the UI can show a list to
+    /// pick from when a name is ambiguous (many "Starbucks"). Biased toward `near`.
+    static func searchPlaces(_ query: String, near center: CLLocationCoordinate2D? = nil, limit: Int = 15)
+        async -> [(name: String, subtitle: String, latitude: Double, longitude: Double)] {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count >= 2 else { return [] }
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = trimmed
+        if let center {
+            request.region = MKCoordinateRegion(center: center, latitudinalMeters: 60_000, longitudinalMeters: 60_000)
+        }
+        guard let items = try? await MKLocalSearch(request: request).start().mapItems else { return [] }
+        return items.prefix(limit).map { item in
+            let c = item.placemark.coordinate
+            return (item.name ?? trimmed, addressLine(item.placemark), c.latitude, c.longitude)
+        }
+    }
+
+    /// A short address line for a search result — "123 Main St, San Francisco, CA".
+    private static func addressLine(_ p: CLPlacemark) -> String {
+        [p.thoroughfare, p.locality ?? p.subAdministrativeArea, p.administrativeArea]
+            .compactMap { $0 }.joined(separator: ", ")
+    }
+
     /// Just the current coordinate (no reverse-geocode to a name) — used to bias a name
     /// lookup to where you are.
     func currentCoordinate() async -> CLLocationCoordinate2D? {
