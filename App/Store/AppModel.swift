@@ -466,7 +466,8 @@ final class AppModel: ObservableObject {
     struct MappablePlace: Identifiable, Equatable {
         let id: String            // noteID|placename, stable across renders
         let noteID: UUID
-        let title: String
+        let title: String         // the note's name (for reference)
+        let placeName: String     // the location's name — what the map pin is labeled with
         let folderName: String
         let date: Date
         let axisID: String?
@@ -484,7 +485,8 @@ final class AppModel: ObservableObject {
         for n in notes {
             for p in n.allPlaces where p.hasCoordinate && LocationService.looksLikePlace(p.name) {
                 out.append(MappablePlace(id: "\(n.id.uuidString)|\(p.name.lowercased())",
-                                         noteID: n.id, title: n.displayName, folderName: n.folderName,
+                                         noteID: n.id, title: n.displayName, placeName: p.name,
+                                         folderName: n.folderName,
                                          date: n.date, axisID: folder(named: n.folderName)?.axisID,
                                          latitude: p.latitude!, longitude: p.longitude!))
             }
@@ -1466,24 +1468,71 @@ final class AppModel: ObservableObject {
         return notes.filter { within($0) && $0.linkTargets.isEmpty && !linkedTargets.contains(Self.norm($0.title)) }
     }
 
-    /// Notes whose name is a disambiguated duplicate — "Sam Davey (2)", "… (3)" — of
-    /// another note that already exists in the same folder. These are the accidental
-    /// re-import duplicates. The base note (without the suffix) is kept.
-    func duplicateNotes(inFolder folderPath: String? = nil) -> [Note] {
+    /// (duplicate note, the title of the original it duplicates) for notes named "X (2)",
+    /// "X (3)"… whose base "X" exists in the same folder — the accidental re-import copies.
+    private func duplicatePairs(inFolder folderPath: String?) -> [(dup: Note, baseTitle: String)] {
         let existing = Set(notes.map { Self.norm($0.title) })
         let regex = try? NSRegularExpression(pattern: #"^(.+) \(\d+\)$"#)
-        return notes.filter { n in
+        var out: [(dup: Note, baseTitle: String)] = []
+        for n in notes {
             if let folderPath {
                 let f = n.folderName.lowercased(), p = folderPath.lowercased()
-                guard f == p || f.hasPrefix(p + "/") else { return false }
+                guard f == p || f.hasPrefix(p + "/") else { continue }
             }
             let name = n.displayName as NSString
             guard let m = regex?.firstMatch(in: n.displayName, range: NSRange(location: 0, length: name.length)),
-                  m.numberOfRanges >= 2 else { return false }
+                  m.numberOfRanges >= 2 else { continue }
             let base = name.substring(with: m.range(at: 1))
             let baseTitle = n.folderName.isEmpty ? base : n.folderName + "/" + base
-            return existing.contains(Self.norm(baseTitle))   // only if the original still exists
+            guard existing.contains(Self.norm(baseTitle)) else { continue }   // original must still exist
+            out.append((n, baseTitle))
         }
+        return out
+    }
+
+    /// Notes that are disambiguated duplicates ("Sam Davey (2)") of an existing original.
+    func duplicateNotes(inFolder folderPath: String? = nil) -> [Note] {
+        duplicatePairs(inFolder: folderPath).map(\.dup)
+    }
+
+    /// Merge each "X (2)" duplicate INTO the original "X" — combining body, details, places
+    /// and photos, repointing any `[[links]]` that pointed at the copy — then remove the
+    /// copy. Nothing unique to the duplicate is lost. Returns how many were merged.
+    @discardableResult
+    func mergeDuplicates(inFolder folderPath: String? = nil) -> Int {
+        let pairs = duplicatePairs(inFolder: folderPath)
+        guard !pairs.isEmpty else { return 0 }
+        var toDelete = Set<UUID>()
+        var linkMap: [String: String] = [:]   // norm(duplicate title) → original title
+        for (dup, baseTitle) in pairs {
+            guard let bi = notes.firstIndex(where: { Self.norm($0.title) == Self.norm(baseTitle) }) else { continue }
+            notes[bi].body = Self.mergeBodies(existing: notes[bi].body, incoming: dup.body)
+            notes[bi].details = Self.mergeDetails(notes[bi].details, dup.details)
+            var places = notes[bi].allPlaces
+            for p in dup.allPlaces where !places.contains(where: { $0.name.caseInsensitiveCompare(p.name) == .orderedSame }) {
+                places.append(p)
+            }
+            if !places.isEmpty {
+                notes[bi].places = places
+                if notes[bi].location?.isEmpty != false { notes[bi].location = places.first?.name }
+            }
+            if let dupPhotos = dup.photos, !dupPhotos.isEmpty {
+                var photos = notes[bi].photos ?? []
+                for ph in dupPhotos where !photos.contains(ph) { photos.append(ph) }
+                notes[bi].photos = photos
+            }
+            if notes[bi].isStub && !dup.isStub { notes[bi].isStub = false }   // engaged copy wins
+            linkMap[Self.norm(dup.title)] = baseTitle
+            toDelete.insert(dup.id)
+        }
+        guard !toDelete.isEmpty else { return 0 }
+        notes.removeAll { toDelete.contains($0.id) }
+        for i in notes.indices where notes[i].body.contains("[[") {
+            let rewritten = WikilinkParser.rewrite(in: notes[i].body) { linkMap[Self.norm($0)] ?? $0 }
+            if rewritten != notes[i].body { notes[i].body = rewritten }
+        }
+        persist()
+        return toDelete.count
     }
 
     /// Delete several folders (and everything filed under them) in one save.

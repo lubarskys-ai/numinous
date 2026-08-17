@@ -378,19 +378,19 @@ private struct DrawerView: View {
                 Text("\(c) note\(c == 1 ? "" : "s") in “\(cabinet.name)” link to nothing and nothing links to them. Keeps only connected notes. This can't be undone.")
             }
         }
-        .confirmationDialog("Remove duplicates?", isPresented: $dupConfirm, titleVisibility: .visible) {
-            let dups = model.duplicateNotes(inFolder: cabinet.id)
-            Button("Remove \(dups.count) duplicate\(dups.count == 1 ? "" : "s")", role: .destructive) {
-                model.delete(dups)
+        .confirmationDialog("Merge duplicates?", isPresented: $dupConfirm, titleVisibility: .visible) {
+            let n = model.duplicateNotes(inFolder: cabinet.id).count
+            Button("Merge \(n) duplicate\(n == 1 ? "" : "s")") {
+                model.mergeDuplicates(inFolder: cabinet.id)
             }
-            .disabled(dups.isEmpty)
+            .disabled(n == 0)
             Button("Cancel", role: .cancel) {}
         } message: {
             let c = model.duplicateNotes(inFolder: cabinet.id).count
             if c == 0 {
                 Text("No duplicates found in “\(cabinet.name)”.")
             } else {
-                Text("\(c) note\(c == 1 ? "" : "s") in “\(cabinet.name)” named like “… (2)” duplicate an existing note. Removes the copies, keeps the originals. This can't be undone.")
+                Text("\(c) note\(c == 1 ? "" : "s") in “\(cabinet.name)” named like “… (2)” duplicate an existing note. Their contents are merged into the original and the copies removed — nothing is lost. This can't be undone.")
             }
         }
     }
@@ -402,7 +402,7 @@ private struct DrawerView: View {
         Button { onMergeFolder(cabinet.id) } label: { Label("Merge into…", systemImage: "arrow.triangle.merge") }
         Button { onEditAxes(cabinet.id) } label: { Label("Grows…", systemImage: "circle.hexagongrid") }
         Button { cleanupConfirm = true } label: { Label("Remove unlinked notes…", systemImage: "sparkles") }
-        Button { dupConfirm = true } label: { Label("Remove duplicates…", systemImage: "doc.on.doc") }
+        Button { dupConfirm = true } label: { Label("Merge duplicates…", systemImage: "arrow.triangle.merge") }
         Menu("Default intensity") {
             let intensity = model.folder(named: cabinet.id)?.defaultIntensity
             Button { model.setFolderIntensity(nil, forFolder: cabinet.id) } label: {
