@@ -55,7 +55,9 @@ struct MapView: View {
     private var pins: [Pin] {
         model.mappablePlaces.compactMap { mp in
             guard folderMatches(mp.folderName), period.contains(mp.date) else { return nil }
-            return Pin(id: mp.id, noteID: mp.noteID, title: mp.title,
+            // Label the pin with the LOCATION name, not the note's title (which for a diary
+            // entry is just its date).
+            return Pin(id: mp.id, noteID: mp.noteID, title: mp.placeName,
                        coordinate: CLLocationCoordinate2D(latitude: mp.latitude, longitude: mp.longitude),
                        color: model.axis(id: mp.axisID)?.color ?? .red)
         }
