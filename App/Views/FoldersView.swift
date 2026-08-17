@@ -345,6 +345,10 @@ struct FoldersView: View {
             }
         } label: { Label("Look up book genres", systemImage: "text.book.closed") }
         Button { showFixNames = true } label: { Label("Fix imported note names", systemImage: "character.cursor.ibeam") }
+        Button {
+            let merged = model.mergeFolderCaseVariants()
+            importMessage = "Unified folder capitalization\(merged > 0 ? " and merged \(merged) duplicate note\(merged == 1 ? "" : "s")" : "")."
+        } label: { Label("Merge case-variant folders", systemImage: "textformat") }
         #if DEBUG
         Button { let (a, u) = model.importReadwise(ReadwiseService.sampleBooks); importMessage = "Readwise (sample): \(a) new, \(u) updated." } label: { Label("Readwise sample (debug)", systemImage: "ladybug") }
         #endif

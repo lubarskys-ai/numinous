@@ -1518,8 +1518,10 @@ final class AppModel: ObservableObject {
     @discardableResult
     func moveNote(_ id: UUID, toFolder folderPath: String) -> Bool {
         guard let note = notes.first(where: { $0.id == id }) else { return false }
-        let dest = folderPath.trimmingCharacters(in: .whitespaces)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        // Re-case the destination to an existing folder's casing so moving into "Travel"
+        // when "travel" exists lands in the SAME folder, not a case-variant twin.
+        let dest = canonicalFolderCasing(folderPath.trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/")))
         let newTitle = dest.isEmpty ? note.displayName : dest + "/" + note.displayName
         // Exact compare so a note can move between folders that differ only in case
         // ("Medical" → "medical"); a norm() compare skipped it as "already here".
@@ -1532,8 +1534,8 @@ final class AppModel: ObservableObject {
     /// Move several notes into `folderPath` in one reflow (one save, one rescore) —
     /// for multi-select. No-op for any note already there.
     func moveNotes(_ ids: [UUID], toFolder folderPath: String) {
-        let dest = folderPath.trimmingCharacters(in: .whitespaces)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let dest = canonicalFolderCasing(folderPath.trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/")))
         var pairs: [(old: String, new: String)] = []
         for id in ids {
             guard let note = notes.first(where: { $0.id == id }) else { continue }
@@ -1583,6 +1585,52 @@ final class AppModel: ObservableObject {
     /// Notes that are disambiguated duplicates ("Sam Davey (2)") of an existing original.
     func duplicateNotes(inFolder folderPath: String? = nil) -> [Note] {
         duplicatePairs(inFolder: folderPath).map(\.dup)
+    }
+
+    /// Merge folders that differ only in case ("travel"/"Travel", "books"/"Books") into a
+    /// single canonical casing, and merge any notes that then share a title (via the same
+    /// lossless dedupe). Returns how many duplicate notes were merged away.
+    @discardableResult
+    func mergeFolderCaseVariants() -> Int {
+        // Canonical casing per normalized folder prefix: prefer a folder record's casing,
+        // else the most-common casing across notes.
+        var votes: [String: [String: Int]] = [:]
+        func tally(_ path: String, weight: Int) {
+            var acc = ""
+            for seg in path.split(separator: "/").map(String.init) {
+                acc = acc.isEmpty ? seg : acc + "/" + seg
+                votes[Self.norm(acc), default: [:]][acc, default: 0] += weight
+            }
+        }
+        for f in folders { tally(f.name, weight: 100) }
+        for n in notes where !n.folderName.isEmpty { tally(n.folderName, weight: 1) }
+        var canon: [String: String] = [:]
+        for (k, m) in votes { canon[k] = m.max { $0.value < $1.value }!.key }
+
+        func canonFolder(_ path: String) -> String {
+            var acc = "", out = ""
+            for seg in path.split(separator: "/").map(String.init) {
+                acc = acc.isEmpty ? seg : acc + "/" + seg
+                let c = canon[Self.norm(acc)] ?? acc
+                let last = c.split(separator: "/").last.map(String.init) ?? seg
+                out = out.isEmpty ? last : out + "/" + last
+            }
+            return out
+        }
+
+        var pairs: [(old: String, new: String)] = []
+        for n in notes where !n.folderName.isEmpty {
+            let newFolder = canonFolder(n.folderName)
+            if newFolder != n.folderName { pairs.append((n.title, newFolder + "/" + n.displayName)) }
+        }
+        for i in folders.indices {
+            let c = canonFolder(folders[i].name)
+            if c != folders[i].name { folders[i].name = c }
+        }
+        let before = notes.count
+        if !pairs.isEmpty { retitle(pairs) }   // re-case + rewrite links + globally dedupe same-title notes
+        else { dedupeByTitle(); persist() }    // still merge any exact same-title duplicates
+        return before - notes.count
     }
 
     /// Merge each "X (2)" duplicate INTO the original "X" — combining body, details, places
