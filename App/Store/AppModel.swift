@@ -610,6 +610,12 @@ final class AppModel: ObservableObject {
         // Auto-geocode a new place-type link (e.g. [[location/Eiffel Tower]]) from its name,
         // so it lands on the map without you setting a location by hand.
         for id in newPlaceStubs { Task { await autoLocatePlaceNote(id) } }
+        // …and the note itself, when it's a place note (travel/, location/, restaurants/…)
+        // that doesn't have coordinates yet — so any note about a place lands on the map.
+        if Self.isPlaceLikeFolder(note.folderName), note.allPlaces.isEmpty {
+            let nid = note.id
+            Task { await autoLocatePlaceNote(nid) }
+        }
     }
 
     func delete(_ toDelete: [Note]) {
@@ -1353,9 +1359,14 @@ final class AppModel: ObservableObject {
         if note.allPlaces.first?.name.caseInsensitiveCompare(name) == .orderedSame,
            note.allPlaces.first?.hasCoordinate == true { return }
         let near = autoLocator.isAuthorized ? await autoLocator.currentCoordinate() : nil
-        guard let c = await LocationService.coordinate(for: name, near: near),
-              let i = notes.firstIndex(where: { $0.id == id }) else { return }
-        commitPlaces([Place(name: name, latitude: c.latitude, longitude: c.longitude)], to: i)
+        // MKLocalSearch first (finds businesses/restaurants), then the address geocoder.
+        if let hit = await LocationService.searchPlace(name, near: near),
+           let i = notes.firstIndex(where: { $0.id == id }) {
+            commitPlaces([Place(name: hit.name, latitude: hit.latitude, longitude: hit.longitude)], to: i)
+        } else if let c = await LocationService.coordinate(for: name, near: near),
+                  let i = notes.firstIndex(where: { $0.id == id }) {
+            commitPlaces([Place(name: name, latitude: c.latitude, longitude: c.longitude)], to: i)
+        }
     }
 
     /// Rename or move a folder path (e.g. `entertainment/restaurant` →
@@ -2011,7 +2022,12 @@ final class AppModel: ObservableObject {
               Self.isPlaceLikeFolder(note.folderName),
               note.allPlaces.isEmpty else { return }
         let near = autoLocator.isAuthorized ? await autoLocator.currentCoordinate() : nil
-        if let c = await LocationService.coordinate(for: note.displayName, near: near) {
+        // Prefer MKLocalSearch — it resolves restaurants/cafés/shops by name (e.g.
+        // "travel/restaurant/Blue Bottle"); the address geocoder is the fallback for
+        // plain places, and your current location the last resort.
+        if let hit = await LocationService.searchPlace(note.displayName, near: near) {
+            addPlace(id, name: hit.name, latitude: hit.latitude, longitude: hit.longitude)
+        } else if let c = await LocationService.coordinate(for: note.displayName, near: near) {
             addPlace(id, name: note.displayName, latitude: c.latitude, longitude: c.longitude)
         } else if autoLocator.isAuthorized, let p = await autoLocator.currentPlaceStructured() {
             addPlace(id, name: p.name, latitude: p.latitude, longitude: p.longitude)
@@ -2436,10 +2452,7 @@ final class AppModel: ObservableObject {
             addTripLinkIfNeeded(i)
             if notes[i].body != note.body { persist() }
         }
-        // A place-type note with no location yet gets one on its own (GPS or geocode).
-        if loc == nil || loc?.isEmpty == true {
-            Task { await autoLocatePlaceNote(note.id) }
-        }
+        // Auto-location for a place note is handled by save() above.
         return note.id
     }
 

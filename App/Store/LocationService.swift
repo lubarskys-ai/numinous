@@ -1,5 +1,6 @@
 import Foundation
 import CoreLocation
+import MapKit
 import NuminousCore
 
 /// One-shot current-place lookup: asks for when-in-use permission, grabs a single
@@ -69,6 +70,22 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
         let resolved = mark.locality ?? mark.administrativeArea ?? mark.country ?? mark.areasOfInterest?.first
         guard resolved != nil else { return nil }
         return (loc.coordinate.latitude, loc.coordinate.longitude)
+    }
+
+    /// Find a business / point of interest by name via MKLocalSearch — which understands
+    /// restaurants, cafés, shops, landmarks, the things the plain address geocoder misses.
+    /// Biased toward `near` when given. Returns the resolved name + coordinate, or nil.
+    static func searchPlace(_ name: String, near center: CLLocationCoordinate2D? = nil) async -> (name: String, latitude: Double, longitude: Double)? {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard looksLikePlace(trimmed) else { return nil }
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = trimmed
+        if let center {
+            request.region = MKCoordinateRegion(center: center, latitudinalMeters: 60_000, longitudinalMeters: 60_000)
+        }
+        guard let item = try? await MKLocalSearch(request: request).start().mapItems.first else { return nil }
+        let c = item.placemark.coordinate
+        return (item.name ?? trimmed, c.latitude, c.longitude)
     }
 
     /// Just the current coordinate (no reverse-geocode to a name) — used to bias a name
