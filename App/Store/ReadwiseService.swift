@@ -258,3 +258,39 @@ enum ReadwiseService {
     }
     #endif
 }
+
+/// Looks up a book's genre from Google Books (free, no key). Readwise/Kindle don't carry
+/// genre metadata, so this fills the gap by title (+ author) so books can group by genre.
+enum GoogleBooksService {
+    private struct Response: Decodable {
+        struct Item: Decodable { let volumeInfo: VolumeInfo? }
+        struct VolumeInfo: Decodable { let categories: [String]? }
+        let items: [Item]?
+    }
+
+    static func genre(title: String, author: String?) async -> String? {
+        var query = "intitle:" + title
+        if let author, !author.isEmpty { query += "+inauthor:" + author }
+        guard var comps = URLComponents(string: "https://www.googleapis.com/books/v1/volumes") else { return nil }
+        comps.queryItems = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "maxResults", value: "5"),
+            URLQueryItem(name: "country", value: "US"),
+        ]
+        guard let url = comps.url,
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let root = try? JSONDecoder().decode(Response.self, from: data) else { return nil }
+        for item in root.items ?? [] {
+            if let cat = item.volumeInfo?.categories?.first { return cleanGenre(cat) }
+        }
+        return nil
+    }
+
+    /// "Fiction / Thrillers / Suspense" → "Thrillers"; "Biography & Autobiography" → itself.
+    /// Prefer the sub-genre over the broad top-level ("Fiction"), and keep it path-safe.
+    private static func cleanGenre(_ raw: String) -> String {
+        let parts = raw.split(separator: "/").map { $0.trimmingCharacters(in: .whitespaces) }
+        let pick = parts.count >= 2 ? parts[1] : (parts.first ?? raw)
+        return pick.replacingOccurrences(of: "/", with: "-").trimmingCharacters(in: .whitespaces)
+    }
+}

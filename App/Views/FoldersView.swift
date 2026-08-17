@@ -124,6 +124,13 @@ struct FoldersView: View {
                             Button { Task { importMessage = await model.syncReadwiseNow() } } label: { Label("Sync Readwise now", systemImage: "arrow.triangle.2.circlepath") }
                         }
                         Button { showReadwise = true } label: { Label(model.isReadwiseConnected ? "Readwise settings" : "Import from Readwise", systemImage: "books.vertical") }
+                        Button {
+                            Task {
+                                let n = await model.backfillBookGenres()
+                                importMessage = n == 0 ? "No new genres found (books may already be tagged, or none matched)."
+                                                       : "Tagged \(n) book\(n == 1 ? "" : "s") with a genre → books/genre/…"
+                            }
+                        } label: { Label("Look up book genres", systemImage: "text.book.closed") }
                         #if DEBUG
                         Button { let (a, u) = model.importReadwise(ReadwiseService.sampleBooks); importMessage = "Readwise (sample): \(a) new, \(u) updated." } label: { Label("Readwise sample (debug)", systemImage: "ladybug") }
                         #endif

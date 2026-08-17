@@ -1005,6 +1005,47 @@ final class AppModel: ObservableObject {
     /// graded per book (type + engagement + genre); the folder carries the type's
     /// base as its default so new same-type notes inherit it.
     @discardableResult
+    /// Look up genres for Kindle/Readwise books from Google Books and link each to a
+    /// `books/genre/<Genre>` note, so your library groups by genre. Skips books already
+    /// tagged; throttled to be polite; applies all results in one save. Returns how many
+    /// were tagged.
+    func backfillBookGenres(limit: Int = 80) async -> Int {
+        let books = notes.filter {
+            $0.origin?.source == "readwise" && Folder.normalize($0.folderName) == "books"
+                && !$0.linkTargets.contains(where: { $0.lowercased().hasPrefix("books/genre/") })
+        }
+        var results: [(id: UUID, genre: String)] = []
+        for book in books.prefix(limit) {
+            let author = book.details.first { $0.key.caseInsensitiveCompare("Author") == .orderedSame }?.value
+            if let genre = await GoogleBooksService.genre(title: book.displayName, author: author) {
+                results.append((book.id, genre))
+            }
+            try? await Task.sleep(nanoseconds: 250_000_000)   // ~4/sec, gentle on the API
+        }
+        applyBookGenres(results)
+        return results.count
+    }
+
+    private func applyBookGenres(_ pairs: [(id: UUID, genre: String)]) {
+        guard !pairs.isEmpty else { return }
+        var newStubs: [String] = []
+        for (id, genre) in pairs {
+            guard let i = notes.firstIndex(where: { $0.id == id }) else { continue }
+            let target = "books/genre/\(genre)"
+            guard !notes[i].linkTargets.contains(where: { Self.norm($0) == Self.norm(target) }) else { continue }
+            let sep = notes[i].body.isEmpty || notes[i].body.hasSuffix("\n") ? "" : "\n"
+            notes[i].body += sep + "[[\(target)]]"
+            if !noteExists(titled: target), !newStubs.contains(where: { Self.norm($0) == Self.norm(target) }) {
+                newStubs.append(target)
+            }
+        }
+        for target in newStubs {
+            ensureCategoryFolder(Self.folderPart(of: target))
+            notes.append(Note(title: target, isStub: true))
+        }
+        persist()
+    }
+
     func importReadwise(_ books: [ReadwiseBook]) -> (added: Int, updated: Int) {
         let items: [ImportedItem] = books.compactMap { book in
             let title = (book.title ?? book.readableTitle)?
