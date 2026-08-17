@@ -84,7 +84,17 @@ struct RootView: View {
     }
 
     private func trigger(_ action: CompanionAction) {
+        guard action != .idle else { return }
+        let start = Date()
         companionAction = action
-        companionActionStart = Date()
+        companionActionStart = start
+        // Fall back to idle after the action plays, so the companion's animation pauses
+        // again (see CompanionView) instead of redrawing forever. Skipped if a newer
+        // action started meanwhile.
+        let duration: Double = action == .walk ? 1.6 : (action == .cheer ? 1.9 : 2.2)
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
+            if companionActionStart == start { companionAction = .idle }
+        }
     }
 }

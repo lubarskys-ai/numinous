@@ -22,10 +22,11 @@ struct CompanionView: View {
     private let cheerDuration = 1.8
 
     var body: some View {
-        // Cap the redraw rate. `.animation` runs at full display refresh (60/120fps) on
-        // EVERY screen, competing with the main thread and making map panning / scrolling
-        // sticky. 30fps is plenty for breathing and a walk cycle, and roughly halves the cost.
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { ctx in
+        // Animate ONLY while the companion is doing something (walk / cheer / celebrate).
+        // When idle it's paused entirely — a continuously-redrawing Canvas on every screen
+        // was a constant main-thread tax that made scrolling and tapping feel sticky
+        // everywhere. Capped at 30fps while active.
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: action == .idle)) { ctx in
             companionBody(now: ctx.date)
         }
     }

@@ -154,7 +154,14 @@ final class AppModel: ObservableObject {
     /// Refresh already-connected import sources on launch/foreground. Idempotent
     /// (matched by id, so no duplicates) and never prompts: contacts sync only when
     /// access is already granted; Readwise only when a token is stored.
+    private var lastAutoSync = Date.distantPast
+
     func autoSync() async {
+        // Re-importing every contact and all of Readwise on EVERY foreground caused a hitch
+        // each time you returned to the app. These sources barely change — sync at most every
+        // 10 minutes. (Manual "Sync contacts" / "Sync Readwise now" bypass this.)
+        if Date().timeIntervalSince(lastAutoSync) < 600 { return }
+        lastAutoSync = Date()
         if ContactsImporter.isAuthorized, let contacts = try? await ContactsImporter.fetchContacts() {
             importContacts(contacts)
         }
