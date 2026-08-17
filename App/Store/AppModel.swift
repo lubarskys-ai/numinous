@@ -1405,6 +1405,52 @@ final class AppModel: ObservableObject {
         return !top.isEmpty && !nonRateableFolders.contains(top)
     }
 
+    /// True when a note is a book (under books/, but not a genre grouping note).
+    static func isBookFolder(_ folderName: String) -> Bool {
+        let f = Folder.normalize(folderName)
+        return (f == "books" || f.hasPrefix("books/")) && !f.hasPrefix("books/genre")
+    }
+
+    /// Genre names already in use (the books/genre/* notes), for the picker.
+    func existingGenres() -> [String] {
+        notes.filter { Folder.normalize($0.folderName) == "books/genre" }
+            .map { $0.displayName }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    /// A book's current genre, from its `[[books/genre/…]]` link (nil if none).
+    func genre(of note: Note) -> String? {
+        for t in note.linkTargets where t.lowercased().hasPrefix("books/genre/") {
+            return String(t.dropFirst("books/genre/".count))
+        }
+        return nil
+    }
+
+    /// Set (or clear, with nil) a book's genre — swaps its `[[books/genre/…]]` link and the
+    /// "Genre" detail, creating the genre note if needed.
+    func setBookGenre(_ id: UUID, to genre: String?) {
+        guard let i = notes.firstIndex(where: { $0.id == id }) else { return }
+        // Drop any existing genre-link line and Genre detail.
+        let kept = notes[i].body.components(separatedBy: "\n").filter { line in
+            let t = line.trimmingCharacters(in: .whitespaces).lowercased()
+            return !(t.hasPrefix("[[books/genre/") && t.hasSuffix("]]"))
+        }
+        var body = kept.joined(separator: "\n")
+        notes[i].details.removeAll { $0.key.caseInsensitiveCompare("Genre") == .orderedSame }
+        if let genre = genre?.trimmingCharacters(in: .whitespaces), !genre.isEmpty {
+            let sep = body.isEmpty || body.hasSuffix("\n") ? "" : "\n"
+            body += sep + "[[books/genre/\(genre)]]"
+            notes[i].details.append(NoteDetail(key: "Genre", value: genre))
+            let target = "books/genre/\(genre)"
+            if !noteExists(titled: target) {
+                ensureCategoryFolder("books/genre")
+                notes.append(Note(title: target, isStub: true))
+            }
+        }
+        notes[i].body = body
+        persist()
+    }
+
     /// Set (or clear, with nil) a note's 1–5 star rating.
     func setRating(_ id: UUID, to rating: Int?) {
         guard let i = notes.firstIndex(where: { $0.id == id }) else { return }

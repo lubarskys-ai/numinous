@@ -269,12 +269,26 @@ enum GoogleBooksService {
     }
 
     static func genre(title: String, author: String?) async -> String? {
-        var query = "intitle:" + title
-        if let author, !author.isEmpty { query += "+inauthor:" + author }
+        // Try several query forms and take the first result that actually carries a category
+        // (many Google Books entries have none, so one narrow query often comes back empty).
+        var queries: [String] = []
+        if let author, !author.isEmpty {
+            queries.append("intitle:\(title) inauthor:\(author)")   // spaces, not "+", so encoding is unambiguous
+        }
+        queries.append("intitle:\(title)")
+        if let author, !author.isEmpty { queries.append("\(title) \(author)") }
+        queries.append(title)
+        for q in queries {
+            if let g = await lookup(q) { return g }
+        }
+        return nil
+    }
+
+    private static func lookup(_ query: String) async -> String? {
         guard var comps = URLComponents(string: "https://www.googleapis.com/books/v1/volumes") else { return nil }
         comps.queryItems = [
             URLQueryItem(name: "q", value: query),
-            URLQueryItem(name: "maxResults", value: "5"),
+            URLQueryItem(name: "maxResults", value: "10"),
             URLQueryItem(name: "country", value: "US"),
         ]
         guard let url = comps.url,

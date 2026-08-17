@@ -16,6 +16,8 @@ struct NoteDetailView: View {
     @State private var followUpMessage: String?
     @State private var titleDraft = ""
     @State private var showPlacePicker = false        // presents the searchable place-list picker
+    @State private var newGenreForNote: UUID?         // book id awaiting a typed new genre
+    @State private var newGenreDraft = ""
     @State private var fullEditNote: Note?           // presents the full-screen composer for editing / find-links
     @State private var editAutofocus = false         // put the keyboard up when opened by tapping to edit
     @State private var hasTripRange = false          // travel notes: is a trip date range set?
@@ -73,6 +75,11 @@ struct NoteDetailView: View {
                 PlacePickerView { r in
                     model.addPlace(note.id, name: r.name, latitude: r.latitude, longitude: r.longitude)
                 }
+            }
+            .alert("New genre", isPresented: Binding(get: { newGenreForNote != nil }, set: { if !$0 { newGenreForNote = nil } })) {
+                TextField("Genre — e.g. Thriller", text: $newGenreDraft)
+                Button("Cancel", role: .cancel) {}
+                Button("Add") { if let id = newGenreForNote { model.setBookGenre(id, to: newGenreDraft) } }
             }
             .onAppear {
                 if loadedBodyFor != note.id {
@@ -186,6 +193,10 @@ struct NoteDetailView: View {
             if AppModel.isRateableFolder(note.folderName) {
                 StarRating(rating: note.rating) { model.setRating(note.id, to: $0) }
             }
+            // Pick a genre for a book (existing or new) — groups it under books/genre/…
+            if AppModel.isBookFolder(note.folderName) {
+                genreRow(note)
+            }
             // Date the entry actually belongs to — change it to backdate a diary entry so
             // it sorts under the day it happened, not the day you typed it. Shown for
             // journal entries and logged records, not for people/places/books.
@@ -210,8 +221,10 @@ struct NoteDetailView: View {
                 )
                 .font(.subheadline)
             }
-            if note.origin?.source != "readwise" { locationRows(note) }
-            if note.origin?.source == "readwise" {
+            if !AppModel.isBookFolder(note.folderName) { locationRows(note) }
+            // Every book — however it was imported (Readwise or the Obsidian vault) — gets the
+            // read toggle. A book grows Mind only once you finish it.
+            if AppModel.isBookFolder(note.folderName) {
                 Toggle(isOn: Binding(get: { !note.isStub },
                                      set: { model.setFinished(note.id, $0) })) {
                     Label(note.isStub ? "Mark as finished" : "Finished reading",
@@ -397,6 +410,30 @@ struct NoteDetailView: View {
                     Button { openFullEditor(note) } label: { Label("Find links", systemImage: "sparkles").font(.caption) }
                 }
                 Button { openFullEditor(note) } label: { Label("Edit", systemImage: "pencil").font(.caption) }
+            }
+        }
+    }
+
+    /// A genre picker for a book: choose an existing genre, add a new one, or clear it.
+    @ViewBuilder private func genreRow(_ note: Note) -> some View {
+        let current = model.genre(of: note)
+        Menu {
+            ForEach(model.existingGenres(), id: \.self) { g in
+                Button { model.setBookGenre(note.id, to: g) } label: {
+                    if current?.caseInsensitiveCompare(g) == .orderedSame { Label(g, systemImage: "checkmark") } else { Text(g) }
+                }
+            }
+            Divider()
+            Button { newGenreDraft = ""; newGenreForNote = note.id } label: { Label("New genre…", systemImage: "plus") }
+            if current != nil {
+                Button(role: .destructive) { model.setBookGenre(note.id, to: nil) } label: { Label("Clear genre", systemImage: "xmark") }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Label("Genre", systemImage: "books.vertical").font(.subheadline).foregroundStyle(.secondary)
+                Spacer()
+                Text(current ?? "Choose…").foregroundStyle(current == nil ? .secondary : .primary)
+                Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.tertiary)
             }
         }
     }
