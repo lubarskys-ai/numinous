@@ -726,10 +726,16 @@ final class AppModel: ObservableObject {
                     notes[i].body = Self.mergeBodies(existing: notes[i].body, incoming: body)
                 }
                 updated += 1
-            } else if let i = notes.firstIndex(where: { Self.norm($0.title) == Self.norm(title) && $0.origin == nil }) {
-                // Adopt a *hand-made* note with this title rather than duplicate it.
+            } else if let i = notes.firstIndex(where: {
+                Self.norm($0.title) == Self.norm(title) && $0.origin?.source != item.origin.source
+            }) {
+                // Adopt an existing same-title note from a DIFFERENT source (a hand-made note,
+                // or the same book imported earlier from the Obsidian vault) instead of
+                // creating a duplicate — this is what stopped merged books re-doubling on the
+                // next Readwise sync.
                 notes[i].origin = item.origin
                 notes[i].details = Self.mergeDetails(notes[i].details, item.details)
+                if item.mergeBody { notes[i].body = Self.mergeBodies(existing: notes[i].body, incoming: body) }
                 updated += 1
             } else {
                 // Disambiguate if a *different* origin already holds this title.
@@ -1719,6 +1725,31 @@ final class AppModel: ObservableObject {
         return toDelete.count
     }
 
+    /// Merge duplicates robustly: fold "X (2)" copies into "X" AND collapse any notes that
+    /// simply share the same title (e.g. a book re-created by a Readwise sync sitting next to
+    /// the merged original). Lossless — bodies/details/places/photos/rating are combined.
+    /// Returns how many notes were removed. Global (title collisions aren't folder-scoped),
+    /// but callers trigger it from a folder's menu.
+    @discardableResult
+    func mergeDuplicatesAndDedupe(inFolder folderPath: String? = nil) -> Int {
+        let before = notes.count
+        mergeDuplicates(inFolder: folderPath)   // "X (2)" → "X" (persists)
+        dedupeByTitle()                         // exact same-title collisions anywhere
+        pruneEmptyFolders()
+        persist()
+        return before - notes.count
+    }
+
+    /// How many notes would `mergeDuplicatesAndDedupe` remove — the "(2)" copies plus any
+    /// exact same-title collisions. Drives the folder menu's count/label.
+    func mergeableDuplicateCount(inFolder folderPath: String? = nil) -> Int {
+        var seen = Set<String>(), extra = 0
+        for n in notes {
+            if !seen.insert(Self.norm(n.title)).inserted { extra += 1 }
+        }
+        return duplicatePairs(inFolder: folderPath).count + extra
+    }
+
     /// Delete several folders (and everything filed under them) in one save.
     func deleteFolders(_ paths: [String]) {
         guard !paths.isEmpty else { return }
@@ -1824,6 +1855,13 @@ final class AppModel: ObservableObject {
         }
         if notes[i].isStub && !other.isStub { notes[i].isStub = false }
         if notes[i].rating == nil { notes[i].rating = other.rating }
+        // Keep a re-syncing origin (Readwise) so a later sync UPDATES this surviving note
+        // instead of re-creating the duplicate we're merging away.
+        if notes[i].origin?.source != "readwise", other.origin?.source == "readwise" {
+            notes[i].origin = other.origin
+        } else if notes[i].origin == nil {
+            notes[i].origin = other.origin
+        }
     }
 
     private static func richer(_ a: Note, than b: Note) -> Bool {

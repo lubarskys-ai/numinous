@@ -379,18 +379,17 @@ private struct DrawerView: View {
             }
         }
         .confirmationDialog("Merge duplicates?", isPresented: $dupConfirm, titleVisibility: .visible) {
-            let n = model.duplicateNotes(inFolder: cabinet.id).count
-            Button("Merge \(n) duplicate\(n == 1 ? "" : "s")") {
-                model.mergeDuplicates(inFolder: cabinet.id)
+            let n = model.mergeableDuplicateCount(inFolder: cabinet.id)
+            Button(n > 0 ? "Merge \(n) duplicate\(n == 1 ? "" : "s")" : "Merge duplicates") {
+                model.mergeDuplicatesAndDedupe(inFolder: cabinet.id)
             }
-            .disabled(n == 0)
             Button("Cancel", role: .cancel) {}
         } message: {
-            let c = model.duplicateNotes(inFolder: cabinet.id).count
+            let c = model.mergeableDuplicateCount(inFolder: cabinet.id)
             if c == 0 {
-                Text("No duplicates found in “\(cabinet.name)”.")
+                Text("No duplicates detected in “\(cabinet.name)”. Merging will still tidy any exact same-name copies elsewhere.")
             } else {
-                Text("\(c) note\(c == 1 ? "" : "s") in “\(cabinet.name)” named like “… (2)” duplicate an existing note. Their contents are merged into the original and the copies removed — nothing is lost. This can't be undone.")
+                Text("\(c) note\(c == 1 ? "" : "s") duplicate an existing note — either named like “… (2)” or sharing the same name. Their contents are merged into the original and the copies removed — nothing is lost. This can't be undone.")
             }
         }
     }

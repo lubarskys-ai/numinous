@@ -55,9 +55,10 @@ struct MapView: View {
     private var pins: [Pin] {
         model.mappablePlaces.compactMap { mp in
             guard folderMatches(mp.folderName), period.contains(mp.date) else { return nil }
-            // Label the pin with the LOCATION name, not the note's title (which for a diary
-            // entry is just its date).
-            return Pin(id: mp.id, noteID: mp.noteID, title: mp.placeName,
+            // Label with the physical place: a place note (e.g. "Blue Bottle") shows its own
+            // name; only a diary entry (named by date) falls back to the place's city/name.
+            let label = AppModel.isDateTitled(mp.title) ? mp.placeName : mp.title
+            return Pin(id: mp.id, noteID: mp.noteID, title: label,
                        coordinate: CLLocationCoordinate2D(latitude: mp.latitude, longitude: mp.longitude),
                        color: model.axis(id: mp.axisID)?.color ?? .red)
         }
