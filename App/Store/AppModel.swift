@@ -1042,9 +1042,13 @@ final class AppModel: ObservableObject {
         notes.filter { Self.cleanObsidianName($0.displayName) != $0.displayName }.count
     }
 
-    func backfillBookGenres(limit: Int = 80) async -> Int {
+    func backfillBookGenres(limit: Int = 120) async -> Int {
+        // Any note filed under books/ (except the genre sub-notes themselves), regardless of
+        // how it got there — direct Readwise sync (origin "readwise") OR the Obsidian vault
+        // import (origin "obsidian"). Skips ones already tagged.
         let books = notes.filter {
-            $0.origin?.source == "readwise" && Folder.normalize($0.folderName) == "books"
+            let f = Folder.normalize($0.folderName)
+            return (f == "books" || f.hasPrefix("books/")) && !f.hasPrefix("books/genre")
                 && !$0.linkTargets.contains(where: { $0.lowercased().hasPrefix("books/genre/") })
         }
         var results: [(id: UUID, genre: String)] = []
