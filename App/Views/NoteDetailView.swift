@@ -79,7 +79,7 @@ struct NoteDetailView: View {
             .alert("New genre", isPresented: Binding(get: { newGenreForNote != nil }, set: { if !$0 { newGenreForNote = nil } })) {
                 TextField("Genre — e.g. Thriller", text: $newGenreDraft)
                 Button("Cancel", role: .cancel) {}
-                Button("Add") { if let id = newGenreForNote { model.setBookGenre(id, to: newGenreDraft) } }
+                Button("Add") { if let id = newGenreForNote { applyGenre(id, to: newGenreDraft) } }
             }
             .onAppear {
                 if loadedBodyFor != note.id {
@@ -417,18 +417,26 @@ struct NoteDetailView: View {
     }
 
     /// A genre picker for a book: choose an existing genre, add a new one, or clear it.
+    /// Set a book's genre AND refresh the local edit buffer. `setBookGenre` rewrites the
+    /// note body (it appends the `[[books/genre/…]]` link), so without this the view's stale
+    /// `editedBody` would be written back on disappear and wipe the genre out.
+    private func applyGenre(_ id: UUID, to genre: String?) {
+        model.setBookGenre(id, to: genre)
+        if let fresh = model.note(id: id) { editedBody = fresh.body }
+    }
+
     @ViewBuilder private func genreRow(_ note: Note) -> some View {
         let current = model.genre(of: note)
         Menu {
             ForEach(model.existingGenres(), id: \.self) { g in
-                Button { model.setBookGenre(note.id, to: g) } label: {
+                Button { applyGenre(note.id, to: g) } label: {
                     if current?.caseInsensitiveCompare(g) == .orderedSame { Label(g, systemImage: "checkmark") } else { Text(g) }
                 }
             }
             Divider()
             Button { newGenreDraft = ""; newGenreForNote = note.id } label: { Label("New genre…", systemImage: "plus") }
             if current != nil {
-                Button(role: .destructive) { model.setBookGenre(note.id, to: nil) } label: { Label("Clear genre", systemImage: "xmark") }
+                Button(role: .destructive) { applyGenre(note.id, to: nil) } label: { Label("Clear genre", systemImage: "xmark") }
             }
         } label: {
             HStack(spacing: 8) {
