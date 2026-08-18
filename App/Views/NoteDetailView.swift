@@ -73,7 +73,8 @@ struct NoteDetailView: View {
             }
             .sheet(isPresented: $showPlacePicker) {
                 PlacePickerView { r in
-                    model.addPlace(note.id, name: r.name, latitude: r.latitude, longitude: r.longitude)
+                    model.linkPlace(model.ensurePlaceNote(name: r.name, latitude: r.latitude, longitude: r.longitude), into: note.id)
+                    refreshBody(note.id)
                 }
             }
             .alert("New genre", isPresented: Binding(get: { newGenreForNote != nil }, set: { if !$0 { newGenreForNote = nil } })) {
@@ -353,11 +354,7 @@ struct NoteDetailView: View {
                 Label("Enter a place name", systemImage: "mappin")
             }
             Button {
-                Task {
-                    if let p = await locator.currentPlaceStructured() {
-                        model.addPlace(note.id, name: p.name, latitude: p.latitude, longitude: p.longitude)
-                    }
-                }
+                Task { await model.captureCurrentPlace(into: note.id); refreshBody(note.id) }   // GPS → place note + pin + body link
             } label: {
                 Label("Use current location", systemImage: "location.fill")
             }
@@ -367,23 +364,18 @@ struct NoteDetailView: View {
         }
     }
 
-    /// Add a typed place immediately, then geocode it in the background so it gains a
-    /// coordinate (making it map-ready). `addPlace` de-dupes by name, so the second call
-    /// just fills in the coordinate.
+    /// Geocode a typed place name and weave it into the note as a mappable, linked place —
+    /// entered once, it becomes note text, a graph node, and a map pin.
     private func addTypedPlace(to id: UUID, name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
-        model.addPlace(id, name: trimmed)
-        Task {
-            let near = await locator.currentCoordinate()
-            // MKLocalSearch first so a restaurant/business name resolves ("Blue Bottle",
-            // "Tartine") — the address geocoder is the fallback. Keeps YOUR typed label.
-            if let hit = await LocationService.searchPlace(trimmed, near: near) {
-                model.addPlace(id, name: trimmed, latitude: hit.latitude, longitude: hit.longitude)
-            } else if let c = await LocationService.coordinate(for: trimmed, near: near) {
-                model.addPlace(id, name: trimmed, latitude: c.latitude, longitude: c.longitude)
-            }
-        }
+        Task { await model.attachPlaceByName(trimmed, into: id); refreshBody(id) }
+    }
+
+    /// Re-sync the editable body buffer after a model action rewrote the note body (adding a
+    /// place link), so it shows and the on-leave autosave doesn't clobber it.
+    private func refreshBody(_ id: UUID) {
+        if let fresh = model.note(id: id) { editedBody = fresh.body }
     }
 
     @ViewBuilder

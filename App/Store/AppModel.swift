@@ -672,18 +672,26 @@ final class AppModel: ObservableObject {
     func save(_ note: Note) {
         if let i = notes.firstIndex(where: { $0.id == note.id }) { notes[i] = note }
         else { notes.append(note) }
-        var newPlaceStubs: [UUID] = []
-        for target in note.linkTargets where !noteExists(titled: target) {
-            // Give the linked folder an axis so this connection counts toward growth.
-            ensureCategoryFolder(Self.folderPart(of: target))
-            let stub = Note(title: target, date: note.date, isStub: true)
-            notes.append(stub)
-            if Self.isPlaceLikeFolder(Self.folderPart(of: target)) { newPlaceStubs.append(stub.id) }
+        var placeLinksToLocate: [UUID] = []
+        for target in note.linkTargets {
+            if !noteExists(titled: target) {
+                // Give the linked folder an axis so this connection counts toward growth.
+                ensureCategoryFolder(Self.folderPart(of: target))
+                let stub = Note(title: target, date: note.date, isStub: true)
+                notes.append(stub)
+                if Self.isPlaceLikeFolder(Self.folderPart(of: target)) { placeLinksToLocate.append(stub.id) }
+            } else if Self.isPlaceLikeFolder(Self.folderPart(of: target)),
+                      let existing = self.note(titled: target),
+                      !existing.allPlaces.contains(where: { $0.hasCoordinate }) {
+                // A place you LINKED that still has no GPS → geocode it from its name too.
+                placeLinksToLocate.append(existing.id)
+            }
         }
         persist()
-        // Auto-geocode a new place-type link (e.g. [[location/Eiffel Tower]]) from its name,
-        // so it lands on the map without you setting a location by hand.
-        for id in newPlaceStubs { Task { await autoLocatePlaceNote(id) } }
+        // Auto-geocode place-type links (e.g. [[location/Eiffel Tower]]) from their name, so
+        // they land on the map without you setting a location by hand. Never fall back to your
+        // current location for a linked place — it could be anywhere.
+        for id in placeLinksToLocate { Task { await autoLocatePlaceNote(id, allowGPSFallback: false) } }
         // …and the note itself, when it's a place note (travel/, location/, restaurants/…)
         // that doesn't have coordinates yet — so any note about a place lands on the map.
         if Self.isPlaceLikeFolder(note.folderName), note.allPlaces.isEmpty {
@@ -2309,6 +2317,73 @@ final class AppModel: ObservableObject {
         return note.id
     }
 
+    // MARK: - Enter a place once (name ↔ GPS ↔ note text ↔ graph)
+
+    /// Ensure a `places/<Name>` note exists at these coordinates — a single place that's both
+    /// a map pin and a connectable graph node. Returns its title (`places/<Name>`) so callers
+    /// can link to it. Reuses an existing place note of the same name (filling in coordinates).
+    @discardableResult
+    func ensurePlaceNote(name: String, latitude: Double, longitude: Double) -> String {
+        let leaf = name.replacingOccurrences(of: "/", with: "-").trimmingCharacters(in: .whitespaces)
+        guard !leaf.isEmpty else { return "" }
+        let title = "places/" + leaf
+        if let i = notes.firstIndex(where: { Self.norm($0.title) == Self.norm(title) }) {
+            addPlace(notes[i].id, name: leaf, latitude: latitude, longitude: longitude)   // fills coords, persists
+        } else {
+            if folder(named: "places") == nil {
+                folders.append(Folder(name: "places", category: "Places", axisID: "meaning"))
+            }
+            notes.append(Note(title: title, date: Date(), location: leaf,
+                              places: [Place(name: leaf, latitude: latitude, longitude: longitude)]))
+            persist()
+        }
+        return title
+    }
+
+    /// Append a `📍 [[places/…]]` link to a note's body (once), so a place is written into
+    /// what you wrote — and becomes a real connection.
+    func linkPlace(_ placeTitle: String, into noteID: UUID) {
+        guard let i = notes.firstIndex(where: { $0.id == noteID }),
+              !placeTitle.isEmpty,
+              !notes[i].linkTargets.contains(where: { Self.norm($0) == Self.norm(placeTitle) }) else { return }
+        let sep = notes[i].body.isEmpty || notes[i].body.hasSuffix("\n") ? "" : "\n"
+        updateBody(noteID, body: notes[i].body + sep + "📍 [[\(placeTitle)]]")
+    }
+
+    /// GPS → note: capture where you are, make it a place note + pin, and link it into the note.
+    func captureCurrentPlace(into noteID: UUID) async {
+        guard let p = await autoLocator.currentPlaceStructured(),
+              let lat = p.latitude, let lng = p.longitude else { return }
+        linkPlace(ensurePlaceNote(name: p.name, latitude: lat, longitude: lng), into: noteID)
+    }
+
+    /// Typed name → note: geocode it, make it a place note + pin, and link it into the note.
+    func attachPlaceByName(_ name: String, into noteID: UUID) async {
+        let near = autoLocator.isAuthorized ? await autoLocator.currentCoordinate() : nil
+        if let hit = await LocationService.searchPlace(name, near: near) {
+            linkPlace(ensurePlaceNote(name: hit.name, latitude: hit.latitude, longitude: hit.longitude), into: noteID)
+        } else if let c = await LocationService.coordinate(for: name, near: near) {
+            linkPlace(ensurePlaceNote(name: name, latitude: c.latitude, longitude: c.longitude), into: noteID)
+        }
+    }
+
+    /// For the composer (a note that isn't saved yet): resolve a place to a `[[places/…]]`
+    /// link string to weave into the text — GPS when `name` is nil, else the typed name.
+    func placeLink(forName name: String?) async -> String? {
+        let near = autoLocator.isAuthorized ? await autoLocator.currentCoordinate() : nil
+        if let name, !name.trimmingCharacters(in: .whitespaces).isEmpty {
+            if let hit = await LocationService.searchPlace(name, near: near) {
+                return "[[\(ensurePlaceNote(name: hit.name, latitude: hit.latitude, longitude: hit.longitude))]]"
+            }
+            if let c = await LocationService.coordinate(for: name, near: near) {
+                return "[[\(ensurePlaceNote(name: name, latitude: c.latitude, longitude: c.longitude))]]"
+            }
+            return nil
+        }
+        guard let p = await autoLocator.currentPlaceStructured(), let lat = p.latitude, let lng = p.longitude else { return nil }
+        return "[[\(ensurePlaceNote(name: p.name, latitude: lat, longitude: lng))]]"
+    }
+
     private func commitPlaces(_ places: [Place], to i: Int) {
         let newPlaces = places.isEmpty ? nil : places
         let newLocation = places.first?.name
@@ -2398,10 +2473,15 @@ final class AppModel: ObservableObject {
     /// are so a chain resolves to the nearby branch. Only when the name isn't a real place
     /// (e.g. a note auto-titled by date) fall back to your current location. Skips notes
     /// that already have a place. Correctable afterwards via the pin editor.
-    func autoLocatePlaceNote(_ id: UUID) async {
+    /// Give a place-type note coordinates from its NAME so it lands on the map — used both
+    /// for a place note you write and for a `[[place link]]` that has no GPS yet. Skips notes
+    /// that already have a coordinate. `allowGPSFallback` stamps your CURRENT location when the
+    /// name can't be geocoded — right for a place you're at, wrong for a place merely linked
+    /// (which could be anywhere), so callers linking places pass false.
+    func autoLocatePlaceNote(_ id: UUID, allowGPSFallback: Bool = true) async {
         guard let note = note(id: id),
               Self.isPlaceLikeFolder(note.folderName),
-              note.allPlaces.isEmpty else { return }
+              !note.allPlaces.contains(where: { $0.hasCoordinate }) else { return }
         let near = autoLocator.isAuthorized ? await autoLocator.currentCoordinate() : nil
         // Prefer MKLocalSearch — it resolves restaurants/cafés/shops by name (e.g.
         // "travel/restaurant/Blue Bottle"); the address geocoder is the fallback for
@@ -2410,10 +2490,7 @@ final class AppModel: ObservableObject {
             addPlace(id, name: hit.name, latitude: hit.latitude, longitude: hit.longitude)
         } else if let c = await LocationService.coordinate(for: note.displayName, near: near) {
             addPlace(id, name: note.displayName, latitude: c.latitude, longitude: c.longitude)
-        } else if autoLocator.isAuthorized, let c = await autoLocator.currentCoordinate() {
-            // Last resort — stamp the current GPS coordinate, but keep the note's OWN name as
-            // the place (the business you filed it under), not the reverse-geocoded "City,
-            // State", so the map pin stays labeled with the business.
+        } else if allowGPSFallback, autoLocator.isAuthorized, let c = await autoLocator.currentCoordinate() {
             addPlace(id, name: note.displayName, latitude: c.latitude, longitude: c.longitude)
         }
     }

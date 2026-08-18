@@ -179,7 +179,17 @@ struct ComposeView: View {
             .alert("Location", isPresented: $showLocationPrompt) {
                 TextField("Where were you?", text: $locationDraft)
                 Button("Cancel", role: .cancel) {}
-                Button("Save") { location = locationDraft.trimmingCharacters(in: .whitespaces); locationCoord = nil }
+                Button("Save") {
+                    let name = locationDraft.trimmingCharacters(in: .whitespaces)
+                    guard !name.isEmpty else { return }
+                    Task {
+                        // Geocode the typed place into a linked, mappable place and weave it in.
+                        if let link = await model.placeLink(forName: name) {
+                            let sep = text.isEmpty || text.hasSuffix("\n") ? "" : "\n"
+                            text += sep + "📍 " + link
+                        } else { location = name; locationCoord = nil }   // fall back to a plain place chip
+                    }
+                }
             } message: { Text("Add a place to this note.") }
             .sheet(item: $editSheetFor) { s in editSheet(s) }
             .sheet(isPresented: $showFollowUp, onDismiss: { dismiss() }) {
@@ -485,10 +495,11 @@ struct ComposeView: View {
 
     private func useCurrentLocation() async {
         locating = true
-        // Capture the structured place (name + coordinates) so the saved note is map-ready.
-        if let p = await locator.currentPlaceStructured() {
-            location = p.name
-            if let lat = p.latitude, let lng = p.longitude { locationCoord = (lat, lng) }
+        // Capture where you are as a place note + pin, and weave its link into what you're
+        // writing — so the place is entered once and becomes text, a graph node, and a map pin.
+        if let link = await model.placeLink(forName: nil) {
+            let sep = text.isEmpty || text.hasSuffix("\n") ? "" : "\n"
+            text += sep + "📍 " + link
         } else if !locator.isAuthorized {
             locationDraft = ""; showLocationPrompt = true
         }
