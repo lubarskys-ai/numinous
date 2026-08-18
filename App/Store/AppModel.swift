@@ -529,6 +529,43 @@ final class AppModel: ObservableObject {
         mappablePlaces = out
     }
 
+    // Cached avatar connectome graph (every note as a node + its engaged/concierge links).
+    // Building it scans all notes with string work — it was running on EVERY avatar render
+    // and zoom (25–56ms at ~4k notes), hitching the page. Now built lazily once after each
+    // data change and reused.
+    private var cachedAvatarNodes: [GraphNode] = []
+    private var cachedAvatarLinks: [GraphEdge] = []
+    private var avatarGraphDirty = true
+
+    func avatarGraph() -> (nodes: [GraphNode], links: [GraphEdge]) {
+        if avatarGraphDirty { recomputeAvatarGraph(); avatarGraphDirty = false }
+        return (cachedAvatarNodes, cachedAvatarLinks)
+    }
+
+    private func recomputeAvatarGraph() {
+        let graphNodes: [GraphNode] = notes.compactMap { note in
+            guard let axis = axis(for: note) else { return nil }
+            return GraphNode(id: note.id, axis: axis.id, label: note.displayName)
+        }
+        let axisOf = Dictionary(graphNodes.map { ($0.id, $0.axis) }, uniquingKeysWith: { a, _ in a })
+        let idByTitle = Dictionary(notes.map { (Self.norm($0.title), $0.id) }, uniquingKeysWith: { a, _ in a })
+        var seen = Set<String>(); var edges: [GraphEdge] = []
+        func add(_ a: UUID, _ b: UUID) {
+            guard a != b, axisOf[a] != nil, axisOf[b] != nil else { return }
+            let key = [a.uuidString, b.uuidString].sorted().joined(separator: "~")
+            guard seen.insert(key).inserted else { return }
+            edges.append(GraphEdge(a: a, b: b, cross: axisOf[a] != axisOf[b]))
+        }
+        for l in score.links where l.isCounted { add(l.a, l.b) }
+        for note in notes where axisOf[note.id] != nil {
+            for target in note.linkTargets where target.lowercased().hasPrefix("concierge/") {
+                if let other = idByTitle[Self.norm(target)] { add(note.id, other) }
+            }
+        }
+        cachedAvatarNodes = graphNodes
+        cachedAvatarLinks = edges
+    }
+
     /// Notes grouped by folder path, folders alphabetized, "Unfiled" last.
     var groupedByFolder: [FolderGroup] {
         let groups = Dictionary(grouping: notes) { $0.folderName }
@@ -1900,6 +1937,7 @@ final class AppModel: ObservableObject {
     private func persist() {
         let t0 = CFAbsoluteTimeGetCurrent()
         recomputeLookupIndexes()          // O(1) note/folder lookups for everything below (+ views)
+        avatarGraphDirty = true           // avatar connectome rebuilds lazily on next view
         score = engine.score(notes: notes, folders: folders, axes: axes)
         let t1 = CFAbsoluteTimeGetCurrent()
         recomputeLastTended()

@@ -15,51 +15,30 @@ struct AvatarView: View {
 
     var body: some View {
         let balance = model.score.axisBalance(over: model.axes)
-        let _graphT0 = CFAbsoluteTimeGetCurrent()
-        // Every file is a node (Obsidian-style) — unlinked ones just float unconnected.
-        let graphNodes: [GraphNode] = model.notes.compactMap { note in
-            guard let axis = model.axis(for: note) else { return nil }
-            return GraphNode(id: note.id, axis: axis.id, label: note.displayName)
-        }
-        // Keep the connectome gradual: draw the ENGAGED growth links (as before) plus, as a
-        // deliberate exception, concierge-tier links even from dormant contacts — so the CRM
-        // grouping shows without lighting up the whole graph at once.
-        let axisOf: [UUID: String] = Dictionary(graphNodes.map { ($0.id, $0.axis) },
-                                                uniquingKeysWith: { a, _ in a })
-        let idByTitle: [String: UUID] = Dictionary(
-            model.notes.map { ($0.title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines), $0.id) },
-            uniquingKeysWith: { a, _ in a })
-        let graphLinks: [GraphEdge] = {
-            var seen = Set<String>(); var edges: [GraphEdge] = []
-            func add(_ a: UUID, _ b: UUID) {
-                guard a != b, axisOf[a] != nil, axisOf[b] != nil else { return }
-                let key = [a.uuidString, b.uuidString].sorted().joined(separator: "~")
-                guard seen.insert(key).inserted else { return }
-                edges.append(GraphEdge(a: a, b: b, cross: axisOf[a] != axisOf[b]))
+        // Cached in the model, rebuilt only when data changes — no per-render/per-zoom scan.
+        let (graphNodes, graphLinks) = model.avatarGraph()
+        // Resolve the axis→(color/growth/maturity) lookups into plain value dictionaries on
+        // the main thread, so the scene can be built on a BACKGROUND thread without touching
+        // the model (see Avatar3DView's async build). Only a handful of axes, so this is cheap.
+        let (axisColor, axisGrowth, axisMat): ([String: UIColor], [String: CGFloat], [String: Double]) = {
+            let axisIDs = Set(model.axes.map(\.id)).union(["mind", "meaning", "heart", "spirit", "gut", "body", "influences"])
+            var c: [String: UIColor] = [:], g: [String: CGFloat] = [:], m: [String: Double] = [:]
+            for a in axisIDs {
+                c[a] = UIColor(model.axis(id: a)?.color ?? .gray)
+                g[a] = min(1, CGFloat(model.score.revealedTotals.points(a) / 150)) * CGFloat(model.axisVitality(a))
+                m[a] = model.axisMaturity(a)
             }
-            // The growth graph — engaged connections that build up over time.
-            for l in model.score.links where l.isCounted { add(l.a, l.b) }
-            // Plus concierge tier links (even from dormant contacts).
-            for note in model.notes where axisOf[note.id] != nil {
-                for target in note.linkTargets where target.lowercased().hasPrefix("concierge/") {
-                    if let other = idByTitle[target.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)] {
-                        add(note.id, other)
-                    }
-                }
-            }
-            return edges
+            return (c, g, m)
         }()
-        let _ = { let ms = (CFAbsoluteTimeGetCurrent() - _graphT0) * 1000
-            if ms > 20 { print("⏱️[perf] avatar graph \(Int(ms))ms nodes=\(graphNodes.count) links=\(graphLinks.count)") } }()
 
         NavigationStack(path: $path) {
             ZStack {
                 spaceBackground.ignoresSafeArea()
                 VStack(spacing: 12) {
                     Avatar3DView(
-                        color: { UIColor(model.axis(id: $0)?.color ?? .gray) },
-                        growth: { min(1, model.score.revealedTotals.points($0) / 150) * model.axisVitality($0) },
-                        regionMaturity: { model.axisMaturity($0) },
+                        color: { axisColor[$0] ?? .gray },
+                        growth: { axisGrowth[$0] ?? 0 },
+                        regionMaturity: { axisMat[$0] ?? 0 },
                         nodes: graphNodes,
                         links: graphLinks,
                         maturity: model.maturity,

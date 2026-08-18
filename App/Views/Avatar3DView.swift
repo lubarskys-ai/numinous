@@ -43,8 +43,6 @@ struct Avatar3DView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView()
-        view.scene = buildScene(context.coordinator)
-        view.pointOfView = view.scene?.rootNode.childNode(withName: "camera", recursively: false)
         view.allowsCameraControl = false
         view.autoenablesDefaultLighting = false
         view.backgroundColor = .clear
@@ -72,6 +70,7 @@ struct Avatar3DView: UIViewRepresentable {
         context.coordinator.onZoomChange = onZoomChange
         context.coordinator.onLabels = onLabels
         view.delegate = context.coordinator     // per-frame hook for projecting labels
+        buildSceneAsync(into: view, context.coordinator)   // build off-main so opening stays smooth
         return view
     }
 
@@ -84,9 +83,8 @@ struct Avatar3DView: UIViewRepresentable {
         // Rebuild when maturity changes (e.g. the "watch it grow" animation stepping
         // it) so the birth sequence plays; otherwise just track zoom.
         if abs(context.coordinator.builtMaturity - maturity) > 0.004 {
-            view.scene = buildScene(context.coordinator)
-            view.pointOfView = view.scene?.rootNode.childNode(withName: "camera", recursively: false)
-            context.coordinator.builtMaturity = maturity
+            context.coordinator.builtMaturity = maturity   // set now so we don't re-trigger mid-build
+            buildSceneAsync(into: view, context.coordinator)
         }
         // Orthographic zoom: scale the viewport, never dolly the camera — so foreground and
         // background nodes zoom identically (no parallax) and the camera never flies past
@@ -116,6 +114,7 @@ struct Avatar3DView: UIViewRepresentable {
     final class Coordinator: NSObject, UIGestureRecognizerDelegate, SCNSceneRendererDelegate {
         weak var view: SCNView?
         var builtMaturity: Double = -1
+        var buildGeneration = 0
         var onTapNode: ((UUID) -> Void)?
         var onZoomChange: ((Double) -> Void)?
         var onLabels: (([NodeLabel]) -> Void)?
@@ -295,7 +294,18 @@ struct Avatar3DView: UIViewRepresentable {
         }
     }
 
-    private func buildScene(_ coordinator: Coordinator? = nil) -> SCNScene {
+    /// The result of a scene build — the scene plus the hit/label data and the two moving
+    /// nodes the coordinator needs. Returned (not written to the coordinator) so the whole
+    /// build can run OFF the main thread; the caller wires these up on the main thread.
+    struct BuiltAvatarScene {
+        let scene: SCNScene
+        let hits: [(id: UUID, local: SCNVector3)]
+        let labels: [(id: UUID, local: SCNVector3, text: String)]
+        let connectome: SCNNode
+        let body: SCNNode
+    }
+
+    private func buildScene() -> BuiltAvatarScene {
         let scene = SCNScene()
         func v(_ x: Double, _ y: Double, _ z: Double) -> SCNVector3 { SCNVector3(Float(x), Float(y), Float(z)) }
         func ball(_ r: Double) -> SCNSphere { let s = SCNSphere(radius: r); s.segmentCount = 64; return s }
@@ -826,10 +836,7 @@ struct Avatar3DView: UIViewRepresentable {
             loose.renderingOrder = 10
             connectomeFloat.addChildNode(loose)
         }
-        coordinator?.nodeHitTargets = hitTargets
-        coordinator?.labelTargets = labelTargets
-        coordinator?.connectomeNode = connectomeFloat
-        coordinator?.bodyFloatNode = bodyFloat
+        // (hit/label targets + the moving nodes are returned below, wired up on the main thread)
 
         // Curved neural threads: each link bows toward the core so it stays inside
         // the body instead of cutting straight across. Only cross-axis links carry
@@ -908,6 +915,33 @@ struct Avatar3DView: UIViewRepresentable {
         connectomeFloat.runAction(drift(0.05, 0, 0, 4.4))
         connectomeFloat.runAction(tumble(-0.04, 0.11, 6.3))
         scene.rootNode.addChildNode(figure)
-        return scene
+        return BuiltAvatarScene(scene: scene, hits: hitTargets, labels: labelTargets,
+                                connectome: connectomeFloat, body: bodyFloat)
+    }
+
+    /// Build the scene on a background thread (it's heavy at scale: an O(n²) layout, model
+    /// loading, and ~1500 objects), then attach it on the main thread — so tapping into the
+    /// avatar stays smooth instead of freezing during the build. A generation token drops a
+    /// stale build if a newer one (e.g. a maturity step) started meanwhile.
+    private func buildSceneAsync(into view: SCNView, _ coordinator: Coordinator) {
+        coordinator.buildGeneration += 1
+        let gen = coordinator.buildGeneration
+        if view.scene == nil { view.scene = SCNScene() }   // instant, empty placeholder
+        let builder = self
+        DispatchQueue.global(qos: .userInitiated).async {
+            let built = builder.buildScene()
+            DispatchQueue.main.async {
+                guard coordinator.buildGeneration == gen, let v = coordinator.view else { return }
+                v.scene = built.scene
+                v.pointOfView = built.scene.rootNode.childNode(withName: "camera", recursively: false)
+                v.pointOfView?.camera?.orthographicScale = Self.baseOrtho / max(0.1, builder.zoom)
+                coordinator.nodeHitTargets = built.hits
+                coordinator.labelTargets = built.labels
+                coordinator.connectomeNode = built.connectome
+                coordinator.bodyFloatNode = built.body
+                coordinator.builtMaturity = builder.maturity
+                coordinator.lastNodeScale = -1   // force a re-thin of link threads for the new scene
+            }
+        }
     }
 }
