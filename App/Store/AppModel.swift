@@ -129,6 +129,7 @@ final class AppModel: ObservableObject {
         self.homeLocation = UserDefaults.standard.data(forKey: Self.homeKey)
             .flatMap { try? JSONDecoder().decode(Place.self, from: $0) }
         self.score = ScoreEngine().score(notes: n, folders: f, axes: a)
+        recomputeLookupIndexes()
         recomputeLastTended()
         recomputeCabinetGroups()
         recomputeMappablePlaces()
@@ -377,15 +378,40 @@ final class AppModel: ObservableObject {
 
     // MARK: - Lookups
 
-    func note(id: UUID) -> Note? { notes.first { $0.id == id } }
+    // O(1) lookup indexes (id/title → array index, folder id → array index), rebuilt whenever
+    // the data changes. Linear `notes.first {…}` / `folders.first {…}` scans per lookup are a
+    // real cost at scale — these are called per row while scrolling and all through persist().
+    // The cached index is validated on use, so a lookup made mid-mutation (before the next
+    // recompute) safely falls back to a scan instead of returning a stale/out-of-range hit.
+    private var noteIndexByID: [UUID: Int] = [:]
+    private var noteIndexByTitle: [String: Int] = [:]
+    private var folderIndexByID: [String: Int] = [:]
+
+    private func recomputeLookupIndexes() {
+        noteIndexByID.removeAll(keepingCapacity: true)
+        noteIndexByTitle.removeAll(keepingCapacity: true)
+        folderIndexByID.removeAll(keepingCapacity: true)
+        for (i, n) in notes.enumerated() {
+            noteIndexByID[n.id] = i
+            noteIndexByTitle[Self.norm(n.title)] = i
+        }
+        for (i, f) in folders.enumerated() { folderIndexByID[f.id] = i }
+    }
+
+    func note(id: UUID) -> Note? {
+        if let i = noteIndexByID[id], notes.indices.contains(i), notes[i].id == id { return notes[i] }
+        return notes.first { $0.id == id }
+    }
 
     func note(titled title: String) -> Note? {
         let key = Self.norm(title)
+        if let i = noteIndexByTitle[key], notes.indices.contains(i), Self.norm(notes[i].title) == key { return notes[i] }
         return notes.first { Self.norm($0.title) == key }
     }
 
     func folder(named name: String) -> Folder? {
         let key = Folder.normalize(name)
+        if let i = folderIndexByID[key], folders.indices.contains(i), folders[i].id == key { return folders[i] }
         return folders.first { $0.id == key }
     }
 
@@ -1873,6 +1899,7 @@ final class AppModel: ObservableObject {
 
     private func persist() {
         let t0 = CFAbsoluteTimeGetCurrent()
+        recomputeLookupIndexes()          // O(1) note/folder lookups for everything below (+ views)
         score = engine.score(notes: notes, folders: folders, axes: axes)
         let t1 = CFAbsoluteTimeGetCurrent()
         recomputeLastTended()

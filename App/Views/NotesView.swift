@@ -292,9 +292,13 @@ struct NoteRow: View {
     }
 
     private var snippet: String? {
-        let t = note.body.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty else { return nil }
-        return t.replacingOccurrences(of: "\n", with: " ")
+        // Only the first non-empty line — the row shows one line (lineLimit(1)). Processing
+        // the WHOLE body here (some imported notes are huge) made scrolling stutter.
+        for line in note.body.split(separator: "\n", omittingEmptySubsequences: true) {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            if !t.isEmpty { return t }
+        }
+        return nil
     }
 }
 
