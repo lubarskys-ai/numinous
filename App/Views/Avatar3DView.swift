@@ -879,6 +879,21 @@ struct Avatar3DView: UIViewRepresentable {
         bodyFloat.runAction(drift(0, 0.06, 0, 2.9))
         bodyFloat.runAction(drift(0.045, 0, 0.02, 3.8))
         bodyFloat.runAction(tumble(0.05, 0.14, 5.2))
+        // A gentle breath: the figure swells and settles on a slow, uneven rhythm (a quicker
+        // inhale, a longer exhale) — chest/belly (x,z) expand a touch more than the lift (y),
+        // so it reads as breathing rather than pulsing. A model-agnostic "alive" idle that
+        // carries over when a rigged model replaces this mesh.
+        let breathPeriod = 5.0
+        let breathe = SCNAction.customAction(duration: breathPeriod) { node, elapsed in
+            let t = Double(elapsed) / breathPeriod                 // 0→1 over a breath
+            // Skewed rise/fall: ~40% inhale, ~60% exhale, smoothed.
+            let raw = t < 0.4 ? (t / 0.4) : (1 - (t - 0.4) / 0.6)
+            let phase = raw * raw * (3 - 2 * raw)                  // smoothstep ease
+            node.scale = SCNVector3(Float(1.0 + 0.014 * phase),
+                                    Float(1.0 + 0.006 * phase),
+                                    Float(1.0 + 0.014 * phase))
+        }
+        bodyFloat.runAction(.repeatForever(breathe))
         // Connectome drifts on its own, slightly different phase/rate.
         connectomeFloat.runAction(drift(0, 0.05, 0.02, 3.5))
         connectomeFloat.runAction(drift(0.05, 0, 0, 4.4))
