@@ -12,6 +12,7 @@ struct AvatarView: View {
     @State private var committedZoom: Double = 1
     @State private var path: [UUID] = []
     @State private var nodeLabels: [NodeLabel] = []
+    @State private var focusName: String?     // node whose connections are spotlighted
 
     var body: some View {
         let balance = model.score.axisBalance(over: model.axes)
@@ -45,10 +46,12 @@ struct AvatarView: View {
                         zoom: zoom,
                         onTapNode: { path.append($0) },
                         onZoomChange: { zoom = $0; committedZoom = $0 },
-                        onLabels: { nodeLabels = $0 }
+                        onLabels: { nodeLabels = $0 },
+                        onFocus: { name in withAnimation(.easeInOut(duration: 0.2)) { focusName = name } }
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .overlay { labelOverlay }
+                    .overlay(alignment: .top) { focusPill }
                     .overlay(alignment: .bottomTrailing) { zoomControls.padding(14) }
 
                     if let reflection {
@@ -85,6 +88,27 @@ struct AvatarView: View {
                 .fixedSize()
                 .position(x: label.point.x, y: label.point.y - 15)
                 .allowsHitTesting(false)
+        }
+    }
+
+    /// When a node is spotlighted, a banner names it and explains the gesture (tap it again
+    /// to open the note, tap empty space to clear).
+    @ViewBuilder private var focusPill: some View {
+        if let focusName {
+            VStack(spacing: 2) {
+                HStack(spacing: 6) {
+                    Image(systemName: "point.3.connected.trianglepath.dotted").font(.caption)
+                    Text(focusName).font(.subheadline.weight(.semibold)).lineLimit(1)
+                }
+                Text("tap again to open · tap empty space to clear")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(.white.opacity(0.15)))
+            .padding(.top, 8)
+            .transition(.opacity.combined(with: .move(edge: .top)))
         }
     }
 

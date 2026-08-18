@@ -30,6 +30,9 @@ struct Avatar3DView: UIViewRepresentable {
     /// Reports on-screen positions of node names near the centre while zoomed in, so a 2D
     /// SwiftUI layer can draw labels without any 3D text geometry.
     var onLabels: (([NodeLabel]) -> Void)? = nil
+    /// Reports the focused node's name (nil when focus clears), so a banner can show which
+    /// node's connections are spotlighted.
+    var onFocus: ((String?) -> Void)? = nil
 
     // A long "telephoto" rig: the camera sits far back with a narrow field of view, which
     // flattens perspective so foreground and background nodes zoom at nearly the same rate
@@ -69,6 +72,7 @@ struct Avatar3DView: UIViewRepresentable {
         context.coordinator.zoom = zoom
         context.coordinator.onZoomChange = onZoomChange
         context.coordinator.onLabels = onLabels
+        context.coordinator.onFocus = onFocus
         view.delegate = context.coordinator     // per-frame hook for projecting labels
         buildSceneAsync(into: view, context.coordinator)   // build off-main so opening stays smooth
         return view
@@ -78,6 +82,7 @@ struct Avatar3DView: UIViewRepresentable {
         context.coordinator.onTapNode = onTapNode
         context.coordinator.onZoomChange = onZoomChange
         context.coordinator.onLabels = onLabels
+        context.coordinator.onFocus = onFocus
         context.coordinator.zoom = zoom
         context.coordinator.viewSize = view.bounds.size
         // Rebuild when maturity changes (e.g. the "watch it grow" animation stepping
@@ -131,6 +136,13 @@ struct Avatar3DView: UIViewRepresentable {
         private var labelsEmpty = true
         weak var connectomeNode: SCNNode?
         weak var bodyFloatNode: SCNNode?
+        // Focus mode: tap a node to spotlight just its connections (dim the rest); tap it
+        // again to open the note; tap empty space to clear.
+        var focusedNode: UUID?
+        var nodeName: [UUID: String] = [:]
+        var onFocus: ((String?) -> Void)?
+        private var highlightOverlay: SCNNode?
+        private var dimmed: [SCNNode] = []
 
         func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
 
@@ -226,7 +238,11 @@ struct Avatar3DView: UIViewRepresentable {
                     links.append((a, b))
                 }
             }
-            if let best { onTapNode?(best.id); return }
+            if let best {
+                if focusedNode == best.id { onTapNode?(best.id) }   // second tap on the same node opens it
+                else { focus(best.id, positions: Dictionary(nodeHitTargets.map { ($0.id, $0.local) }, uniquingKeysWith: { a, _ in a }), links: links) }
+                return
+            }
             // No node hit — see if the tap landed on a link thread.
             var bestLink: (id: UUID, dist: CGFloat)?
             for (a, b) in links {
@@ -236,7 +252,71 @@ struct Avatar3DView: UIViewRepresentable {
                 let id = hypot(pa.x - p.x, pa.y - p.y) < hypot(pb.x - p.x, pb.y - p.y) ? a : b
                 if bestLink == nil || d < bestLink!.dist { bestLink = (id, d) }
             }
-            if let bestLink { onTapNode?(bestLink.id) }
+            if let bestLink { focus(bestLink.id, positions: Dictionary(nodeHitTargets.map { ($0.id, $0.local) }, uniquingKeysWith: { a, _ in a }), links: links); return }
+            clearFocus()   // tapped empty space → clear the spotlight
+        }
+
+        /// Spotlight one node: dim the whole connectome and draw a bright overlay of the node,
+        /// its directly-connected neighbours, and the links between them (in the connectome's
+        /// own space, so it drifts along with it).
+        func focus(_ id: UUID, positions: [UUID: SCNVector3], links: [(UUID, UUID)]) {
+            guard let connectome = connectomeNode, let center = positions[id] else { return }
+            clearHighlight()
+            focusedNode = id
+            var neighbors = Set<UUID>()
+            for (a, b) in links {
+                if a == id { neighbors.insert(b) } else if b == id { neighbors.insert(a) }
+            }
+            // Dim everything currently in the connectome (nodes, links, dust).
+            dimmed = connectome.childNodes
+            for c in dimmed { c.opacity = 0.14 }
+            let overlay = SCNNode()
+            func brightDot(_ p: SCNVector3, _ r: CGFloat, _ color: UIColor) {
+                let s = SCNSphere(radius: r); s.segmentCount = 12
+                let m = SCNMaterial(); m.lightingModel = .constant
+                m.diffuse.contents = color; m.emission.contents = color; m.emission.intensity = 1
+                m.writesToDepthBuffer = false; s.materials = [m]
+                let n = SCNNode(geometry: s); n.position = p; n.renderingOrder = 30
+                overlay.addChildNode(n)
+            }
+            func brightThread(_ a: SCNVector3, _ b: SCNVector3) {
+                let dx = Double(b.x - a.x), dy = Double(b.y - a.y), dz = Double(b.z - a.z)
+                let d = (dx * dx + dy * dy + dz * dz).squareRoot()
+                guard d > 1e-5 else { return }
+                let cyl = SCNCylinder(radius: 0.004, height: CGFloat(d)); cyl.radialSegmentCount = 6
+                let m = SCNMaterial(); m.lightingModel = .constant
+                let col = UIColor(red: 0.7, green: 0.9, blue: 1.0, alpha: 1)
+                m.diffuse.contents = col; m.emission.contents = col; m.emission.intensity = 0.9
+                m.writesToDepthBuffer = false; cyl.materials = [m]
+                let n = SCNNode(geometry: cyl)
+                n.position = SCNVector3((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2)
+                n.look(at: b, up: SCNVector3(0, 1, 0), localFront: SCNVector3(0, 1, 0))
+                n.renderingOrder = 29
+                overlay.addChildNode(n)
+            }
+            for nb in neighbors {
+                if let np = positions[nb] { brightThread(center, np); brightDot(np, 0.03, UIColor(white: 0.96, alpha: 1)) }
+            }
+            brightDot(center, 0.05, .white)   // the focused node, largest & brightest
+            connectome.addChildNode(overlay)
+            highlightOverlay = overlay
+            onFocus?(nodeName[id])
+        }
+
+        func clearFocus() {
+            guard focusedNode != nil else { return }
+            focusedNode = nil
+            clearHighlight()
+            onFocus?(nil)
+        }
+
+        /// Reset focus refs without a callback — used when the whole scene is rebuilt.
+        func resetFocusState() { focusedNode = nil; highlightOverlay = nil; dimmed = [] }
+
+        private func clearHighlight() {
+            highlightOverlay?.removeFromParentNode(); highlightOverlay = nil
+            for c in dimmed { c.opacity = 1 }
+            dimmed = []
         }
 
         /// Shortest distance from a point to a line segment, in screen space.
@@ -937,10 +1017,13 @@ struct Avatar3DView: UIViewRepresentable {
                 v.pointOfView?.camera?.orthographicScale = Self.baseOrtho / max(0.1, builder.zoom)
                 coordinator.nodeHitTargets = built.hits
                 coordinator.labelTargets = built.labels
+                coordinator.nodeName = Dictionary(built.labels.map { ($0.id, $0.text) }, uniquingKeysWith: { a, _ in a })
                 coordinator.connectomeNode = built.connectome
                 coordinator.bodyFloatNode = built.body
                 coordinator.builtMaturity = builder.maturity
                 coordinator.lastNodeScale = -1   // force a re-thin of link threads for the new scene
+                coordinator.resetFocusState()    // old scene's highlight refs are gone
+                builder.onFocus?(nil)
             }
         }
     }
