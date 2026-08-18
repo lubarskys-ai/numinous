@@ -1,5 +1,6 @@
 import SwiftUI
 import MapKit
+import UIKit
 import NuminousCore
 
 /// A map of where your life happened: every note place that has coordinates, plotted
@@ -39,6 +40,8 @@ struct MapView: View {
     @State private var searchResultName: String?      // the resolved place/business name
     @State private var searching = false
     @State private var searchFailed = false
+    @State private var locating = false
+    @State private var locationDenied = false
 
     private struct NoteRef: Identifiable { let id: UUID }
 
@@ -121,6 +124,7 @@ struct MapView: View {
                     filterBar(count: currentPins.count)
                 }
             }
+            .overlay(alignment: .bottomLeading) { locateButton.padding(.leading, 14).padding(.bottom, 30) }
             .overlay { if currentPins.isEmpty && searchResult == nil { emptyState } }
             .navigationTitle("Map")
             .navigationBarTitleDisplayMode(.inline)
@@ -136,6 +140,12 @@ struct MapView: View {
             .alert("Couldn’t find that place", isPresented: $searchFailed) {
                 Button("OK", role: .cancel) {}
             } message: { Text("No location matched “\(searchText)”. Try a city, address, or landmark.") }
+            .alert("Location is off", isPresented: $locationDenied) {
+                Button("Open Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("Enable Location for Numinous in Settings to center the map on where you are.") }
         }
     }
 
@@ -206,6 +216,39 @@ struct MapView: View {
     }
 
     private func clearSearch() { searchText = ""; searchResult = nil; searchResultName = nil }
+
+    // MARK: - Locate me
+
+    /// A prominent "center on where I am" button (bottom-leading, clear of the top filter
+    /// bars and the floating companion at bottom-trailing). Complements Apple's small
+    /// MapUserLocationButton, which the overlay bars can hide.
+    private var locateButton: some View {
+        Button {
+            Task { await centerOnUser() }
+        } label: {
+            Image(systemName: locating ? "location.fill" : "location")
+                .font(.headline)
+                .frame(width: 44, height: 44)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().strokeBorder(.secondary.opacity(0.2)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Center on my location")
+    }
+
+    /// Ask for location (prompting once if needed), then fly the map to where you are.
+    private func centerOnUser() async {
+        locating = true
+        defer { locating = false }
+        guard let c = await locator.currentCoordinate() else {
+            if !locator.isAuthorized { locationDenied = true }
+            return
+        }
+        withAnimation(.easeInOut(duration: 0.4)) {
+            position = .region(MKCoordinateRegion(center: c,
+                                                  span: MKCoordinateSpan(latitudeDelta: 0.03, longitudeDelta: 0.03)))
+        }
+    }
 
     private func runSearch() async {
         let q = searchText.trimmingCharacters(in: .whitespaces)
