@@ -77,7 +77,8 @@ struct MapView: View {
             visible = (0..<Self.markerCap).map { visible[Int(Double($0) * step)] }
         }
         return visible.map { mp in
-            Pin(id: mp.id, noteID: mp.noteID, title: Self.pinLabel(title: mp.title, placeName: mp.placeName),
+            Pin(id: mp.id, noteID: mp.noteID,
+                title: Self.pinLabel(title: mp.title, placeName: mp.placeName, folderName: mp.folderName),
                 coordinate: CLLocationCoordinate2D(latitude: mp.latitude, longitude: mp.longitude),
                 color: model.axis(id: mp.axisID)?.color ?? .red)
         }
@@ -85,16 +86,19 @@ struct MapView: View {
 
     private static let markerCap = 200
 
-    /// The name to show on a pin — the business/venue, not a city or a diary date.
-    /// A stored place name from a POI search is a clean business name ("Blue Bottle Coffee");
-    /// one from a GPS reverse-geocode is an address / "City, State" form (it has a comma).
-    /// So: prefer the place name when it's a clean business name; when it's the address form,
-    /// use the note's own name (which the user filed under the business). A diary entry
-    /// (named by date) always shows the place name, never its date.
-    static func pinLabel(title: String, placeName: String) -> String {
-        if placeName.isEmpty { return title }
-        if AppModel.isDateTitled(title) { return placeName }
-        return placeName.contains(",") ? title : placeName
+    /// The name to show on a pin.
+    /// - A diary entry (named by a date) shows WHERE it happened, not the date.
+    /// - A place-type note (restaurant/travel/location) shows the venue: a clean business
+    ///   name from a POI search, else the note's own name when the stored place is an
+    ///   address / "City, State" form (has a comma).
+    /// - Everything else — a PERSON, an idea — shows its OWN name, never a geocoded city or
+    ///   region. (This is what stopped a note on "Troy Dickman" reading "Virginia".)
+    static func pinLabel(title: String, placeName: String, folderName: String) -> String {
+        if AppModel.isDateTitled(title) { return placeName.isEmpty ? title : placeName }
+        if AppModel.isPlaceLikeFolder(folderName), !placeName.isEmpty, !placeName.contains(",") {
+            return placeName
+        }
+        return title
     }
 
     private func folderMatches(_ folderName: String) -> Bool {
