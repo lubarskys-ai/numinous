@@ -387,7 +387,7 @@ struct Avatar3DView: UIViewRepresentable {
         let maxRegion = regionKeys.map { regionMaturity($0) }.max() ?? 0
         var bodySamples: [SCNVector3] = []
         if let loaded = GLTFBody.load(color: color, growth: growth, regionMaturity: regionMaturity) {
-            if maxRegion > 0.4 { bodyFloat.addChildNode(loaded.node) }   // no solid body until a region truly forms
+            if maxRegion > 0.62 { bodyFloat.addChildNode(loaded.node) }   // solid body only LATE — organs form first
             bodySamples = loaded.samples
         } else {
             part(ball(0.17), "mind",    v(-0.07, 0.80, 0), scale: v(0.85, 1.15, 1.0))
@@ -614,9 +614,35 @@ struct Avatar3DView: UIViewRepresentable {
             return parent
         }
 
-        // No solid organ meshes: the organs are suggested purely by where the connected
-        // nodes coalesce (organSample places each axis's linked notes into its organ shape)
-        // and the threads between them. The graph itself is the body.
+        // ── Organs: the developmental stage BETWEEN the loose graph and the solid body.
+        // Each axis's organ mesh swells in as that region matures (grey → axis-color by
+        // growth), glows while it's the leading edge of growth, then dissolves as the
+        // sculpted body takes over — so the avatar visibly forms organ-by-organ, not all
+        // at once. Nodes still cluster inside each organ (organSample), so the mesh and the
+        // connectome read as one thing.
+        let organAxes = ["mind", "meaning", "heart", "spirit", "gut"]
+        for axisKey in organAxes {
+            let mr = max(0, min(1, regionMaturity(axisKey)))
+            let organIn = smoothstep(0.12, 0.5, mr)     // materialize across the mid band
+            let organOut = smoothstep(0.62, 0.95, mr)   // then give way to the solid body
+            let alpha = organIn * (1 - organOut)
+            guard alpha > 0.02 else { continue }
+            let g = min(1, max(0, growth(axisKey)))
+            let m = SCNMaterial()
+            m.lightingModel = .physicallyBased
+            m.diffuse.contents = blend(greyBase, color(axisKey), g * 0.85).withAlphaComponent(CGFloat(0.4 * alpha))
+            m.emission.contents = color(axisKey)
+            m.emission.intensity = CGFloat((0.12 + 0.45 * g) * alpha)
+            m.roughness.contents = 0.55
+            m.transparency = CGFloat(alpha)
+            m.writesToDepthBuffer = false
+            m.isDoubleSided = true
+            let organ = organNode(axisKey, axisKey == "spirit" ? 0.10 : 0.14, m)
+            let c = region(axisKey)
+            organ.position = v(c.0, c.1, c.2)
+            organ.renderingOrder = 2
+            bodyFloat.addChildNode(organ)
+        }
 
         // ── Force-directed graph layout (Obsidian-style). Run Fruchterman–Reingold
         // only on the LINKED nodes (fast even with thousands of files), then scatter
@@ -632,7 +658,7 @@ struct Avatar3DView: UIViewRepresentable {
             fx[id] = 1.2 * cos(a) * sin(b); fy[id] = 1.2 * cos(b); fz[id] = 1.2 * sin(a) * sin(b)
         }
         if fdIds.count > 1 {
-            let k = 0.62   // shorter spring length → tighter clusters, shorter links
+            let k = 0.95   // spring length → looser clusters, more breathing room between nodes
             var temp = 0.5
             let iters = fdIds.count > 800 ? 18 : (fdIds.count > 400 ? 32 : 80)
             for _ in 0..<iters {
@@ -670,7 +696,7 @@ struct Avatar3DView: UIViewRepresentable {
             let cz = fdIds.map { fz[$0]! }.reduce(0, +) / n
             var maxR = 0.01
             for id in fdIds { maxR = max(maxR, ((fx[id]! - cx) * (fx[id]! - cx) + (fy[id]! - cy) * (fy[id]! - cy) + (fz[id]! - cz) * (fz[id]! - cz)).squareRoot()) }
-            let sc = 1.4 / maxR   // more compact groupings — a cluster shouldn't fill the screen
+            let sc = 2.7 / maxR   // spread the whole web out so the connectome isn't a tight knot
             for id in fdIds { fx[id] = (fx[id]! - cx) * sc; fy[id] = (fy[id]! - cy) * sc; fz[id] = (fz[id]! - cz) * sc }
         }
         // Unlinked files sit on a surrounding shell (fibonacci sphere).
@@ -740,7 +766,11 @@ struct Avatar3DView: UIViewRepresentable {
                     // graph is diffuse stardust, and organs (then a whole body) emerge slowly,
                     // each axis at its own pace: a rich axis solidifies while a sparse one
                     // stays ethereal and spread out.
-                    let converge = smoothstep(0.05, 0.9, regionMaturity(axisKey))
+                    // Pull toward the organ shape as the axis matures, but only PARTWAY —
+                    // the nodes keep breathing room so the connectome stays a spread web
+                    // rather than collapsing into a tight knot. The translucent organ mesh
+                    // (added below) supplies the actual organ silhouette.
+                    let converge = smoothstep(0.05, 0.9, regionMaturity(axisKey)) * 0.6
                     p = lerpV(graphPos(gn.id), organSample(axisKey, i, n), converge)
                 } else {
                     p = graphPos(gn.id)   // the surrounding shell — loose, unintegrated

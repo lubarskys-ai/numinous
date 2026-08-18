@@ -79,7 +79,7 @@ final class AppModel: ObservableObject {
     /// Counted connections touching one axis needed for that body region to fully
     /// form. Deliberately high — the avatar should spend a long time as stardust and
     /// only become a solid human form after a *lot* of connection.
-    static let maturityFullPerAxis = 350.0
+    static let maturityFullPerAxis = 480.0
 
     /// Per-axis maturity 0→1 — how *formed* that body region is, from the counted
     /// connections touching it. Regions grow independently: a neglected axis stays
