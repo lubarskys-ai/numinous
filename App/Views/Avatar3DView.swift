@@ -385,11 +385,20 @@ struct Avatar3DView: UIViewRepresentable {
         // rates and ungrown ones stay ethereal.
         let regionKeys = ["mind", "meaning", "heart", "spirit", "gut", "body"]
         let maxRegion = regionKeys.map { regionMaturity($0) }.max() ?? 0
+        let dominantAxis = regionKeys.max { growth($0) < growth($1) } ?? "spirit"
         var bodySamples: [SCNVector3] = []
+        // Prefer the RIGGED, animated body (Mixamo → USDZ) once the form emerges — it keeps
+        // its skeleton + breathing/idle animation. Falls back to the static sculpted mesh.
+        var usedRigged = false
+        if maxRegion > 0.62,
+           let rigged = RiggedBody.load(dominantColor: color(dominantAxis), growth01: growth(dominantAxis), maturity: matur) {
+            bodyFloat.addChildNode(rigged)
+            usedRigged = true
+        }
         if let loaded = GLTFBody.load(color: color, growth: growth, regionMaturity: regionMaturity) {
-            if maxRegion > 0.62 { bodyFloat.addChildNode(loaded.node) }   // solid body only LATE — organs form first
-            bodySamples = loaded.samples
-        } else {
+            if maxRegion > 0.62 && !usedRigged { bodyFloat.addChildNode(loaded.node) }  // solid body only LATE
+            bodySamples = loaded.samples   // static mesh surface points feed the stardust gather
+        } else if !usedRigged {
             part(ball(0.17), "mind",    v(-0.07, 0.80, 0), scale: v(0.85, 1.15, 1.0))
             part(ball(0.17), "meaning", v( 0.07, 0.80, 0), scale: v(0.85, 1.15, 1.0))
             part(limb(0.065, 0.16), "body", v(0, 0.60, 0))
