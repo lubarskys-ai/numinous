@@ -42,6 +42,7 @@ struct MapView: View {
     @State private var searchFailed = false
     @State private var locating = false
     @State private var locationDenied = false
+    @State private var visibleRegion: MKCoordinateRegion?
 
     private struct NoteRef: Identifiable { let id: UUID }
 
@@ -53,16 +54,36 @@ struct MapView: View {
         let color: Color
     }
 
-    /// Plottable places matching the current filters — built from the model's cached
-    /// `mappablePlaces`, so this no longer rescans every note on every render.
-    private var pins: [Pin] {
-        model.mappablePlaces.compactMap { mp in
-            guard folderMatches(mp.folderName), period.contains(mp.date) else { return nil }
-            return Pin(id: mp.id, noteID: mp.noteID, title: Self.pinLabel(title: mp.title, placeName: mp.placeName),
-                       coordinate: CLLocationCoordinate2D(latitude: mp.latitude, longitude: mp.longitude),
-                       color: model.axis(id: mp.axisID)?.color ?? .red)
+    /// Places matching the folder/time filters (from the cached `mappablePlaces`).
+    private var matchingPlaces: [AppModel.MappablePlace] {
+        model.mappablePlaces.filter { folderMatches($0.folderName) && period.contains($0.date) }
+    }
+
+    /// The markers to actually draw: culled to what's on-screen (plus a margin) and hard-
+    /// capped, so the Map never renders thousands of markers at once. Rendering the whole set
+    /// made panning glitchy and made Apple's Map drop overlapping labels (the missing company
+    /// names). Off-screen pins reappear as you move; a very dense view subsamples evenly.
+    private func pins(from places: [AppModel.MappablePlace]) -> [Pin] {
+        var visible = places
+        if let r = visibleRegion {
+            let latPad = r.span.latitudeDelta * 0.65 + 0.001
+            let lonPad = r.span.longitudeDelta * 0.65 + 0.001
+            visible = places.filter {
+                abs($0.latitude - r.center.latitude) <= latPad && abs($0.longitude - r.center.longitude) <= lonPad
+            }
+        }
+        if visible.count > Self.markerCap {
+            let step = Double(visible.count) / Double(Self.markerCap)
+            visible = (0..<Self.markerCap).map { visible[Int(Double($0) * step)] }
+        }
+        return visible.map { mp in
+            Pin(id: mp.id, noteID: mp.noteID, title: Self.pinLabel(title: mp.title, placeName: mp.placeName),
+                coordinate: CLLocationCoordinate2D(latitude: mp.latitude, longitude: mp.longitude),
+                color: model.axis(id: mp.axisID)?.color ?? .red)
         }
     }
+
+    private static let markerCap = 200
 
     /// The name to show on a pin — the business/venue, not a city or a diary date.
     /// A stored place name from a POI search is a clean business name ("Blue Bottle Coffee");
@@ -93,7 +114,8 @@ struct MapView: View {
     }
 
     var body: some View {
-        let currentPins = pins
+        let matching = matchingPlaces
+        let currentPins = pins(from: matching)
         NavigationStack {
             Map(position: $position, selection: $selection) {
                 UserAnnotation()            // the blue "you are here" dot (when authorized)
@@ -112,6 +134,7 @@ struct MapView: View {
                 .restaurant, .cafe, .bakery, .brewery, .winery, .nightlife,
                 .hotel, .store, .park, .museum, .movieTheater, .fitnessCenter])))
             .mapControls { MapUserLocationButton(); MapCompass() }
+            .onMapCameraChange(frequency: .onEnd) { ctx in visibleRegion = ctx.region }
             .onChange(of: selection) { _, id in
                 guard let id, let mp = model.mappablePlaces.first(where: { $0.id == id }) else { return }
                 openNote = NoteRef(id: mp.noteID)
@@ -121,11 +144,11 @@ struct MapView: View {
                 VStack(spacing: 8) {
                     searchBar
                     if searchResult != nil { saveSearchedBar }
-                    filterBar(count: currentPins.count)
+                    filterBar(count: matching.count)
                 }
             }
             .overlay(alignment: .bottomLeading) { locateButton.padding(.leading, 14).padding(.bottom, 30) }
-            .overlay { if currentPins.isEmpty && searchResult == nil { emptyState } }
+            .overlay { if matching.isEmpty && searchResult == nil { emptyState } }
             .navigationTitle("Map")
             .navigationBarTitleDisplayMode(.inline)
             .sheet(item: $openNote) { ref in
