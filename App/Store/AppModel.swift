@@ -2345,8 +2345,11 @@ final class AppModel: ObservableObject {
             addPlace(id, name: hit.name, latitude: hit.latitude, longitude: hit.longitude)
         } else if let c = await LocationService.coordinate(for: note.displayName, near: near) {
             addPlace(id, name: note.displayName, latitude: c.latitude, longitude: c.longitude)
-        } else if autoLocator.isAuthorized, let p = await autoLocator.currentPlaceStructured() {
-            addPlace(id, name: p.name, latitude: p.latitude, longitude: p.longitude)
+        } else if autoLocator.isAuthorized, let c = await autoLocator.currentCoordinate() {
+            // Last resort — stamp the current GPS coordinate, but keep the note's OWN name as
+            // the place (the business you filed it under), not the reverse-geocoded "City,
+            // State", so the map pin stays labeled with the business.
+            addPlace(id, name: note.displayName, latitude: c.latitude, longitude: c.longitude)
         }
     }
 
