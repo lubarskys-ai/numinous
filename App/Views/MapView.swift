@@ -55,22 +55,13 @@ struct MapView: View {
     private var pins: [Pin] {
         model.mappablePlaces.compactMap { mp in
             guard folderMatches(mp.folderName), period.contains(mp.date) else { return nil }
-            return Pin(id: mp.id, noteID: mp.noteID, title: Self.pinLabel(title: mp.title, placeName: mp.placeName),
+            // Label with the physical place: a place note (e.g. "Blue Bottle") shows its own
+            // name; only a diary entry (named by date) falls back to the place's city/name.
+            let label = AppModel.isDateTitled(mp.title) ? mp.placeName : mp.title
+            return Pin(id: mp.id, noteID: mp.noteID, title: label,
                        coordinate: CLLocationCoordinate2D(latitude: mp.latitude, longitude: mp.longitude),
                        color: model.axis(id: mp.axisID)?.color ?? .red)
         }
-    }
-
-    /// The name to show on a pin — the business/venue, not a city or a diary date.
-    /// A stored place name from a POI search is a clean business name ("Blue Bottle Coffee");
-    /// one from a GPS reverse-geocode is an address / "City, State" form (it has a comma).
-    /// So: prefer the place name when it's a clean business name; when it's the address form,
-    /// use the note's own name (which the user filed under the business). A diary entry
-    /// (named by date) always shows the place name, never its date.
-    static func pinLabel(title: String, placeName: String) -> String {
-        if placeName.isEmpty { return title }
-        if AppModel.isDateTitled(title) { return placeName }
-        return placeName.contains(",") ? title : placeName
     }
 
     private func folderMatches(_ folderName: String) -> Bool {
