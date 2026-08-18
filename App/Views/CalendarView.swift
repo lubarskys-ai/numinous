@@ -47,9 +47,9 @@ struct CalendarView: View {
                         UIPasteboard.general.string = diarySnippet(event)
                         toast = "Copied — paste it into a diary entry."
                     }
-                    Button("Add to \(Self.diaryDayLabel(event.start)) diary") {
-                        model.appendToDiary(on: event.start, diarySnippet(event))
-                        toast = "Added to \(Self.diaryDayLabel(event.start)) diary."
+                    Button("Add to today's diary") {
+                        model.appendToTodayDiary(diarySnippet(event))
+                        toast = "Added to today's diary."
                     }
                     Button("Create a note", role: .none) { open(event) }
                     Button("Cancel", role: .cancel) {}
@@ -197,14 +197,6 @@ struct CalendarView: View {
         if cal.isDateInTomorrow(date) { return "Tomorrow" }
         let f = DateFormatter(); f.dateFormat = "EEEE, MMM d"
         return f.string(from: date)
-    }
-
-    /// Possessive day label for the diary button — "today's" for today, else "Aug 12's" —
-    /// so an event is filed under its OWN date's diary, not just today's.
-    private static func diaryDayLabel(_ date: Date) -> String {
-        if Calendar.current.isDateInToday(date) { return "today's" }
-        let f = DateFormatter(); f.dateFormat = "MMM d"
-        return f.string(from: date) + "'s"
     }
 
     private static func timeLabel(_ event: CalendarEvent) -> String {

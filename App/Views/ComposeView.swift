@@ -24,9 +24,6 @@ struct ComposeView: View {
 
     @State private var text = ""
     @State private var intensity = 3
-    /// The date this note is filed under — defaults to now, but editable so a note can be
-    /// backdated (or post-dated) when you create it. Applied on save for new notes.
-    @State private var noteDate = Date()
     @State private var location = ""
     /// Coordinates captured when the location came from GPS, so the saved place is
     /// map-ready (not a hollow, coordinate-less pin). Cleared when you type a place.
@@ -88,7 +85,6 @@ struct ComposeView: View {
         _category = State(initialValue: note.folderName.isEmpty ? "notes" : note.folderName)
         _text = State(initialValue: note.body)
         _intensity = State(initialValue: note.intensity)
-        _noteDate = State(initialValue: note.date)
         _location = State(initialValue: note.location ?? "")
         _existingNoteID = State(initialValue: note.id)
         _diaryResolved = State(initialValue: true)   // nothing to pull forward
@@ -197,10 +193,6 @@ struct ComposeView: View {
                 Text(categoryLabel).fontWeight(.medium)
                 Image(systemName: "chevron.down").font(.caption2)
                 Spacer()
-                if !diaryMode {
-                    Label(noteDate.formatted(.dateTime.month(.abbreviated).day()), systemImage: "calendar")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
                 if !location.isEmpty { Label(location, systemImage: "mappin.and.ellipse").font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                 Text("⚡\(intensity)").font(.caption).foregroundStyle(.tertiary)
             }
@@ -298,11 +290,6 @@ struct ComposeView: View {
 
     private var detailsMenu: some View {
         Menu {
-            // Date this note is filed under — editable so you can backdate an entry.
-            // (Diary mode writes into today's existing entry, so it's fixed there.)
-            if !diaryMode {
-                DatePicker("Date", selection: $noteDate, displayedComponents: .date)
-            }
             Picker("Intensity", selection: $intensity) {
                 Text("1 · faint").tag(1); Text("2 · light").tag(2); Text("3 · present").tag(3)
                 Text("4 · vivid").tag(4); Text("5 · profound").tag(5)
@@ -522,15 +509,10 @@ struct ComposeView: View {
             model.updateBody(existing, body: body)
             // Persist location edits too — updateBody alone left today's diary location stuck.
             model.updateLocation(existing, location: location.isEmpty ? nil : location)
-            // Honor a date change from the picker (diary mode leaves its date fixed).
-            if !diaryMode, let n = model.note(id: existing), n.date != noteDate { model.setNoteDate(existing, to: noteDate) }
             id = existing
         } else {
             id = model.createCapturedNote(body: body, folder: category, intensity: intensity,
                                           location: location.isEmpty ? nil : location)
-            // Apply the chosen date (defaults to now). setNoteDate also re-stamps the
-            // date-titled name so a backdated note sorts to the right day.
-            if !Calendar.current.isDate(noteDate, inSameDayAs: Date()) { model.setNoteDate(id, to: noteDate) }
         }
         attachCoordinates(to: id)
         return id
