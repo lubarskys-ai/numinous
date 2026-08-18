@@ -658,8 +658,14 @@ struct Avatar3DView: UIViewRepresentable {
             fx[id] = 1.2 * cos(a) * sin(b); fy[id] = 1.2 * cos(b); fz[id] = 1.2 * sin(a) * sin(b)
         }
         if fdIds.count > 1 {
-            let k = 0.95   // spring length → looser clusters, more breathing room between nodes
-            var temp = 0.5
+            // Decoupled forces so the graph reads as distinct constellations: a SHORT, strong
+            // spring pulls connected notes into tight, concentrated clusters (short links),
+            // while a stronger, long-range repulsion drives *separate* groups far apart —
+            // leaving generous empty space between clusters. Lower kSpring = tighter clusters;
+            // higher kRepel = more space between groups.
+            let kSpring = 0.08   // tight clusters / short links
+            let kRepel  = 1.30   // big gaps between separate groups
+            var temp = 0.6
             let iters = fdIds.count > 800 ? 18 : (fdIds.count > 400 ? 32 : 80)
             for _ in 0..<iters {
                 var dx = [UUID: Double](), dy = [UUID: Double](), dz = [UUID: Double]()
@@ -670,7 +676,7 @@ struct Avatar3DView: UIViewRepresentable {
                         var ex = fx[A]! - fx[B]!, ey = fy[A]! - fy[B]!, ez = fz[A]! - fz[B]!
                         var dist = (ex * ex + ey * ey + ez * ez).squareRoot()
                         if dist < 0.02 { ex += 0.02; dist = 0.02 }
-                        let rep = (k * k) / (dist * dist)
+                        let rep = (kRepel * kRepel) / (dist * dist)
                         dx[A, default: 0] += ex * rep; dy[A, default: 0] += ey * rep; dz[A, default: 0] += ez * rep
                         dx[B, default: 0] -= ex * rep; dy[B, default: 0] -= ey * rep; dz[B, default: 0] -= ez * rep
                     }
@@ -678,7 +684,7 @@ struct Avatar3DView: UIViewRepresentable {
                 for e in links where fx[e.a] != nil && fx[e.b] != nil {
                     let ex = fx[e.a]! - fx[e.b]!, ey = fy[e.a]! - fy[e.b]!, ez = fz[e.a]! - fz[e.b]!
                     let dist = max(0.02, (ex * ex + ey * ey + ez * ez).squareRoot())
-                    let att = dist / k
+                    let att = dist / kSpring
                     dx[e.a, default: 0] -= ex * att; dy[e.a, default: 0] -= ey * att; dz[e.a, default: 0] -= ez * att
                     dx[e.b, default: 0] += ex * att; dy[e.b, default: 0] += ey * att; dz[e.b, default: 0] += ez * att
                 }
@@ -696,7 +702,7 @@ struct Avatar3DView: UIViewRepresentable {
             let cz = fdIds.map { fz[$0]! }.reduce(0, +) / n
             var maxR = 0.01
             for id in fdIds { maxR = max(maxR, ((fx[id]! - cx) * (fx[id]! - cx) + (fy[id]! - cy) * (fy[id]! - cy) + (fz[id]! - cz) * (fz[id]! - cz)).squareRoot()) }
-            let sc = 2.7 / maxR   // spread the whole web out so the connectome isn't a tight knot
+            let sc = 3.0 / maxR   // overall size (clusters stay tight; the gaps between them scale up)
             for id in fdIds { fx[id] = (fx[id]! - cx) * sc; fy[id] = (fy[id]! - cy) * sc; fz[id] = (fz[id]! - cz) * sc }
         }
         // Unlinked files sit on a surrounding shell (fibonacci sphere).
@@ -705,7 +711,7 @@ struct Avatar3DView: UIViewRepresentable {
         for (i, id) in unlinked.enumerated() {
             let t = (Double(i) + 0.5) / Double(max(1, unlinked.count))
             let phi = acos(1 - 2 * t), theta = golden * Double(i)
-            fx[id] = 2.4 * sin(phi) * cos(theta); fy[id] = 2.4 * cos(phi); fz[id] = 2.4 * sin(phi) * sin(theta)
+            fx[id] = 3.5 * sin(phi) * cos(theta); fy[id] = 3.5 * cos(phi); fz[id] = 3.5 * sin(phi) * sin(theta)
         }
         func graphPos(_ id: UUID) -> SCNVector3 { v(fx[id] ?? 0, fy[id] ?? 0, fz[id] ?? 0) }
 
