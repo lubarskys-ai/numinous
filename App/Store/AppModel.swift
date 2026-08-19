@@ -987,6 +987,44 @@ final class AppModel: ObservableObject {
     /// and when you last engaged them (their note or the newest note that links them).
     struct PersonPlaces: Identifiable { let id: UUID; let name: String; let text: String; let lastContact: Date }
 
+    /// A person with a real coordinate, for GPS-distance reconnection.
+    struct PersonLocation: Identifiable { let id: UUID; let name: String; let latitude: Double; let longitude: Double; let lastContact: Date }
+
+    /// People who have a real coordinate — from a place on their OWN note, or a place they
+    /// link to (e.g. `[[places/Austin]]`). This is what makes distance-based "near me" work.
+    func peopleWithCoordinates() -> [PersonLocation] {
+        // Resolve place-note titles → coordinate, so a person's [[places/X]] link supplies one.
+        var placeCoord: [String: (Double, Double)] = [:]
+        for n in notes {
+            if let p = n.allPlaces.first(where: { $0.hasCoordinate }) {
+                placeCoord[Self.norm(n.title)] = (p.latitude!, p.longitude!)
+            }
+        }
+        var out: [PersonLocation] = []
+        for n in notes {
+            let f = Folder.normalize(n.folderName)
+            guard f == "people" || f == "contacts" else { continue }
+            var coord = n.allPlaces.first(where: { $0.hasCoordinate }).map { ($0.latitude!, $0.longitude!) }
+            if coord == nil { for t in n.linkTargets { if let c = placeCoord[Self.norm(t)] { coord = c; break } } }
+            guard let c = coord else { continue }
+            let lastContact = max(n.date, backlinks(to: n).map(\.date).max() ?? .distantPast)
+            out.append(PersonLocation(id: n.id, name: n.displayName, latitude: c.0, longitude: c.1, lastContact: lastContact))
+        }
+        return out
+    }
+
+    /// People within `km` of a coordinate, labeled with the actual distance, most-overdue first.
+    func peopleNear(latitude: Double, longitude: Double, withinKm km: Double = 40) -> [ReconnectPrompt] {
+        peopleWithCoordinates().compactMap { person -> ReconnectPrompt? in
+            let d = Self.distanceKm(latitude, longitude, person.latitude, person.longitude)
+            guard d <= km else { return nil }
+            let miles = d * 0.621371
+            let label = miles < 1 ? "Right here" : "\(Int(miles.rounded())) mi away"
+            return ReconnectPrompt(id: person.id, name: person.name, place: "", reason: label, lastContact: person.lastContact)
+        }
+        .sorted { $0.lastContact < $1.lastContact }
+    }
+
     /// Build the person→place-text index ONCE. A person matches a place only by their OWN
     /// note — its body and its location (so "South Carolina" written anywhere in Jay's own
     /// note is found). We deliberately do NOT pull in the location of other notes that link
@@ -1045,10 +1083,9 @@ final class AppModel: ObservableObject {
     /// it doesn't hit location on every view appearance.
     func nearbyOverduePrompt() async -> ReconnectPrompt? {
         guard Date().timeIntervalSince(lastNudgeCheck) > 3 * 3600 else { return nil }
-        guard autoLocator.isAuthorized, let region = await autoLocator.currentRegion() else { return nil }
+        guard autoLocator.isAuthorized, let c = await autoLocator.currentCoordinate() else { return nil }
         lastNudgeCheck = Date()
-        let matches = Self.matchPeople(peopleWithPlaces(), place: region,
-                                       cityReason: "You're nearby", stateReason: "Nearby")
+        let matches = peopleNear(latitude: c.latitude, longitude: c.longitude)   // real GPS distance
         let cal = Calendar.current
         let overdueCutoff = cal.date(byAdding: .day, value: -45, to: Date()) ?? .distantPast
         let nudged = (UserDefaults.standard.dictionary(forKey: Self.nudgeDatesKey) as? [String: Date]) ?? [:]

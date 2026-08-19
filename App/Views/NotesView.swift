@@ -460,26 +460,20 @@ struct ReconnectView: View {
     private func refreshLocation() async {
         loading = true; noFix = false; nearby = []
         if locator.isAuthorized {
-            let place = await locator.currentRegion()
-            if let place {
-                nearby = AppModel.matchPeople(placeIndex, place: place,
-                                              cityReason: "You're here now", stateReason: "Same state — nearby")
-            }
-            noFix = (place == nil)
+            if let c = await locator.currentCoordinate() {
+                nearby = model.peopleNear(latitude: c.latitude, longitude: c.longitude)   // real distance
+            } else { noFix = true }
         }
         loading = false
     }
 
     private func refresh() async {
         loading = true
-        placeIndex = model.peopleWithPlaces()   // build the match index once
+        placeIndex = model.peopleWithPlaces()   // for the typed city/state search below
         if locator.isAuthorized {
-            let place = await locator.currentRegion()   // City, State — with an internal timeout
-            if let place {
-                nearby = AppModel.matchPeople(placeIndex, place: place,
-                                              cityReason: "You're here now", stateReason: "Same state — nearby")
-            }
-            noFix = (place == nil)
+            if let c = await locator.currentCoordinate() {
+                nearby = model.peopleNear(latitude: c.latitude, longitude: c.longitude)   // real GPS distance
+            } else { noFix = true }
         }
         loading = false   // stop the spinner after the location step — calendar loads on its own
         if let events = try? await CalendarService.fetchEvents(daysBack: 0, daysForward: 120) {
