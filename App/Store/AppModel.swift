@@ -980,11 +980,12 @@ final class AppModel: ObservableObject {
         let name: String
         let place: String  // the place that matched
         let reason: String // "You're here now" / "Trip · Sep 3"
+        var lastContact: Date = .distantPast   // when you last engaged them — drives staleness
     }
 
-    /// A person and the lowercased text to match places against (their note's location +
-    /// body, plus the location of any note that links them).
-    struct PersonPlaces: Identifiable { let id: UUID; let name: String; let text: String }
+    /// A person, the lowercased text to match places against (their note's location + body),
+    /// and when you last engaged them (their note or the newest note that links them).
+    struct PersonPlaces: Identifiable { let id: UUID; let name: String; let text: String; let lastContact: Date }
 
     /// Build the person→place-text index ONCE. A person matches a place only by their OWN
     /// note — its body and its location (so "South Carolina" written anywhere in Jay's own
@@ -998,7 +999,11 @@ final class AppModel: ObservableObject {
             guard f == "people" || f == "contacts" else { continue }
             let placeNames = n.allPlaces.map(\.name).joined(separator: " ")
             let text = (n.body + " " + placeNames).lowercased()
-            out.append(PersonPlaces(id: n.id, name: n.displayName, text: text))
+            // Last time you were "in touch": their note's own date, or the newest note that
+            // links them (a diary entry, a call log, a reconnection) — whichever is later.
+            let lastLink = backlinks(to: n).map(\.date).max()
+            let lastContact = max(n.date, lastLink ?? .distantPast)
+            out.append(PersonPlaces(id: n.id, name: n.displayName, text: text, lastContact: lastContact))
         }
         return out
     }
@@ -1018,15 +1023,16 @@ final class AppModel: ObservableObject {
         for person in index {
             let t = person.text
             if let cityNeedle, t.contains(cityNeedle) {
-                cityHits.append(ReconnectPrompt(id: person.id, name: person.name, place: place, reason: cityReason))
+                cityHits.append(ReconnectPrompt(id: person.id, name: person.name, place: place, reason: cityReason, lastContact: person.lastContact))
             } else if (stateFull != nil && t.contains(stateFull!)) || (codeRe?.firstMatch(in: t, range: NSRange(t.startIndex..., in: t)) != nil) {
-                stateHits.append(ReconnectPrompt(id: person.id, name: person.name, place: place, reason: stateReason))
+                stateHits.append(ReconnectPrompt(id: person.id, name: person.name, place: place, reason: stateReason, lastContact: person.lastContact))
             } else if let rawNeedle, t.contains(rawNeedle) {
-                cityHits.append(ReconnectPrompt(id: person.id, name: person.name, place: place, reason: cityReason))
+                cityHits.append(ReconnectPrompt(id: person.id, name: person.name, place: place, reason: cityReason, lastContact: person.lastContact))
             }
         }
-        let byName: (ReconnectPrompt, ReconnectPrompt) -> Bool = { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        return cityHits.sorted(by: byName) + stateHits.sorted(by: byName)
+        // Most OVERDUE first (oldest contact) — the whole point is "near you AND out of touch".
+        let byStaleness: (ReconnectPrompt, ReconnectPrompt) -> Bool = { $0.lastContact < $1.lastContact }
+        return cityHits.sorted(by: byStaleness) + stateHits.sorted(by: byStaleness)
     }
 
     /// From upcoming calendar events with a location, who you know there.

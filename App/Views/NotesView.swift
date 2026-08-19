@@ -379,14 +379,29 @@ struct ReconnectView: View {
         }
     }
 
+    /// "6mo out of touch" / "2y out of touch" — only when it's genuinely been a while, so a
+    /// recently-contacted nearby person isn't flagged as overdue.
+    private static func sinceLabel(_ date: Date) -> String? {
+        let days = Calendar.current.dateComponents([.day], from: date, to: Date()).day ?? 0
+        guard days >= 45 else { return nil }
+        if days >= 365 { return "\(days / 365)y out of touch" }
+        return "\(days / 30)mo out of touch"
+    }
+
     private func promptRow(_ p: AppModel.ReconnectPrompt) -> some View {
         Button { openNote = Wrapped(id: p.id) } label: {
             HStack(spacing: 11) {
                 Circle().fill(Color.pink.opacity(0.8)).frame(width: 9, height: 9)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(p.name).foregroundStyle(.primary)
-                    Text("\(p.reason)\(p.reason.isEmpty ? "" : " · ")\(p.place)")
-                        .font(.caption2).foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Text("\(p.reason)\(p.reason.isEmpty ? "" : " · ")\(p.place)")
+                            .foregroundStyle(.secondary)
+                        if let stale = Self.sinceLabel(p.lastContact) {
+                            Text("· \(stale)").foregroundStyle(.pink)   // near AND overdue
+                        }
+                    }
+                    .font(.caption2)
                 }
                 Spacer()
                 Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
