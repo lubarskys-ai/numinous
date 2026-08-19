@@ -139,6 +139,7 @@ struct Avatar3DView: UIViewRepresentable {
         // Focus mode: tap a node to spotlight just its connections (dim the rest); tap it
         // again to open the note; tap empty space to clear.
         var focusedNode: UUID?
+        var focusIDs: Set<UUID> = []   // the focused node + its neighbours (for scoped labels)
         var nodeName: [UUID: String] = [:]
         var onFocus: ((String?) -> Void)?
         private var highlightOverlay: SCNNode?
@@ -150,19 +151,33 @@ struct Avatar3DView: UIViewRepresentable {
         /// screen centre and hand a small set to the 2D SwiftUI overlay. Labels are drawn in
         /// SwiftUI, never as SceneKit text, so they add no scene memory.
         func renderer(_ renderer: SCNSceneRenderer, didRenderScene scene: SCNScene, atTime time: TimeInterval) {
-            guard let view, zoom > 6, viewSize.width > 1 else {
+            // Labels show either (a) in focus mode — ONLY the focused node + its neighbours, at
+            // any zoom — or (b) otherwise, the names nearest screen centre while zoomed in.
+            guard let view, viewSize.width > 1, (focusedNode != nil || zoom > 6) else {
                 if !labelsEmpty { labelsEmpty = true; DispatchQueue.main.async { self.onLabels?([]) } }
                 return
             }
             guard time - lastLabelTime > 0.11 else { return }   // ~9 Hz is plenty for labels
             lastLabelTime = time
             let sz = viewSize
+            let connectome = connectomeNode?.presentation
+            if focusedNode != nil {
+                var out: [NodeLabel] = []
+                for (id, local, text) in labelTargets where focusIDs.contains(id) {
+                    let wp = connectome?.convertPosition(local, to: nil) ?? local
+                    let s = view.projectPoint(wp)
+                    guard s.z > 0, s.z < 1 else { continue }
+                    out.append(NodeLabel(id: id, text: text, point: CGPoint(x: CGFloat(s.x), y: CGFloat(s.y))))
+                }
+                labelsEmpty = out.isEmpty
+                DispatchQueue.main.async { self.onLabels?(out) }
+                return
+            }
             let center = CGPoint(x: sz.width / 2, y: sz.height / 2)
             // Only label nodes actually near the middle of what you're looking at, so a node
             // you've zoomed past (now off to the edge or off-screen) drops its label instead
             // of lingering. The window tightens the further you zoom in.
             let maxR = min(sz.width, sz.height) * (zoom >= 14 ? 0.28 : 0.4)
-            let connectome = connectomeNode?.presentation
             var cands: [(NodeLabel, CGFloat)] = []
             for (id, local, text) in labelTargets {
                 let wp = connectome?.convertPosition(local, to: nil) ?? local
@@ -267,6 +282,7 @@ struct Avatar3DView: UIViewRepresentable {
             for (a, b) in links {
                 if a == id { neighbors.insert(b) } else if b == id { neighbors.insert(a) }
             }
+            focusIDs = neighbors.union([id])   // label only these while focused
             // Dim everything currently in the connectome (nodes, links, dust).
             dimmed = connectome.childNodes
             for c in dimmed { c.opacity = 0.14 }
@@ -305,13 +321,13 @@ struct Avatar3DView: UIViewRepresentable {
 
         func clearFocus() {
             guard focusedNode != nil else { return }
-            focusedNode = nil
+            focusedNode = nil; focusIDs = []
             clearHighlight()
             onFocus?(nil)
         }
 
         /// Reset focus refs without a callback — used when the whole scene is rebuilt.
-        func resetFocusState() { focusedNode = nil; highlightOverlay = nil; dimmed = [] }
+        func resetFocusState() { focusedNode = nil; focusIDs = []; highlightOverlay = nil; dimmed = [] }
 
         private func clearHighlight() {
             highlightOverlay?.removeFromParentNode(); highlightOverlay = nil
