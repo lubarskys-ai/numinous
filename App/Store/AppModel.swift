@@ -1035,6 +1035,45 @@ final class AppModel: ObservableObject {
         return cityHits.sorted(by: byStaleness) + stateHits.sorted(by: byStaleness)
     }
 
+    private var lastNudgeCheck = Date.distantPast
+    private static let nudgeDatesKey = "reconnect_nudge_dates"
+
+    /// The most overdue friend near you right now — for a gentle nudge on the Notes tab (never
+    /// a background push; that would fight the app's quiet ethos). nil unless location is
+    /// granted, you're somewhere that matches a person's note, they're 45+ days out of touch,
+    /// and they weren't nudged in the last few days. GPS-throttled to ~once every 3 hours so
+    /// it doesn't hit location on every view appearance.
+    func nearbyOverduePrompt() async -> ReconnectPrompt? {
+        guard Date().timeIntervalSince(lastNudgeCheck) > 3 * 3600 else { return nil }
+        guard autoLocator.isAuthorized, let region = await autoLocator.currentRegion() else { return nil }
+        lastNudgeCheck = Date()
+        let matches = Self.matchPeople(peopleWithPlaces(), place: region,
+                                       cityReason: "You're nearby", stateReason: "Nearby")
+        let cal = Calendar.current
+        let overdueCutoff = cal.date(byAdding: .day, value: -45, to: Date()) ?? .distantPast
+        let nudged = (UserDefaults.standard.dictionary(forKey: Self.nudgeDatesKey) as? [String: Date]) ?? [:]
+        let quietUntil = cal.date(byAdding: .day, value: -4, to: Date()) ?? .distantPast
+        return matches.first {   // already sorted most-overdue first
+            $0.lastContact < overdueCutoff && (nudged[$0.id.uuidString] ?? .distantPast) < quietUntil
+        }
+    }
+
+    /// "6mo/2y out of touch" — nil until it's genuinely been a while (45+ days), so a
+    /// recently-seen person isn't flagged as overdue. Shared by the Reconnect list + nudge.
+    static func outOfTouchLabel(_ date: Date) -> String? {
+        let days = Calendar.current.dateComponents([.day], from: date, to: Date()).day ?? 0
+        guard days >= 45 else { return nil }
+        if days >= 365 { return "\(days / 365)y out of touch" }
+        return "\(days / 30)mo out of touch"
+    }
+
+    /// Remember we nudged (or you dismissed) this person, so we don't nag again for a few days.
+    func recordNudged(_ id: UUID) {
+        var dates = (UserDefaults.standard.dictionary(forKey: Self.nudgeDatesKey) as? [String: Date]) ?? [:]
+        dates[id.uuidString] = Date()
+        UserDefaults.standard.set(dates, forKey: Self.nudgeDatesKey)
+    }
+
     /// From upcoming calendar events with a location, who you know there.
     func tripPrompts(from events: [CalendarEvent]) -> [ReconnectPrompt] {
         let index = peopleWithPlaces()

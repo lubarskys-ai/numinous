@@ -7,6 +7,7 @@ import NuminousCore
 /// time/flow view of your life; the Folders tab is the structural view.
 struct NotesView: View {
     @EnvironmentObject var model: AppModel
+    @Environment(\.scenePhase) private var scenePhase
     @State private var searchText = ""
     @State private var debouncedQuery = ""
     @State private var categoryFilter: String?
@@ -14,6 +15,7 @@ struct NotesView: View {
     @State private var showReconnect = false
     @State private var importMessage: String?
     @State private var path: [UUID] = []
+    @State private var nudge: AppModel.ReconnectPrompt?   // gentle "near an overdue friend" prompt
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -68,11 +70,39 @@ struct NotesView: View {
                 .alert("Contacts", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
                     Button("OK", role: .cancel) {}
                 } message: { Text(importMessage ?? "") }
+                .task { await refreshNudge() }
+                .onChange(of: scenePhase) { if $0 == .active { Task { await refreshNudge() } } }
         }
+    }
+
+    /// Ask (gently, throttled) whether an overdue friend is near you right now.
+    private func refreshNudge() async {
+        guard nudge == nil else { return }
+        if let p = await model.nearbyOverduePrompt() { withAnimation { nudge = p } }
+    }
+
+    private func dismissNudge(_ p: AppModel.ReconnectPrompt) {
+        model.recordNudged(p.id)
+        withAnimation { nudge = nil }
     }
 
     @ViewBuilder
     private var content: some View {
+        VStack(spacing: 0) {
+            nudgeBanner
+            streamOrResults
+        }
+    }
+
+    @ViewBuilder
+    private var nudgeBanner: some View {
+        if let nudge, searchText.trimmingCharacters(in: .whitespaces).isEmpty {
+            nudgeCard(nudge).padding(.horizontal).padding(.top, 8)
+        }
+    }
+
+    @ViewBuilder
+    private var streamOrResults: some View {
         if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
             let sections = streamSections
             if sections.isEmpty { emptyStream } else { streamList(sections) }
@@ -80,6 +110,30 @@ struct NotesView: View {
             let hits = matchingNotes(debouncedQuery)
             if hits.isEmpty { emptyResults } else { resultsList(hits) }
         }
+    }
+
+    /// A quiet nudge: an overdue friend is near you now. Tap to open their note; ✕ to dismiss.
+    private func nudgeCard(_ p: AppModel.ReconnectPrompt) -> some View {
+        let subtitle = AppModel.outOfTouchLabel(p.lastContact).map { "\($0) — a good moment to reach out" }
+            ?? "A good moment to reach out"
+        return HStack(spacing: 11) {
+            Image(systemName: "location.fill").foregroundStyle(.pink)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(p.name) is nearby").font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button { dismissNudge(p) } label: {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+        .background(Color.pink.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.pink.opacity(0.25)))
+        .contentShape(Rectangle())
+        .onTapGesture { let id = p.id; dismissNudge(p); path.append(id) }
+        .transition(.opacity.combined(with: .move(edge: .top)))
     }
 
     // MARK: - Stream (reverse-chronological, grouped by day)
@@ -379,15 +433,6 @@ struct ReconnectView: View {
         }
     }
 
-    /// "6mo out of touch" / "2y out of touch" — only when it's genuinely been a while, so a
-    /// recently-contacted nearby person isn't flagged as overdue.
-    private static func sinceLabel(_ date: Date) -> String? {
-        let days = Calendar.current.dateComponents([.day], from: date, to: Date()).day ?? 0
-        guard days >= 45 else { return nil }
-        if days >= 365 { return "\(days / 365)y out of touch" }
-        return "\(days / 30)mo out of touch"
-    }
-
     private func promptRow(_ p: AppModel.ReconnectPrompt) -> some View {
         Button { openNote = Wrapped(id: p.id) } label: {
             HStack(spacing: 11) {
@@ -397,7 +442,7 @@ struct ReconnectView: View {
                     HStack(spacing: 4) {
                         Text("\(p.reason)\(p.reason.isEmpty ? "" : " · ")\(p.place)")
                             .foregroundStyle(.secondary)
-                        if let stale = Self.sinceLabel(p.lastContact) {
+                        if let stale = AppModel.outOfTouchLabel(p.lastContact) {
                             Text("· \(stale)").foregroundStyle(.pink)   // near AND overdue
                         }
                     }
