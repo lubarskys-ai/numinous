@@ -119,7 +119,7 @@ struct NoteDetailView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { model.avatarFocus = note.id } label: {
+                    Button { model.avatarFocus = AvatarFocus(label: note.displayName, ids: [note.id], expandNeighbors: true) } label: {
                         Image(systemName: "point.3.connected.trianglepath.dotted")
                     }
                     .accessibilityLabel("See this note's connections in the graph")

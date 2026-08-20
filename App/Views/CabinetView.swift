@@ -397,6 +397,9 @@ private struct DrawerView: View {
     /// Actions for a whole folder — shown both from the ⋯ button and by long-pressing
     /// the folder header, so a click-and-hold gives Rename / Move / Merge / Delete.
     @ViewBuilder private var folderMenuContent: some View {
+        Button {
+            model.avatarFocus = AvatarFocus(label: cabinet.name, ids: model.nodeIDs(inFolder: cabinet.id))
+        } label: { Label("See in graph", systemImage: "point.3.connected.trianglepath.dotted") }
         Button { onRenameFolder(cabinet.id) } label: { Label("Rename or move folder…", systemImage: "pencil") }
         Button { onMergeFolder(cabinet.id) } label: { Label("Merge into…", systemImage: "arrow.triangle.merge") }
         Button { onEditAxes(cabinet.id) } label: { Label("Grows…", systemImage: "circle.hexagongrid") }

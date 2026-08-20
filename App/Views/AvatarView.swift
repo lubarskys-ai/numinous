@@ -48,7 +48,7 @@ struct AvatarView: View {
                         onZoomChange: { zoom = $0; committedZoom = $0 },
                         onLabels: { nodeLabels = $0 },
                         onFocus: { name in withAnimation(.easeInOut(duration: 0.2)) { focusName = name } },
-                        focusNode: model.avatarFocus
+                        focusRequest: model.avatarFocus
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .overlay { labelOverlay }

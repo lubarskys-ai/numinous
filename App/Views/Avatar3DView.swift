@@ -9,6 +9,14 @@ struct GraphEdge { let a: UUID; let b: UUID; let cross: Bool }
 /// (drawn only when zoomed in — no memory-heavy 3D text).
 struct NodeLabel: Identifiable { let id: UUID; let text: String; let point: CGPoint }
 
+/// A request to open the avatar/connectome spotlighting node(s): one note (with its
+/// neighbours) or a whole folder's set of nodes (even the unlinked ones).
+struct AvatarFocus: Equatable {
+    let label: String        // banner text ("2026-08-16" or "golf clubs · 5")
+    let ids: [UUID]          // the node(s) to spotlight
+    var expandNeighbors: Bool = false   // also light up each node's direct connections
+}
+
 /// Phase-1/3 spike: a rotatable androgynous body (grey when young, tinting to each
 /// axis's color as it grows) with the connection graph rendered *inside* it — the
 /// translucent figure holds a glowing connectome (nodes at their regions, links as
@@ -33,9 +41,9 @@ struct Avatar3DView: UIViewRepresentable {
     /// Reports the focused node's name (nil when focus clears), so a banner can show which
     /// node's connections are spotlighted.
     var onFocus: ((String?) -> Void)? = nil
-    /// Programmatic focus: spotlight this node's connections (e.g. opened from a note). Applied
-    /// once the scene is built.
-    var focusNode: UUID? = nil
+    /// Programmatic focus: spotlight a note's connections or a whole folder's nodes (opened
+    /// from a note/folder). Applied once the scene is built.
+    var focusRequest: AvatarFocus? = nil
 
     // A long "telephoto" rig: the camera sits far back with a narrow field of view, which
     // flattens perspective so foreground and background nodes zoom at nearly the same rate
@@ -88,7 +96,7 @@ struct Avatar3DView: UIViewRepresentable {
         context.coordinator.onFocus = onFocus
         context.coordinator.zoom = zoom
         context.coordinator.viewSize = view.bounds.size
-        if focusNode != context.coordinator.appliedFocus { context.coordinator.applyFocus(focusNode) }
+        if focusRequest != context.coordinator.appliedFocus { context.coordinator.applyFocus(focusRequest) }
         // Rebuild when maturity changes (e.g. the "watch it grow" animation stepping
         // it) so the birth sequence plays; otherwise just track zoom.
         if abs(context.coordinator.builtMaturity - maturity) > 0.004 {
@@ -142,10 +150,10 @@ struct Avatar3DView: UIViewRepresentable {
         weak var bodyFloatNode: SCNNode?
         // Focus mode: tap a node to spotlight just its connections (dim the rest); tap it
         // again to open the note; tap empty space to clear.
-        var focusedNode: UUID?
-        var appliedFocus: UUID?        // last programmatic focus applied (nil = none)
-        var pendingFocus: UUID?        // a focus requested before the scene finished building
-        var focusIDs: Set<UUID> = []   // the focused node + its neighbours (for scoped labels)
+        var focusedNode: UUID?         // single node the pill's "tap again to open" targets
+        var appliedFocus: AvatarFocus? // last programmatic focus applied (nil = none)
+        var pendingFocus: AvatarFocus? // a focus requested before the scene finished building
+        var focusIDs: Set<UUID> = []   // all spotlighted nodes (for scoped labels)
         var nodeName: [UUID: String] = [:]
         var onFocus: ((String?) -> Void)?
         private var highlightOverlay: SCNNode?
@@ -277,19 +285,22 @@ struct Avatar3DView: UIViewRepresentable {
             clearFocus()   // tapped empty space → clear the spotlight
         }
 
-        /// Spotlight one node: dim the whole connectome and draw a bright overlay of the node,
-        /// its directly-connected neighbours, and the links between them (in the connectome's
-        /// own space, so it drifts along with it).
+        /// Spotlight one node + its neighbours (a tap, or a single-note focus).
         func focus(_ id: UUID, positions: [UUID: SCNVector3], links: [(UUID, UUID)]) {
-            guard let connectome = connectomeNode, let center = positions[id] else { return }
+            var set: Set<UUID> = [id]
+            for (a, b) in links { if a == id { set.insert(b) } else if b == id { set.insert(a) } }
+            focusSet(set, label: nodeName[id] ?? "", tapTarget: id, positions: positions, links: links)
+        }
+
+        /// Spotlight an arbitrary SET of nodes: dim the whole connectome, draw bright dots for
+        /// each node in the set, bright threads for links WITHIN the set, and label only these.
+        /// Serves both a single node (+ neighbours) and a whole folder's nodes (even unlinked).
+        func focusSet(_ ids: Set<UUID>, label: String, tapTarget: UUID?,
+                      positions: [UUID: SCNVector3], links: [(UUID, UUID)]) {
+            guard let connectome = connectomeNode, !ids.isEmpty else { return }
             clearHighlight()
-            focusedNode = id
-            var neighbors = Set<UUID>()
-            for (a, b) in links {
-                if a == id { neighbors.insert(b) } else if b == id { neighbors.insert(a) }
-            }
-            focusIDs = neighbors.union([id])   // label only these while focused
-            // Dim everything currently in the connectome (nodes, links, dust).
+            focusedNode = tapTarget
+            focusIDs = ids
             dimmed = connectome.childNodes
             for c in dimmed { c.opacity = 0.14 }
             let overlay = SCNNode()
@@ -316,20 +327,24 @@ struct Avatar3DView: UIViewRepresentable {
                 n.renderingOrder = 29
                 overlay.addChildNode(n)
             }
-            for nb in neighbors {
-                if let np = positions[nb] { brightThread(center, np); brightDot(np, 0.03, UIColor(white: 0.96, alpha: 1)) }
+            for (a, b) in links where ids.contains(a) && ids.contains(b) {
+                if let pa = positions[a], let pb = positions[b] { brightThread(pa, pb) }
             }
-            brightDot(center, 0.05, .white)   // the focused node, largest & brightest
+            for id in ids {
+                guard let p = positions[id] else { continue }
+                let isTap = id == tapTarget
+                brightDot(p, isTap ? 0.05 : 0.03, isTap ? .white : UIColor(white: 0.96, alpha: 1))
+            }
             connectome.addChildNode(overlay)
             highlightOverlay = overlay
-            onFocus?(nodeName[id])
+            onFocus?(label)
         }
 
-        /// Spotlight a node by id (from a note, not a tap). Defers until the scene is built.
-        func applyFocus(_ id: UUID?) {
-            appliedFocus = id
-            guard let id else { clearFocus(); return }
-            guard let view, !nodeHitTargets.isEmpty else { pendingFocus = id; return }
+        /// Spotlight a note or folder by request (not a tap). Defers until the scene is built.
+        func applyFocus(_ f: AvatarFocus?) {
+            appliedFocus = f
+            guard let f else { clearFocus(); return }
+            guard let view, !nodeHitTargets.isEmpty else { pendingFocus = f; return }
             var links: [(UUID, UUID)] = []
             view.scene?.rootNode.enumerateChildNodes { node, _ in
                 guard let name = node.name, name.hasPrefix("link:") else { return }
@@ -338,11 +353,20 @@ struct Avatar3DView: UIViewRepresentable {
                     links.append((a, b))
                 }
             }
-            focus(id, positions: Dictionary(nodeHitTargets.map { ($0.id, $0.local) }, uniquingKeysWith: { a, _ in a }), links: links)
+            let positions = Dictionary(nodeHitTargets.map { ($0.id, $0.local) }, uniquingKeysWith: { a, _ in a })
+            var set = Set(f.ids)
+            if f.expandNeighbors {
+                for (a, b) in links {
+                    if f.ids.contains(a) { set.insert(b) }
+                    if f.ids.contains(b) { set.insert(a) }
+                }
+            }
+            focusSet(set, label: f.label, tapTarget: f.ids.count == 1 ? f.ids.first : nil,
+                     positions: positions, links: links)
         }
 
         func clearFocus() {
-            guard focusedNode != nil else { return }
+            guard focusedNode != nil || highlightOverlay != nil else { return }
             focusedNode = nil; focusIDs = []
             clearHighlight()
             onFocus?(nil)
@@ -1062,8 +1086,8 @@ struct Avatar3DView: UIViewRepresentable {
                 coordinator.lastNodeScale = -1   // force a re-thin of link threads for the new scene
                 coordinator.resetFocusState()    // old scene's highlight refs are gone
                 builder.onFocus?(nil)
-                // Apply a focus that was requested before the scene was ready (opened from a note).
-                let pending = coordinator.pendingFocus ?? builder.focusNode
+                // Apply a focus requested before the scene was ready (opened from a note/folder).
+                let pending = coordinator.pendingFocus ?? builder.focusRequest
                 if let pending { coordinator.pendingFocus = nil; coordinator.applyFocus(pending) }
             }
         }

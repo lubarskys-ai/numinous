@@ -68,9 +68,20 @@ final class AppModel: ObservableObject {
     @Published private(set) var folders: [Folder] = []
     @Published private(set) var axes: [Axis] = Axis.defaultSet
     @Published private(set) var score: ScoreResult
-    /// A request to open the avatar/connectome spotlighting this note's node (set from a note,
-    /// consumed by the avatar view, cleared when it closes).
-    @Published var avatarFocus: UUID?
+    /// A request to open the avatar/connectome spotlighting node(s) — a note or a whole folder
+    /// (set from a note/folder, consumed by the avatar view, cleared when it closes).
+    @Published var avatarFocus: AvatarFocus?
+
+    /// Graph-node ids for notes filed under a folder (and its subfolders) that actually appear
+    /// in the connectome — for spotlighting a whole folder, including notes linked to nothing.
+    func nodeIDs(inFolder folderPath: String) -> [UUID] {
+        let p = Folder.normalize(folderPath)
+        return notes.compactMap { n in
+            let f = Folder.normalize(n.folderName)
+            guard (f == p || f.hasPrefix(p + "/")), axis(for: n) != nil else { return nil }
+            return n.id
+        }
+    }
 
     /// Visual maturity, 0→1 — the single value both the avatar and companion read,
     /// so they evolve in lockstep. Deliberately *very slow and connection-intensive*:
