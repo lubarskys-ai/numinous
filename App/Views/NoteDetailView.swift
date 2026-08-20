@@ -118,6 +118,12 @@ struct NoteDetailView: View {
                 }
             }
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { model.avatarFocus = note.id } label: {
+                        Image(systemName: "point.3.connected.trianglepath.dotted")
+                    }
+                    .accessibilityLabel("See this note's connections in the graph")
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         if editedBody != note.body { model.updateBody(note.id, body: editedBody) }

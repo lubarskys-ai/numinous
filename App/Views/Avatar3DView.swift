@@ -33,6 +33,9 @@ struct Avatar3DView: UIViewRepresentable {
     /// Reports the focused node's name (nil when focus clears), so a banner can show which
     /// node's connections are spotlighted.
     var onFocus: ((String?) -> Void)? = nil
+    /// Programmatic focus: spotlight this node's connections (e.g. opened from a note). Applied
+    /// once the scene is built.
+    var focusNode: UUID? = nil
 
     // A long "telephoto" rig: the camera sits far back with a narrow field of view, which
     // flattens perspective so foreground and background nodes zoom at nearly the same rate
@@ -85,6 +88,7 @@ struct Avatar3DView: UIViewRepresentable {
         context.coordinator.onFocus = onFocus
         context.coordinator.zoom = zoom
         context.coordinator.viewSize = view.bounds.size
+        if focusNode != context.coordinator.appliedFocus { context.coordinator.applyFocus(focusNode) }
         // Rebuild when maturity changes (e.g. the "watch it grow" animation stepping
         // it) so the birth sequence plays; otherwise just track zoom.
         if abs(context.coordinator.builtMaturity - maturity) > 0.004 {
@@ -139,6 +143,8 @@ struct Avatar3DView: UIViewRepresentable {
         // Focus mode: tap a node to spotlight just its connections (dim the rest); tap it
         // again to open the note; tap empty space to clear.
         var focusedNode: UUID?
+        var appliedFocus: UUID?        // last programmatic focus applied (nil = none)
+        var pendingFocus: UUID?        // a focus requested before the scene finished building
         var focusIDs: Set<UUID> = []   // the focused node + its neighbours (for scoped labels)
         var nodeName: [UUID: String] = [:]
         var onFocus: ((String?) -> Void)?
@@ -317,6 +323,22 @@ struct Avatar3DView: UIViewRepresentable {
             connectome.addChildNode(overlay)
             highlightOverlay = overlay
             onFocus?(nodeName[id])
+        }
+
+        /// Spotlight a node by id (from a note, not a tap). Defers until the scene is built.
+        func applyFocus(_ id: UUID?) {
+            appliedFocus = id
+            guard let id else { clearFocus(); return }
+            guard let view, !nodeHitTargets.isEmpty else { pendingFocus = id; return }
+            var links: [(UUID, UUID)] = []
+            view.scene?.rootNode.enumerateChildNodes { node, _ in
+                guard let name = node.name, name.hasPrefix("link:") else { return }
+                let parts = name.dropFirst(5).split(separator: ":")
+                if parts.count == 2, let a = UUID(uuidString: String(parts[0])), let b = UUID(uuidString: String(parts[1])) {
+                    links.append((a, b))
+                }
+            }
+            focus(id, positions: Dictionary(nodeHitTargets.map { ($0.id, $0.local) }, uniquingKeysWith: { a, _ in a }), links: links)
         }
 
         func clearFocus() {
@@ -1040,6 +1062,9 @@ struct Avatar3DView: UIViewRepresentable {
                 coordinator.lastNodeScale = -1   // force a re-thin of link threads for the new scene
                 coordinator.resetFocusState()    // old scene's highlight refs are gone
                 builder.onFocus?(nil)
+                // Apply a focus that was requested before the scene was ready (opened from a note).
+                let pending = coordinator.pendingFocus ?? builder.focusNode
+                if let pending { coordinator.pendingFocus = nil; coordinator.applyFocus(pending) }
             }
         }
     }

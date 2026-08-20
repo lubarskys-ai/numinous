@@ -70,6 +70,8 @@ struct RootView: View {
         .onChange(of: selection) { _ in trigger(.walk) }
         // …and does a joyful, heart-popping cheer when a new connection forms.
         .onChange(of: model.spark?.id) { id in if id != nil { trigger(.cheer) } }
+        // "See in graph" from a note opens the avatar, spotlighting that note's connections.
+        .onChange(of: model.avatarFocus) { if $0 != nil { showAvatar = true } }
         // Refresh already-connected sources (contacts, Readwise) when returning to the app.
         .onChange(of: scenePhase) {
             if $0 == .active { Task { await model.autoSync() } }

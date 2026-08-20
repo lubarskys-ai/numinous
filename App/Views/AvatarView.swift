@@ -47,7 +47,8 @@ struct AvatarView: View {
                         onTapNode: { path.append($0) },
                         onZoomChange: { zoom = $0; committedZoom = $0 },
                         onLabels: { nodeLabels = $0 },
-                        onFocus: { name in withAnimation(.easeInOut(duration: 0.2)) { focusName = name } }
+                        onFocus: { name in withAnimation(.easeInOut(duration: 0.2)) { focusName = name } },
+                        focusNode: model.avatarFocus
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .overlay { labelOverlay }
@@ -65,6 +66,7 @@ struct AvatarView: View {
             .navigationTitle("Numinous")
             .toolbarBackground(.hidden, for: .navigationBar)
             .onAppear { if reflection == nil { reflection = model.currentReflection() } }
+            .onDisappear { model.avatarFocus = nil }   // don't re-focus next time the avatar opens
             // Push within the avatar's own stack rather than a sheet: this view lives
             // inside a full-screen cover, and a sheet presented from there fails silently.
             .navigationDestination(for: UUID.self) { id in

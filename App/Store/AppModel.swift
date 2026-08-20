@@ -68,6 +68,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var folders: [Folder] = []
     @Published private(set) var axes: [Axis] = Axis.defaultSet
     @Published private(set) var score: ScoreResult
+    /// A request to open the avatar/connectome spotlighting this note's node (set from a note,
+    /// consumed by the avatar view, cleared when it closes).
+    @Published var avatarFocus: UUID?
 
     /// Visual maturity, 0→1 — the single value both the avatar and companion read,
     /// so they evolve in lockstep. Deliberately *very slow and connection-intensive*:
