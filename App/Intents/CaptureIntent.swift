@@ -39,6 +39,24 @@ struct QuickCaptureIntent: AppIntent {
     }
 }
 
+/// An App Shortcut you can bind to the iPhone Action Button (or run via Siri / Shortcuts)
+/// to log where you are RIGHT NOW into today's diary — WITHOUT opening the app. One press,
+/// a quick confirmation, back to your life. Needs location permission; the first run may
+/// prompt for it.
+struct LogLocationToDiaryIntent: AppIntent {
+    static var title: LocalizedStringResource = "Log location to today's diary"
+    static var description = IntentDescription("Save where you are right now into today's diary — no need to open the app.")
+    static var openAppWhenRun = false
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        if let name = await AppModel.shared.logCurrentLocationToTodayDiary() {
+            return .result(dialog: "Logged 📍 \(name) to today's diary.")
+        }
+        return .result(dialog: "Couldn't get your location — check that Numinous has location access.")
+    }
+}
+
 struct NuminousShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
@@ -58,6 +76,15 @@ struct NuminousShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Today's diary",
             systemImageName: "calendar.badge.plus"
+        )
+        AppShortcut(
+            intent: LogLocationToDiaryIntent(),
+            phrases: [
+                "Log my location in \(.applicationName)",
+                "Save where I am in \(.applicationName)",
+            ],
+            shortTitle: "Log location",
+            systemImageName: "mappin.and.ellipse"
         )
     }
 }

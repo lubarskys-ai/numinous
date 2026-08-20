@@ -64,6 +64,11 @@ struct ImportedItem {
 /// function), which is what makes remapping a folder's axis reflow all history.
 @MainActor
 final class AppModel: ObservableObject {
+    /// One shared store for the whole app. The UI binds to this instance, and so does the
+    /// Action-Button intent (LogLocationToDiaryIntent) — using the same instance means a
+    /// background capture and the live app never fork into two copies that clobber each other.
+    @MainActor static let shared = AppModel()
+
     @Published private(set) var notes: [Note] = []
     @Published private(set) var folders: [Folder] = []
     @Published private(set) var axes: [Axis] = Axis.defaultSet
@@ -2553,6 +2558,18 @@ final class AppModel: ObservableObject {
         guard let p = await autoLocator.currentPlaceStructured(),
               let lat = p.latitude, let lng = p.longitude else { return }
         linkPlace(ensurePlaceNote(name: p.name, latitude: lat, longitude: lng), into: noteID)
+    }
+
+    /// Action-Button entry: capture where you are right now and file it into TODAY's diary,
+    /// with no UI. Reuses today's diary entry (or opens one), drops in a `📍 [[…]]` place link,
+    /// and returns the resolved place name for a confirmation — or nil if location was
+    /// unavailable or denied.
+    @discardableResult
+    func logCurrentLocationToTodayDiary() async -> String? {
+        guard let p = await autoLocator.currentPlaceStructured(),
+              let lat = p.latitude, let lng = p.longitude else { return nil }
+        linkPlace(ensurePlaceNote(name: p.name, latitude: lat, longitude: lng), into: openTodayDiary())
+        return p.name
     }
 
     /// Typed name → note: geocode it, make it a place note + pin, and link it into the note.
