@@ -16,6 +16,8 @@ struct NotesView: View {
     @State private var importMessage: String?
     @State private var path: [UUID] = []
     @State private var nudge: AppModel.ReconnectPrompt?   // gentle "near an overdue friend" prompt
+    @State private var showReview = false
+    @State private var reviewDue = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -42,6 +44,7 @@ struct NotesView: View {
                                 }
                             }
                             Divider()
+                            Button { showReview = true } label: { Label("Your week", systemImage: "sparkles") }
                             Button { importContacts() } label: { Label("Sync contacts", systemImage: "person.crop.circle.badge.plus") }
                         } label: {
                             Label(categoryFilter ?? "All", systemImage: "line.3.horizontal.decrease.circle")
@@ -67,11 +70,12 @@ struct NotesView: View {
                 }
                 .fullScreenCover(item: $compose) { req in ComposeView(prefillTitle: req.prefillTitle, diary: req.diary) }
                 .sheet(isPresented: $showReconnect) { ReconnectView() }
+                .sheet(isPresented: $showReview) { WeeklyReviewView(digest: model.weeklyDigest()) }
                 .alert("Contacts", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
                     Button("OK", role: .cancel) {}
                 } message: { Text(importMessage ?? "") }
-                .task { await refreshNudge() }
-                .onChange(of: scenePhase) { if $0 == .active { Task { await refreshNudge() } } }
+                .task { reviewDue = model.weeklyReviewDue; await refreshNudge() }
+                .onChange(of: scenePhase) { if $0 == .active { reviewDue = model.weeklyReviewDue; Task { await refreshNudge() } } }
         }
     }
 
@@ -89,9 +93,39 @@ struct NotesView: View {
     @ViewBuilder
     private var content: some View {
         VStack(spacing: 0) {
+            reviewBanner
             nudgeBanner
             streamOrResults
         }
+    }
+
+    @ViewBuilder
+    private var reviewBanner: some View {
+        if reviewDue, searchText.trimmingCharacters(in: .whitespaces).isEmpty {
+            reviewCard.padding(.horizontal).padding(.top, 8)
+        }
+    }
+
+    /// A once-a-week invitation to look back — tap to open the review, ✕ to skip this week.
+    private var reviewCard: some View {
+        HStack(spacing: 11) {
+            Image(systemName: "sparkles").foregroundStyle(.purple)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Your week is ready").font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                Text("A quiet look at what you tended").font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button { model.markReviewSeen(); withAnimation { reviewDue = false } } label: {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+        .background(Color.purple.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.purple.opacity(0.25)))
+        .contentShape(Rectangle())
+        .onTapGesture { model.markReviewSeen(); reviewDue = false; showReview = true }
+        .transition(.opacity.combined(with: .move(edge: .top)))
     }
 
     @ViewBuilder

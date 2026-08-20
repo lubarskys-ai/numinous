@@ -1111,6 +1111,61 @@ final class AppModel: ObservableObject {
         UserDefaults.standard.set(dates, forKey: Self.nudgeDatesKey)
     }
 
+    // MARK: - Weekly review (a quiet, once-a-week look at what you tended and who's drifting)
+
+    struct WeeklyDigest {
+        struct Person: Identifiable { let id: UUID; let name: String; let lastContact: Date }
+        let tendedAxisIDs: [String]   // life areas you touched in the last 7 days
+        let quietAxisIDs: [String]    // areas that went untended
+        let drifting: [Person]        // people you've most fallen out of touch with
+        let reflection: String?       // the app's current grounded observation, if any
+        var isEmpty: Bool { tendedAxisIDs.isEmpty && quietAxisIDs.isEmpty && drifting.isEmpty && reflection == nil }
+    }
+
+    /// People (not stubs) you've fallen out of touch with, most-overdue first — for the review.
+    func peopleByStaleness(overdueDays: Int = 45, limit: Int = 4) -> [WeeklyDigest.Person] {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -overdueDays, to: Date()) ?? .distantPast
+        var out: [WeeklyDigest.Person] = []
+        for n in notes {
+            let f = Folder.normalize(n.folderName)
+            guard (f == "people" || f == "contacts"), !n.isStub else { continue }
+            let last = max(n.date, backlinks(to: n).map(\.date).max() ?? .distantPast)
+            if last < cutoff { out.append(WeeklyDigest.Person(id: n.id, name: n.displayName, lastContact: last)) }
+        }
+        return Array(out.sorted { $0.lastContact < $1.lastContact }.prefix(limit))
+    }
+
+    /// A gentle weekly digest: which life areas you tended, which went quiet, who you've
+    /// drifted from, and one grounded observation — built entirely from signals you already
+    /// have (last-tended dates, staleness, the reflection engine).
+    func weeklyDigest() -> WeeklyDigest {
+        let weekAgo = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? .distantPast
+        var tended: [String] = [], quiet: [String] = []
+        for a in axes {
+            if let last = lastTendedByAxis[a.id], last >= weekAgo { tended.append(a.id) } else { quiet.append(a.id) }
+        }
+        return WeeklyDigest(tendedAxisIDs: tended, quietAxisIDs: quiet,
+                            drifting: peopleByStaleness(), reflection: currentReflection()?.text)
+    }
+
+    // Once-a-week gating for the review card, by ISO week.
+    private static let lastReviewWeekKey = "weekly_review_week"
+
+    /// True when a new week has begun since the review was last surfaced (so the card shows
+    /// at most once a week). Reading it doesn't consume it — call `markReviewSeen()` for that.
+    var weeklyReviewDue: Bool {
+        let cal = Calendar(identifier: .iso8601)
+        let now = cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date())
+        let key = "\(now.yearForWeekOfYear ?? 0)-\(now.weekOfYear ?? 0)"
+        return UserDefaults.standard.string(forKey: Self.lastReviewWeekKey) != key
+    }
+
+    func markReviewSeen() {
+        let cal = Calendar(identifier: .iso8601)
+        let now = cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date())
+        UserDefaults.standard.set("\(now.yearForWeekOfYear ?? 0)-\(now.weekOfYear ?? 0)", forKey: Self.lastReviewWeekKey)
+    }
+
     /// From upcoming calendar events with a location, who you know there.
     func tripPrompts(from events: [CalendarEvent]) -> [ReconnectPrompt] {
         let index = peopleWithPlaces()
