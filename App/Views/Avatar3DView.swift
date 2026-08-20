@@ -825,7 +825,7 @@ struct Avatar3DView: UIViewRepresentable {
             // leaving generous empty space between clusters. Lower kSpring = tighter clusters;
             // higher kRepel = more space between groups.
             let kSpring = 0.08   // tight clusters / short links
-            let kRepel  = 1.70   // big gaps between separate groups (higher = more spread)
+            let kRepel  = 1.35   // keeps clusters compact (gaps come from component spread below)
             var temp = 0.6
             let iters = fdIds.count > 800 ? 18 : (fdIds.count > 400 ? 32 : 80)
             for _ in 0..<iters {
@@ -857,13 +857,44 @@ struct Avatar3DView: UIViewRepresentable {
                 }
                 temp *= 0.96
             }
+            // Push SEPARATE constellations apart WITHOUT stretching their internal links: find
+            // the connected components, then translate each one rigidly outward from the centre.
+            // The gaps between groupings widen while every cluster keeps its tight, short-axis
+            // shape — "spread the groups, don't lengthen the axes". Union–find is ~linear.
+            var parent = [UUID: UUID](minimumCapacity: fdIds.count)
+            for id in fdIds { parent[id] = id }
+            func find(_ x: UUID) -> UUID {
+                var r = x
+                while parent[r]! != r { parent[r] = parent[parent[r]!]!; r = parent[r]! }
+                return r
+            }
+            for e in links where fx[e.a] != nil && fx[e.b] != nil {
+                let ra = find(e.a), rb = find(e.b); if ra != rb { parent[ra] = rb }
+            }
+            var comps = [UUID: [UUID]]()
+            for id in fdIds { comps[find(id), default: []].append(id) }
+            if comps.count > 1 {
+                let gn = Double(fdIds.count)
+                let gx = fdIds.reduce(0.0) { $0 + fx[$1]! } / gn
+                let gy = fdIds.reduce(0.0) { $0 + fy[$1]! } / gn
+                let gz = fdIds.reduce(0.0) { $0 + fz[$1]! } / gn
+                let spread = 1.9   // >1 widens the gaps between groups; internal links untouched
+                for (_, members) in comps {
+                    let mn = Double(members.count)
+                    let cx = members.reduce(0.0) { $0 + fx[$1]! } / mn
+                    let cy = members.reduce(0.0) { $0 + fy[$1]! } / mn
+                    let cz = members.reduce(0.0) { $0 + fz[$1]! } / mn
+                    let ox = (cx - gx) * (spread - 1), oy = (cy - gy) * (spread - 1), oz = (cz - gz) * (spread - 1)
+                    for id in members { fx[id]! += ox; fy[id]! += oy; fz[id]! += oz }
+                }
+            }
             let n = Double(fdIds.count)
             let cx = fdIds.map { fx[$0]! }.reduce(0, +) / n
             let cy = fdIds.map { fy[$0]! }.reduce(0, +) / n
             let cz = fdIds.map { fz[$0]! }.reduce(0, +) / n
             var maxR = 0.01
             for id in fdIds { maxR = max(maxR, ((fx[id]! - cx) * (fx[id]! - cx) + (fy[id]! - cy) * (fy[id]! - cy) + (fz[id]! - cz) * (fz[id]! - cz)).squareRoot()) }
-            let sc = 3.7 / maxR   // overall size (clusters stay tight; the gaps between them scale up)
+            let sc = 3.4 / maxR   // fit to viewport; with groups pre-spread, clusters read tight
             for id in fdIds { fx[id] = (fx[id]! - cx) * sc; fy[id] = (fy[id]! - cy) * sc; fz[id] = (fz[id]! - cz) * sc }
         }
         // Unlinked files sit on a surrounding shell (fibonacci sphere).
@@ -872,7 +903,7 @@ struct Avatar3DView: UIViewRepresentable {
         for (i, id) in unlinked.enumerated() {
             let t = (Double(i) + 0.5) / Double(max(1, unlinked.count))
             let phi = acos(1 - 2 * t), theta = golden * Double(i)
-            fx[id] = 4.4 * sin(phi) * cos(theta); fy[id] = 4.4 * cos(phi); fz[id] = 4.4 * sin(phi) * sin(theta)
+            fx[id] = 4.0 * sin(phi) * cos(theta); fy[id] = 4.0 * cos(phi); fz[id] = 4.0 * sin(phi) * sin(theta)
         }
         func graphPos(_ id: UUID) -> SCNVector3 { v(fx[id] ?? 0, fy[id] ?? 0, fz[id] ?? 0) }
 
