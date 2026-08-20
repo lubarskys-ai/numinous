@@ -2455,11 +2455,12 @@ final class AppModel: ObservableObject {
     @discardableResult
     func createPlaceNote(name: String, latitude: Double, longitude: Double) -> UUID {
         let leaf = name.trimmingCharacters(in: .whitespaces)
-        if folder(named: "places") == nil {
-            folders.append(Folder(name: "places", category: "Places", axisID: "meaning"))
+        let folderName = preferredPlaceFolder()
+        if folder(named: folderName) == nil {
+            folders.append(Folder(name: folderName, category: "Places", axisID: "meaning"))
         }
-        var title = "places/" + leaf, k = 2
-        while noteExists(titled: title) { title = "places/\(leaf) (\(k))"; k += 1 }
+        var title = folderName + "/" + leaf, k = 2
+        while noteExists(titled: title) { title = "\(folderName)/\(leaf) (\(k))"; k += 1 }
         let note = Note(title: title, date: Date(),
                         location: leaf,
                         places: [Place(name: leaf, latitude: latitude, longitude: longitude)])
@@ -2473,16 +2474,34 @@ final class AppModel: ObservableObject {
     /// Ensure a `places/<Name>` note exists at these coordinates — a single place that's both
     /// a map pin and a connectable graph node. Returns its title (`places/<Name>`) so callers
     /// can link to it. Reuses an existing place note of the same name (filling in coordinates).
+    /// The folder to file GPS/typed places under — reuse a place folder you ALREADY have
+    /// (your built-in "location") instead of spawning a parallel "places". Defaults to
+    /// "location" so places land in a natural, single home.
+    func preferredPlaceFolder() -> String {
+        for name in ["location", "locations", "places"] {
+            if folder(named: name) != nil || notes.contains(where: { Folder.normalize($0.folderName) == name }) {
+                return canonicalFolderCasing(name)
+            }
+        }
+        return "location"
+    }
+
     @discardableResult
     func ensurePlaceNote(name: String, latitude: Double, longitude: Double) -> String {
         let leaf = name.replacingOccurrences(of: "/", with: "-").trimmingCharacters(in: .whitespaces)
         guard !leaf.isEmpty else { return "" }
-        let title = "places/" + leaf
+        let folderName = preferredPlaceFolder()
+        // Fold any stray, auto-created "places" notes into your place folder (links rewrite).
+        if Folder.normalize(folderName) != "places" {
+            let stray = notes.filter { Folder.normalize($0.folderName) == "places" }.map(\.id)
+            if !stray.isEmpty { moveNotes(stray, toFolder: folderName) }
+        }
+        let title = folderName + "/" + leaf
         if let i = notes.firstIndex(where: { Self.norm($0.title) == Self.norm(title) }) {
             addPlace(notes[i].id, name: leaf, latitude: latitude, longitude: longitude)   // fills coords, persists
         } else {
-            if folder(named: "places") == nil {
-                folders.append(Folder(name: "places", category: "Places", axisID: "meaning"))
+            if folder(named: folderName) == nil {
+                folders.append(Folder(name: folderName, category: "Places", axisID: "meaning"))
             }
             notes.append(Note(title: title, date: Date(), location: leaf,
                               places: [Place(name: leaf, latitude: latitude, longitude: longitude)]))

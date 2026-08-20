@@ -122,6 +122,9 @@ private struct DrawerView: View {
     /// The action menu shared by a note card's ⋯ button and its long-press — the same
     /// Open · Rename · Move · Delete offered in the folder browser.
     @ViewBuilder private func noteMenu(_ note: Note) -> some View {
+        Button {
+            model.avatarFocus = AvatarFocus(label: note.displayName, ids: [note.id], expandNeighbors: true)
+        } label: { Label("See in graph", systemImage: "point.3.connected.trianglepath.dotted") }
         noteActionButtons(
             open: { onOpenNote(note.id) },
             rename: { renameDraft = note.displayName; renameID = note.id },

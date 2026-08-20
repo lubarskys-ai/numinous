@@ -201,23 +201,28 @@ struct ComposeView: View {
     // MARK: - Bars
 
     private var categoryBar: some View {
-        Button { showCategoryPicker = true } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "folder")
-                Text(categoryLabel).fontWeight(.medium)
-                Image(systemName: "chevron.down").font(.caption2)
-                Spacer()
-                if !diaryMode {
-                    Label(noteDate.formatted(.dateTime.month(.abbreviated).day()), systemImage: "calendar")
-                        .font(.caption).foregroundStyle(.secondary)
+        HStack(spacing: 8) {
+            Button { showCategoryPicker = true } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "folder")
+                    Text(categoryLabel).fontWeight(.medium)
+                    Image(systemName: "chevron.down").font(.caption2)
                 }
-                if !location.isEmpty { Label(location, systemImage: "mappin.and.ellipse").font(.caption).foregroundStyle(.secondary).lineLimit(1) }
-                Text("⚡\(intensity)").font(.caption).foregroundStyle(.tertiary)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 14).padding(.vertical, 10)
-            .contentShape(Rectangle())
+            .foregroundStyle(.primary)
+            Spacer(minLength: 4)
+            // A prominent, tappable date so you're prompted to set WHEN this note is for
+            // (defaults to now). Diary mode writes into today's entry, so it's fixed there.
+            if !diaryMode {
+                DatePicker("", selection: $noteDate, displayedComponents: .date)
+                    .labelsHidden()
+                    .font(.caption)
+            }
+            if !location.isEmpty { Label(location, systemImage: "mappin.and.ellipse").font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+            Text("⚡\(intensity)").font(.caption).foregroundStyle(.tertiary)
         }
-        .foregroundStyle(.primary)
+        .padding(.horizontal, 14).padding(.vertical, 10)
         .sheet(isPresented: $showCategoryPicker) { CategoryPickerView(category: $category) }
     }
 
@@ -308,11 +313,6 @@ struct ComposeView: View {
 
     private var detailsMenu: some View {
         Menu {
-            // Date this note is filed under — editable so you can backdate an entry.
-            // (Diary mode writes into today's existing entry, so it's fixed there.)
-            if !diaryMode {
-                DatePicker("Date", selection: $noteDate, displayedComponents: .date)
-            }
             Picker("Intensity", selection: $intensity) {
                 Text("1 · faint").tag(1); Text("2 · light").tag(2); Text("3 · present").tag(3)
                 Text("4 · vivid").tag(4); Text("5 · profound").tag(5)
