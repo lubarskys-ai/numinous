@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import Photos
 import MapKit
 import NuminousCore
 
@@ -649,6 +650,12 @@ struct NoteDetailView: View {
                         .padding(.vertical, 2)
                     }
                 }
+                // Opt-in: photos taken the SAME day as this note, so you can attach the day's
+                // pictures without hunting the whole library. Touches the library only after
+                // you tap to enable it, and only reads — nothing leaves the device.
+                SameDayPhotoStrip(day: note.date) { data in
+                    model.addPhoto(to: note.id, data: data)
+                }
                 PhotosPicker(selection: $photoItems, maxSelectionCount: 10, matching: .images) {
                     Label("Add photos", systemImage: "photo.badge.plus")
                 }
@@ -926,5 +933,171 @@ struct PlacePickerView: View {
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
         }
         .presentationDetents([.medium, .large])
+    }
+}
+
+// MARK: - Same-day photo suggestions
+
+/// Read-only helpers over the system photo library. Used only to SUGGEST photos taken the
+/// same day as a note; images stay on device (a chosen one is copied into the note's own
+/// ImageStore, same as the picker). Reading the library needs `.readWrite` authorization —
+/// there is no read-only access level in PhotoKit.
+enum PhotoLibrary {
+    static var status: PHAuthorizationStatus { PHPhotoLibrary.authorizationStatus(for: .readWrite) }
+
+    static func requestAuthorization() async -> PHAuthorizationStatus {
+        await withCheckedContinuation { cont in
+            PHPhotoLibrary.requestAuthorization(for: .readWrite) { cont.resume(returning: $0) }
+        }
+    }
+
+    /// Image assets whose creation date falls on `day` (local calendar), oldest first, capped.
+    static func photos(on day: Date, limit: Int) async -> [PHAsset] {
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: day)
+        guard let end = cal.date(byAdding: .day, value: 1, to: start) else { return [] }
+        let opts = PHFetchOptions()
+        opts.predicate = NSPredicate(format: "creationDate >= %@ AND creationDate < %@ AND mediaType == %d",
+                                     start as NSDate, end as NSDate, PHAssetMediaType.image.rawValue)
+        opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
+        opts.fetchLimit = limit
+        let result = PHAsset.fetchAssets(with: opts)
+        var assets: [PHAsset] = []
+        result.enumerateObjects { a, _, _ in assets.append(a) }
+        return assets
+    }
+
+    static func thumbnail(for asset: PHAsset, size: CGSize) async -> UIImage? {
+        await withCheckedContinuation { cont in
+            let opts = PHImageRequestOptions()
+            opts.deliveryMode = .highQualityFormat  // one final callback with a real image
+            opts.resizeMode = .exact
+            opts.isNetworkAccessAllowed = true
+            var done = false
+            PHImageManager.default().requestImage(for: asset, targetSize: size,
+                                                  contentMode: .aspectFill, options: opts) { img, info in
+                // Opportunistic can fire twice; ignore an interim nil/degraded frame and
+                // resume exactly once on the real image.
+                let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                if degraded && img == nil { return }
+                guard !done else { return }
+                done = true
+                cont.resume(returning: img)
+            }
+        }
+    }
+
+    static func imageData(for asset: PHAsset) async -> Data? {
+        await withCheckedContinuation { cont in
+            let opts = PHImageRequestOptions()
+            opts.deliveryMode = .highQualityFormat
+            opts.isNetworkAccessAllowed = true
+            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: opts) { data, _, _, _ in
+                cont.resume(returning: data)
+            }
+        }
+    }
+}
+
+/// An opt-in strip of photos taken the same day as the note. Before you enable it, it's just a
+/// button; tapping asks for photo access, then shows that day's pictures as tappable chips.
+/// Picking one copies it into the note. Denied/empty states are quiet — the full picker below
+/// always remains the fallback.
+private struct SameDayPhotoStrip: View {
+    let day: Date
+    let onPick: (Data) -> Void
+
+    @State private var status = PhotoLibrary.status
+    @State private var assets: [PHAsset] = []
+    @State private var thumbs: [String: UIImage] = [:]
+    @State private var added: Set<String> = []
+    @State private var loading = false
+
+    private var dayLabel: String { day.formatted(.dateTime.month(.abbreviated).day()) }
+
+    var body: some View {
+        Group {
+            switch status {
+            case .authorized, .limited:
+                if !assets.isEmpty { strip }
+                else if loading { ProgressView().frame(maxWidth: .infinity) }
+                else { caption("No photos from \(dayLabel).") }
+            case .notDetermined:
+                Button { Task { await enable() } } label: {
+                    Label("Suggest photos from \(dayLabel)", systemImage: "sparkles")
+                        .font(.subheadline)
+                }
+            default:
+                caption("Photo access is off — turn it on in Settings to see photos from \(dayLabel).")
+            }
+        }
+        .task { if status == .authorized || status == .limited, assets.isEmpty { await load() } }
+    }
+
+    private func caption(_ s: String) -> some View {
+        Text(s).font(.caption).foregroundStyle(.secondary)
+    }
+
+    private var strip: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("From \(dayLabel)").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(assets, id: \.localIdentifier) { asset in
+                        Button {
+                            Task {
+                                if let data = await PhotoLibrary.imageData(for: asset) {
+                                    added.insert(asset.localIdentifier)
+                                    onPick(data)
+                                }
+                            }
+                        } label: {
+                            thumb(asset)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(added.contains(asset.localIdentifier))
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func thumb(_ asset: PHAsset) -> some View {
+        let isAdded = added.contains(asset.localIdentifier)
+        ZStack {
+            if let t = thumbs[asset.localIdentifier] {
+                Image(uiImage: t).resizable().scaledToFill()
+            } else {
+                Color.secondary.opacity(0.15)
+            }
+        }
+        .frame(width: 64, height: 64)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay { if isAdded { Color.black.opacity(0.35) } }
+        .overlay(alignment: .topTrailing) {
+            if isAdded {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.white, .green).padding(2)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func enable() async {
+        status = await PhotoLibrary.requestAuthorization()
+        if status == .authorized || status == .limited { await load() }
+    }
+
+    private func load() async {
+        guard !loading else { return }
+        loading = true
+        defer { loading = false }
+        let found = await PhotoLibrary.photos(on: day, limit: 24)
+        await MainActor.run { assets = found }
+        for a in found {
+            if let img = await PhotoLibrary.thumbnail(for: a, size: CGSize(width: 128, height: 128)) {
+                await MainActor.run { thumbs[a.localIdentifier] = img }
+            }
+        }
     }
 }
