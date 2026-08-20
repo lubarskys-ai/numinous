@@ -1734,7 +1734,7 @@ final class AppModel: ObservableObject {
     func setNoteDate(_ id: UUID, to newDate: Date) {
         guard let i = notes.firstIndex(where: { $0.id == id }), notes[i].date != newDate else { return }
         notes[i].date = newDate
-        addTripLinkIfNeeded(i)   // a trip may now (or no longer) cover this date
+        refreshTripLink(i)   // a trip may now cover this date — or no longer does
 
         if Self.isDateTitled(notes[i].displayName) {
             let folder = notes[i].folderName
@@ -2750,8 +2750,8 @@ final class AppModel: ObservableObject {
         for target in notes[i].linkTargets where !noteExists(titled: target) {
             notes.append(Note(title: target, date: notes[i].date, isStub: true))
         }
-        // A diary entry dated within a trip auto-links that trip.
-        addTripLinkIfNeeded(i)
+        // A diary entry dated within a trip auto-links that trip (and sheds one it left).
+        refreshTripLink(i)
         persist()
     }
 
@@ -2773,7 +2773,7 @@ final class AppModel: ObservableObject {
         while notes.contains(where: { Self.norm($0.title) == Self.norm(title) }) { title = "\(base) (\(n))"; n += 1 }
         let note = Note(title: title, date: day, intensity: defaultIntensity(forFolderNamed: "notes/diary"))
         notes.append(note)
-        addTripLinkIfNeeded(notes.count - 1)   // if today falls within a trip, link it
+        refreshTripLink(notes.count - 1)   // if this day falls within a trip, link it
         persist()
         return note.id
     }
@@ -2836,7 +2836,7 @@ final class AppModel: ObservableObject {
         setDetail(&notes[i], key: "Trip start", value: start.map(Self.tripDayString))
         setDetail(&notes[i], key: "Trip end", value: end.map(Self.tripDayString))
         if start != nil, end != nil {
-            for j in notes.indices { addTripLinkIfNeeded(j) }
+            for j in notes.indices { refreshTripLink(j) }
         }
         applyTravelValue(i)   // longer trips grow you more
         persist()
@@ -2847,17 +2847,45 @@ final class AppModel: ObservableObject {
         if let value { n.details.append(NoteDetail(key: key, value: value)) }
     }
 
-    /// If notes[i] is a diary entry dated within a trip and isn't already linked to it,
-    /// append the trip link to its body. Idempotent; does not persist (caller persists).
-    private func addTripLinkIfNeeded(_ i: Int) {
+    /// Keep a diary entry's auto-linked trip consistent with its DATE: add the trip that now
+    /// covers the note's day, and drop any trip link that no longer does (e.g. after backdating
+    /// the entry out of a trip's range). Trips auto-link by date, so the link must follow the
+    /// date — an add-only version left, say, an August Lake Tahoe link on a note rebased to
+    /// January. Idempotent; does not persist (caller persists).
+    private func refreshTripLink(_ i: Int) {
         guard notes.indices.contains(i),
-              Folder.normalize(notes[i].folderName).contains("diary"),
-              let trip = trip(coveringDate: notes[i].date),
-              trip.id != notes[i].id,
-              !notes[i].linkTargets.contains(where: { Self.norm($0) == Self.norm(trip.title) })
-        else { return }
-        let sep = notes[i].body.isEmpty ? "" : "\n"
-        notes[i].body += sep + "[[\(trip.title)]]"
+              Folder.normalize(notes[i].folderName).contains("diary") else { return }
+        let allTrips = trips()                       // one scan; reused for covering + cleanup
+        let cal = Calendar.current
+        let day = cal.startOfDay(for: notes[i].date)
+        let covering = allTrips.first {
+            $0.id != notes[i].id &&
+            day >= cal.startOfDay(for: $0.start) && day <= cal.startOfDay(for: $0.end)
+        }
+        let coveringNorm = covering.map { Self.norm($0.title) }
+        // Remove links to any OTHER trip this entry has fallen out of.
+        for t in allTrips where t.id != notes[i].id {
+            let tn = Self.norm(t.title)
+            if tn != coveringNorm, notes[i].linkTargets.contains(where: { Self.norm($0) == tn }) {
+                removeInlineLink(&notes[i], title: t.title)
+            }
+        }
+        // Add the covering trip if it isn't already linked.
+        if let trip = covering,
+           !notes[i].linkTargets.contains(where: { Self.norm($0) == Self.norm(trip.title) }) {
+            let sep = notes[i].body.isEmpty ? "" : "\n"
+            notes[i].body += sep + "[[\(trip.title)]]"
+        }
+    }
+
+    /// Strip an inline `[[title]]` wikilink (plain, aliased, or with a #heading) from a note's
+    /// body, swallowing a preceding newline so it doesn't leave a blank line behind.
+    private func removeInlineLink(_ n: inout Note, title: String) {
+        let escaped = NSRegularExpression.escapedPattern(for: title)
+        let pattern = "\\n?\\[\\[" + escaped + "(?:[|#][^\\]]*)?\\]\\]"
+        guard let re = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return }
+        let full = NSRange(n.body.startIndex..., in: n.body)
+        n.body = re.stringByReplacingMatches(in: n.body, range: full, withTemplate: "")
     }
 
     /// The most recent diary note dated to `day`, if one exists yet (does NOT create
@@ -3130,7 +3158,7 @@ final class AppModel: ObservableObject {
         save(note)   // also creates stubs for any [[links]]
         // A new diary entry within a trip auto-links it (no-op for other folders).
         if let i = notes.firstIndex(where: { $0.id == note.id }) {
-            addTripLinkIfNeeded(i)
+            refreshTripLink(i)
             if notes[i].body != note.body { persist() }
         }
         // Auto-location for a place note is handled by save() above.
