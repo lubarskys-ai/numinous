@@ -146,8 +146,8 @@ final class AppModel: ObservableObject {
         recomputeLookupIndexes()
         recomputeLastTended()
         recomputeCabinetGroups()
+        recomputeBacklinkIndex()          // before places — pin labels resolve via backlinks
         recomputeMappablePlaces()
-        recomputeBacklinkIndex()
         if loaded == nil || didMigrate || version < Self.schemaVersion {
             storage.save(StoredData(notes: n, folders: f, axes: a, schemaVersion: Self.schemaVersion,
                                     reflections: reflectionLog, followUps: followUps,
@@ -516,7 +516,8 @@ final class AppModel: ObservableObject {
         let id: String            // noteID|placename, stable across renders
         let noteID: UUID
         let title: String         // the note's name (for reference)
-        let placeName: String     // the location's name — what the map pin is labeled with
+        let placeName: String     // the location's name
+        let label: String         // what the map pin is actually labeled with (person/venue, not raw geography)
         let folderName: String
         let date: Date
         let axisID: String?
@@ -535,12 +536,39 @@ final class AppModel: ObservableObject {
             for p in n.allPlaces where p.hasCoordinate && LocationService.looksLikePlace(p.name) {
                 out.append(MappablePlace(id: "\(n.id.uuidString)|\(p.name.lowercased())",
                                          noteID: n.id, title: n.displayName, placeName: p.name,
+                                         label: mapLabel(for: n, place: p),
                                          folderName: n.folderName,
                                          date: n.date, axisID: folder(named: n.folderName)?.axisID,
                                          latitude: p.latitude!, longitude: p.longitude!))
             }
         }
         mappablePlaces = out
+    }
+
+    /// What a map pin should read — the meaningful thing at that spot, not raw geography.
+    /// - A diary entry (named by a date) shows WHERE it happened.
+    /// - A bare "location hub" note (a place-folder note whose title is just the place, e.g.
+    ///   `location/Switzerland`) is the coordinate carrier for whatever links to it. If exactly
+    ///   one real note (a person/event, not another place) references it, show THAT — so the pin
+    ///   reads "Neal Kutner", not "Switzerland". If several reference it, keep the shared place
+    ///   name. If nothing does, it's a place you logged for its own sake — show the place.
+    /// - A named venue note (title differs from the place) shows the clean venue name.
+    /// - Everyone/everything else shows its own name, never a geocoded city or region.
+    private func mapLabel(for n: Note, place p: Place) -> String {
+        if Self.isDateTitled(n.displayName) { return p.name.isEmpty ? n.displayName : p.name }
+        guard Self.isPlaceLikeFolder(n.folderName) else { return n.displayName }
+        let isBareHub = Self.norm(n.displayName) == Self.norm(p.name)
+        if isBareHub {
+            // Only a real entity — a person/idea (not a place, not a stub, not a dated diary
+            // entry) — overrides the geographic name. A diary entry that merely happened at a
+            // venue must NOT rename the venue to its date; that's why Blue Bottle stays "Blue
+            // Bottle" while Switzerland (linked only from Neal's note) reads "Neal Kutner".
+            let referrers = backlinks(to: n).filter {
+                !$0.isStub && !Self.isPlaceLikeFolder($0.folderName) && !Self.isDateTitled($0.displayName)
+            }
+            if referrers.count == 1 { return referrers[0].displayName }
+        }
+        return (!p.name.isEmpty && !p.name.contains(",")) ? p.name : n.displayName
     }
 
     // Cached avatar connectome graph (every note as a node + its engaged/concierge links).
@@ -2102,8 +2130,8 @@ final class AppModel: ObservableObject {
         recomputeLastTended()
         let t2 = CFAbsoluteTimeGetCurrent()
         recomputeCabinetGroups()          // cache the Folders-tab grouping once, not per render
+        recomputeBacklinkIndex()          // cache backlinks once (before places — pin labels use them)
         recomputeMappablePlaces()         // cache the Map's plottable places once, not per render
-        recomputeBacklinkIndex()          // cache backlinks once, so note views don't re-parse all links
         let t3 = CFAbsoluteTimeGetCurrent()
         storage.save(currentSnapshot())   // encodes + writes on a background queue
         runAutoBackup()
