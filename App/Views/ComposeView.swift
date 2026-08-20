@@ -38,6 +38,8 @@ struct ComposeView: View {
     @State private var showLocationPrompt = false
     @State private var locationDraft = ""
     @State private var locating = false
+    @State private var nearbyOptions: [AppModel.NearbyPlace] = []   // venues near you, to pick from
+    @State private var showNearbyPicker = false
     @State private var showFollowUp = false
     @State private var reminderNoteTitle = ""
     @State private var scanning = false
@@ -331,6 +333,15 @@ struct ComposeView: View {
         } label: {
             Image(systemName: "slider.horizontal.3")
         }
+        .confirmationDialog("Where are you?", isPresented: $showNearbyPicker, titleVisibility: .visible) {
+            ForEach(nearbyOptions) { opt in
+                Button("\(opt.name) · \(opt.subtitle)") { insertPlaceLink(model.placeLink(for: opt)) }
+            }
+            Button("Use my address instead") {
+                Task { if let link = await model.placeLink(forName: nil) { insertPlaceLink(link) } }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 
     // MARK: - Actions
@@ -495,15 +506,24 @@ struct ComposeView: View {
 
     private func useCurrentLocation() async {
         locating = true
-        // Capture where you are as a place note + pin, and weave its link into what you're
-        // writing — so the place is entered once and becomes text, a graph node, and a map pin.
-        if let link = await model.placeLink(forName: nil) {
-            let sep = text.isEmpty || text.hasSuffix("\n") ? "" : "\n"
-            text += sep + "📍 " + link
+        // Offer the businesses/venues around you to pick from, so the place is a real venue
+        // (café, shop) rather than a street address. Entered once, its link becomes text, a
+        // graph node, and a map pin. Nothing near → fall back to the GPS/address link.
+        let opts = await model.nearbyPlaceOptions()
+        locating = false
+        if !opts.isEmpty {
+            nearbyOptions = opts; showNearbyPicker = true
+        } else if let link = await model.placeLink(forName: nil) {
+            insertPlaceLink(link)
         } else if !locator.isAuthorized {
             locationDraft = ""; showLocationPrompt = true
         }
-        locating = false
+    }
+
+    /// Weave a `[[places/…]]` place link into the entry text (once), prefixed with a 📍.
+    private func insertPlaceLink(_ link: String) {
+        let sep = text.isEmpty || text.hasSuffix("\n") ? "" : "\n"
+        text += sep + "📍 " + link
     }
 
     /// In diary mode, pull today's entry forward so you continue writing in it.

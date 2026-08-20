@@ -27,6 +27,8 @@ struct NoteDetailView: View {
     @State private var editingLocation = false
     @State private var locationDraft = ""
     @State private var editingPlace: PlaceRef?
+    @State private var nearbyOptions: [AppModel.NearbyPlace] = []   // venues near you, to pick from
+    @State private var showNearbyPicker = false
     @StateObject private var locator = LocationService()
 
     private struct LinkTarget: Identifiable { let id: UUID }
@@ -361,13 +363,28 @@ struct NoteDetailView: View {
                 Label("Enter a place name", systemImage: "mappin")
             }
             Button {
-                Task { await model.captureCurrentPlace(into: note.id); refreshBody(note.id) }   // GPS → place note + pin + body link
+                // Offer the businesses/venues around you to pick from, not just an address.
+                Task {
+                    let opts = await model.nearbyPlaceOptions()
+                    if opts.isEmpty {
+                        await model.captureCurrentPlace(into: note.id); refreshBody(note.id)   // nothing near → address
+                    } else {
+                        nearbyOptions = opts; showNearbyPicker = true
+                    }
+                }
             } label: {
                 Label("Use current location", systemImage: "location.fill")
             }
         } label: {
             Label(note.allPlaces.isEmpty ? "Add location" : "Add another location", systemImage: "plus.circle")
                 .foregroundStyle(.tint)
+        }
+        .confirmationDialog("Where are you?", isPresented: $showNearbyPicker, titleVisibility: .visible) {
+            ForEach(nearbyOptions) { opt in
+                Button("\(opt.name) · \(opt.subtitle)") { model.attachResolvedPlace(opt, into: note.id); refreshBody(note.id) }
+            }
+            Button("Use my address instead") { Task { await model.captureCurrentPlace(into: note.id); refreshBody(note.id) } }
+            Button("Cancel", role: .cancel) {}
         }
     }
 

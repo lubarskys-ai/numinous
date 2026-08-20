@@ -106,6 +106,30 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
         }
     }
 
+    /// Businesses / points of interest within ~`radius` metres of a coordinate, NEAREST FIRST —
+    /// so "find my location" can offer the real venues around you (a café, a shop, a park)
+    /// instead of only a street address. Each result carries a "N m away" subtitle.
+    static func nearbyPlaces(_ center: CLLocationCoordinate2D, radius: CLLocationDistance = 150, limit: Int = 12)
+        async -> [(name: String, subtitle: String, latitude: Double, longitude: Double)] {
+        let request = MKLocalPointsOfInterestRequest(center: center, radius: radius)
+        guard let items = try? await MKLocalSearch(request: request).start().mapItems else { return [] }
+        let here = CLLocation(latitude: center.latitude, longitude: center.longitude)
+        return items
+            .compactMap { item -> (name: String, lat: Double, lng: Double, dist: Double)? in
+                guard let name = item.name else { return nil }
+                let c = item.placemark.coordinate
+                let d = CLLocation(latitude: c.latitude, longitude: c.longitude).distance(from: here)
+                return (name, c.latitude, c.longitude, d)
+            }
+            .sorted { $0.dist < $1.dist }
+            .prefix(limit)
+            .map { (name: $0.name, subtitle: distanceLabel($0.dist), latitude: $0.lat, longitude: $0.lng) }
+    }
+
+    private static func distanceLabel(_ metres: Double) -> String {
+        metres < 1000 ? "\(Int(metres.rounded())) m away" : String(format: "%.1f km away", metres / 1000)
+    }
+
     /// A short address line for a search result — "123 Main St, San Francisco, CA".
     private static func addressLine(_ p: CLPlacemark) -> String {
         [p.thoroughfare, p.locality ?? p.subAdministrativeArea, p.administrativeArea]

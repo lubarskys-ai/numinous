@@ -2560,16 +2560,52 @@ final class AppModel: ObservableObject {
         linkPlace(ensurePlaceNote(name: p.name, latitude: lat, longitude: lng), into: noteID)
     }
 
+    /// A nearby business/venue you can pick instead of a bare address (name + "N m away").
+    struct NearbyPlace: Identifiable, Hashable {
+        let id = UUID()
+        let name: String
+        let subtitle: String
+        let latitude: Double
+        let longitude: Double
+    }
+
+    /// Businesses/venues around where you are right now (nearest first) so a capture can be a
+    /// real place, not a street address. Empty if location is off or nothing is close.
+    func nearbyPlaceOptions(limit: Int = 10) async -> [NearbyPlace] {
+        guard let c = await autoLocator.currentCoordinate() else { return [] }
+        return await LocationService.nearbyPlaces(c, limit: limit).map {
+            NearbyPlace(name: $0.name, subtitle: $0.subtitle, latitude: $0.latitude, longitude: $0.longitude)
+        }
+    }
+
+    /// Attach an already-resolved place (picked from the nearby list) to a note — no re-geocode.
+    func attachResolvedPlace(_ p: NearbyPlace, into noteID: UUID) {
+        linkPlace(ensurePlaceNote(name: p.name, latitude: p.latitude, longitude: p.longitude), into: noteID)
+    }
+
+    /// Composer variant: a `[[places/…]]` link string for an already-resolved nearby place.
+    func placeLink(for p: NearbyPlace) -> String {
+        "[[\(ensurePlaceNote(name: p.name, latitude: p.latitude, longitude: p.longitude))]]"
+    }
+
     /// Action-Button entry: capture where you are right now and file it into TODAY's diary,
-    /// with no UI. Reuses today's diary entry (or opens one), drops in a `📍 [[…]]` place link,
-    /// and returns the resolved place name for a confirmation — or nil if location was
-    /// unavailable or denied.
+    /// with no UI. Headless, so it can't show a chooser — it auto-picks the NEAREST venue
+    /// (a café, a shop) and falls back to the reverse-geocoded address, then a raw coordinate.
+    /// Reuses today's diary entry, drops in a `📍 [[…]]` link, and returns the name it used —
+    /// or nil if location was unavailable or denied.
     @discardableResult
     func logCurrentLocationToTodayDiary() async -> String? {
-        guard let p = await autoLocator.currentPlaceStructured(),
-              let lat = p.latitude, let lng = p.longitude else { return nil }
-        linkPlace(ensurePlaceNote(name: p.name, latitude: lat, longitude: lng), into: openTodayDiary())
-        return p.name
+        guard let c = await autoLocator.currentCoordinate() else { return nil }
+        let name: String, lat: Double, lng: Double
+        if let venue = await LocationService.nearbyPlaces(c, limit: 1).first {
+            (name, lat, lng) = (venue.name, venue.latitude, venue.longitude)
+        } else if let p = await autoLocator.currentPlaceStructured(), let plat = p.latitude, let plng = p.longitude {
+            (name, lat, lng) = (p.name, plat, plng)
+        } else {
+            (name, lat, lng) = (String(format: "%.4f, %.4f", c.latitude, c.longitude), c.latitude, c.longitude)
+        }
+        linkPlace(ensurePlaceNote(name: name, latitude: lat, longitude: lng), into: openTodayDiary())
+        return name
     }
 
     /// Typed name → note: geocode it, make it a place note + pin, and link it into the note.
