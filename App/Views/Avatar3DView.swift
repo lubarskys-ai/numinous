@@ -824,8 +824,8 @@ struct Avatar3DView: UIViewRepresentable {
             // while a stronger, long-range repulsion drives *separate* groups far apart —
             // leaving generous empty space between clusters. Lower kSpring = tighter clusters;
             // higher kRepel = more space between groups.
-            let kSpring = 0.08   // tight clusters / short links
-            let kRepel  = 1.35   // keeps clusters compact (gaps come from component spread below)
+            let kSpring = 0.14   // looser springs let the dense central mass expand (higher = more spread)
+            let kRepel  = 2.2    // stronger repulsion inflates the interconnected core, not just the edges
             // How connected each node is. HIGH-degree nodes (hubs) otherwise pile up in the centre
             // (the "hairball"); we give hub↔hub pairs extra repulsion so they fan out — but a hub's
             // links to its low-degree leaves get NO boost, so those axes keep their length.
@@ -833,9 +833,9 @@ struct Avatar3DView: UIViewRepresentable {
             for e in links where fx[e.a] != nil && fx[e.b] != nil {
                 degree[e.a, default: 0] += 1; degree[e.b, default: 0] += 1
             }
-            let hubK = 3.0        // degree above which a node counts as a hub
-            let hubSpread = 0.02  // how hard hubs push each other apart
-            let hubMax = 5.0      // cap so a super-hub can't blow up the layout
+            let hubK = 2.0        // degree above which a node counts as a hub
+            let hubSpread = 0.08  // how hard hubs push each other apart (unfolds the dense core)
+            let hubMax = 12.0     // cap so a super-hub can't blow up the layout
             var temp = 0.6
             let iters = fdIds.count > 800 ? 18 : (fdIds.count > 400 ? 32 : 80)
             for _ in 0..<iters {
