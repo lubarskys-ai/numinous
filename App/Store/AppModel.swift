@@ -2612,13 +2612,29 @@ final class AppModel: ObservableObject {
         if let noteID, let n = note(id: noteID) {
             already = n.allPlaces.filter { $0.hasCoordinate }.reduce(into: Set<String>()) { $0.insert(Self.norm($1.name)) }
         }
-        // Resolve every candidate concurrently — MapKit is the real filter: only names that map to
-        // a genuine venue come back. Keep source order.
+        // Resolve every candidate concurrently. Keep source order.
         let resolved: [(Int, (name: String, latitude: Double, longitude: Double)?)] =
             await withTaskGroup(of: (Int, (name: String, latitude: Double, longitude: Double)?).self) { group in
                 for (i, name) in candidates.enumerated() {
-                    let query = region.map { "\(name) \($0.name)" } ?? name
-                    group.addTask { (i, await LocationService.searchPlace(query, near: near, radiusMeters: radius)) }
+                    // Append the region name UNLESS it's redundant — a link that IS the region
+                    // ("Hanoi" in a Hanoi note) must not become the query "Hanoi Hanoi".
+                    let n = name.lowercased()
+                    let suffix = region.flatMap { r -> String? in
+                        let rn = r.name.lowercased()
+                        return (n.contains(rn) || rn.contains(n)) ? nil : r.name
+                    }
+                    let query = suffix.map { "\(name) \($0)" } ?? name
+                    group.addTask {
+                        // Venue search first; then a plain geocode, which resolves cities/regions
+                        // (like "Hanoi") that the point-of-interest search may not return.
+                        if let hit = await LocationService.searchPlace(query, near: near, radiusMeters: radius) {
+                            return (i, hit)
+                        }
+                        if let c = await LocationService.coordinate(for: query, near: near) {
+                            return (i, (name: name, latitude: c.latitude, longitude: c.longitude))
+                        }
+                        return (i, nil)
+                    }
                 }
                 var acc: [(Int, (name: String, latitude: Double, longitude: Double)?)] = []
                 for await r in group { acc.append(r) }
@@ -2654,18 +2670,22 @@ final class AppModel: ObservableObject {
         return Array(out.prefix(8))   // cap the concurrent MapKit searches "Find locations" fires
     }
 
-    /// The region a note is about — its NAME ("Thailand", "Bangkok") and CENTRE coordinate — so
+    /// The region a note is about — its NAME ("Thailand", "Hanoi") and CENTRE coordinate — so
     /// links resolve in the right country. In priority: the travel folder/subfolder, the note's
-    /// title, its creation-location text, then any candidate that itself names a city/region/
-    /// country. Geocoded, so only a real region is used. nil if none found.
+    /// title, then a linked place that itself names a city/region/country ([[Hanoi]] IS the
+    /// destination), and only LAST the note's creation-location text — where you were planning
+    /// FROM shouldn't override an explicit place you wrote. Geocoded, so only a real region is
+    /// used. nil if none found.
     func inferredRegion(noteID: UUID?, candidates: [String]) async -> (name: String, center: CLLocationCoordinate2D)? {
         var hints: [String] = []
+        var creationLocation: String?
         if let noteID, let n = note(id: noteID) {
             hints.append(contentsOf: Self.regionHintsFromFolder(n.folderName))  // travel/Thailand → "Thailand"
             hints.append(n.displayName)                                        // title, e.g. "Bangkok Trip"
-            if let loc = n.location, !loc.isEmpty { hints.append(loc) }        // where it was created
+            creationLocation = n.location
         }
-        hints.append(contentsOf: candidates)
+        hints.append(contentsOf: candidates)                                   // a link that IS a region
+        if let loc = creationLocation, !loc.isEmpty { hints.append(loc) }      // last: where it was created
         for name in hints where name.count >= 3 {
             if let c = await LocationService.regionCenter(for: name) { return (name, c) }
         }

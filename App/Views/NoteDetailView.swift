@@ -30,9 +30,19 @@ struct NoteDetailView: View {
     @State private var nearbyOptions: [AppModel.NearbyPlace] = []   // venues near you, to pick from
     @State private var showNearbyPicker = false
     @State private var photoViewerData: PhotoViewerData?   // attached photos opened full-screen
-    @State private var foundLocations: [AppModel.NearbyPlace] = []   // places scanned from the text
+    @State private var foundLocations: [AppModel.NearbyPlace] = []   // places resolved from the note's links
     @State private var showFoundPicker = false
     @State private var scanningLocations = false
+    @State private var hadLocatableLinks = false   // were there links to try, if none resolved?
+
+    /// Title for the Find-locations chooser: results, "couldn't resolve" (links existed but none
+    /// mapped — usually no connection), or "no place links".
+    private var foundLocationsTitle: String {
+        if !foundLocations.isEmpty { return "Places from your links — tap to map" }
+        return hadLocatableLinks
+            ? "Couldn't place those links — check your connection and try again"
+            : "No place links to locate — try Find links first"
+    }
     @StateObject private var locator = LocationService()
 
     private struct LinkTarget: Identifiable { let id: UUID }
@@ -431,9 +441,10 @@ struct NoteDetailView: View {
                 if editedBody.trimmingCharacters(in: .whitespaces).count >= 3 {
                     Button { openFullEditor(note) } label: { Label("Find links", systemImage: "sparkles").font(.caption) }
                     Button {
-                        // Scan the written note for places you mentioned and offer to attach them.
+                        // Locate the note's place links and offer to map them.
                         scanningLocations = true
                         Task {
+                            hadLocatableLinks = !model.linkPlaceCandidates(forNote: note.id).isEmpty
                             foundLocations = await model.findLocations(in: editedBody, forNote: note.id)
                             scanningLocations = false
                             showFoundPicker = true
@@ -447,8 +458,7 @@ struct NoteDetailView: View {
                 Button { openFullEditor(note) } label: { Label("Edit", systemImage: "pencil").font(.caption) }
             }
         }
-        .confirmationDialog(foundLocations.isEmpty ? "No place links to locate — try Find links first" : "Places from your links — tap to map",
-                            isPresented: $showFoundPicker, titleVisibility: .visible) {
+        .confirmationDialog(foundLocationsTitle, isPresented: $showFoundPicker, titleVisibility: .visible) {
             ForEach(foundLocations) { p in
                 Button("\(p.name) · \(p.subtitle)") { model.attachResolvedPlace(p, into: note.id); refreshBody(note.id) }
             }
