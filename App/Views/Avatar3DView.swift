@@ -904,9 +904,19 @@ struct Avatar3DView: UIViewRepresentable {
             let cx = fdIds.map { fx[$0]! }.reduce(0, +) / n
             let cy = fdIds.map { fy[$0]! }.reduce(0, +) / n
             let cz = fdIds.map { fz[$0]! }.reduce(0, +) / n
-            var maxR = 0.01
-            for id in fdIds { maxR = max(maxR, ((fx[id]! - cx) * (fx[id]! - cx) + (fy[id]! - cy) * (fy[id]! - cy) + (fz[id]! - cz) * (fz[id]! - cz)).squareRoot()) }
-            let sc = 3.4 / maxR   // fit to viewport; with groups pre-spread, clusters read tight
+            // Normalize by a high PERCENTILE radius, not the max: one far-flung cluster (or a
+            // spread-out hub) shouldn't shrink everything else into a central blob. The BULK of
+            // nodes then spreads to fill the view; a handful of outliers reach past the edges
+            // (pan/zoom to reach them). This is what stops the graph reading as a middle-of-screen
+            // knot.
+            var radii = [Double](); radii.reserveCapacity(fdIds.count)
+            for id in fdIds {
+                let ddx = fx[id]! - cx, ddy = fy[id]! - cy, ddz = fz[id]! - cz
+                radii.append((ddx * ddx + ddy * ddy + ddz * ddz).squareRoot())
+            }
+            radii.sort()
+            let pR = max(0.01, radii[Int(Double(radii.count - 1) * 0.85)])   // 85th-percentile radius
+            let sc = 3.0 / pR   // spread the bulk to fill the screen
             for id in fdIds { fx[id] = (fx[id]! - cx) * sc; fy[id] = (fy[id]! - cy) * sc; fz[id] = (fz[id]! - cz) * sc }
         }
         // Unlinked files sit on a surrounding shell (fibonacci sphere).
