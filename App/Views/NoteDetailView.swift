@@ -447,7 +447,7 @@ struct NoteDetailView: View {
                 Button { openFullEditor(note) } label: { Label("Edit", systemImage: "pencil").font(.caption) }
             }
         }
-        .confirmationDialog(foundLocations.isEmpty ? "No places found in your note" : "Places you mentioned — tap to attach",
+        .confirmationDialog(foundLocations.isEmpty ? "No place links to locate — try Find links first" : "Places from your links — tap to map",
                             isPresented: $showFoundPicker, titleVisibility: .visible) {
             ForEach(foundLocations) { p in
                 Button("\(p.name) · \(p.subtitle)") { model.attachResolvedPlace(p, into: note.id); refreshBody(note.id) }

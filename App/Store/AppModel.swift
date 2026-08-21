@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import CoreLocation
 import NaturalLanguage
 import NuminousCore
 
@@ -2584,26 +2585,40 @@ final class AppModel: ObservableObject {
         linkPlace(ensurePlaceNote(name: p.name, latitude: p.latitude, longitude: p.longitude), into: noteID)
     }
 
-    /// Scan a note's TEXT for the places you mentioned and resolve each to a real location — so
-    /// after writing "coffee at Blue Bottle with Sam" you can attach Blue Bottle in one tap,
-    /// the location counterpart of "Find links". On-device place-name detection (NaturalLanguage)
-    /// finds the candidates; MapKit resolves them to a venue + coordinate, biased to where you
-    /// are. Skips places already linked on the note. Returns resolved, mappable places.
+    /// Locate the places a note LINKS to — the location counterpart of "Find links". It takes the
+    /// note's `[[links]]` (not a broad text scan), skips people/entities and already-mapped ones,
+    /// and resolves each to a venue via MapKit — biased to the note's INFERRED REGION (a place
+    /// already pinned on it, its travel folder name, where it was created, or a city/country it
+    /// names) so a Bangkok trip's links resolve in Bangkok, not near you. Returns mappable places.
     func findLocations(in text: String, forNote noteID: UUID? = nil) async -> [NearbyPlace] {
-        let candidates = Self.placeNameCandidates(in: text)
+        // Source from the note's links; only fall back to a text scan when there's no note (e.g.
+        // a future composer use), which the note-detail button never hits.
+        let candidates: [String] = noteID.map { linkPlaceCandidates(forNote: $0) } ?? Self.placeNameCandidates(in: text)
         guard !candidates.isEmpty else { return [] }
-        let near = autoLocator.isAuthorized ? await autoLocator.currentCoordinate() : nil
+        // Region strategy — belt and suspenders, because a country is a big fuzzy target:
+        //   1) append the region NAME to each query ("Sky Bar" → "Sky Bar Thailand"), and
+        //   2) bias to the region CENTRE with a COUNTRY-SCALE radius (a tight 60 km bias around a
+        //      country centroid misses the actual city — that's why a Bangkok venue once resolved
+        //      to Rome).
+        // With no named region, bias to a destination already pinned on a linked note, else to
+        // where you are now (at the normal local radius).
+        let region = await inferredRegion(noteID: noteID, candidates: candidates)
+        var near: CLLocationCoordinate2D?
+        var radius: CLLocationDistance = 60_000
+        if let region { near = region.center; radius = 900_000 }        // ~country scale
+        else if let noteID { near = linkedPlaceCoordinate(noteID) }
+        if near == nil, autoLocator.isAuthorized { near = await autoLocator.currentCoordinate() }
         var already = Set<String>()
         if let noteID, let n = note(id: noteID) {
-            already = Set(n.linkTargets.map { Self.norm(Self.leafName($0)) })
-            already.formUnion(n.allPlaces.map { Self.norm($0.name) })
+            already = n.allPlaces.filter { $0.hasCoordinate }.reduce(into: Set<String>()) { $0.insert(Self.norm($1.name)) }
         }
-        // Resolve every candidate concurrently — each is a MapKit search, and MapKit is the real
-        // filter: only names that map to a genuine nearby venue come back. Keep source order.
+        // Resolve every candidate concurrently — MapKit is the real filter: only names that map to
+        // a genuine venue come back. Keep source order.
         let resolved: [(Int, (name: String, latitude: Double, longitude: Double)?)] =
             await withTaskGroup(of: (Int, (name: String, latitude: Double, longitude: Double)?).self) { group in
                 for (i, name) in candidates.enumerated() {
-                    group.addTask { (i, await LocationService.searchPlace(name, near: near)) }
+                    let query = region.map { "\(name) \($0.name)" } ?? name
+                    group.addTask { (i, await LocationService.searchPlace(query, near: near, radiusMeters: radius)) }
                 }
                 var acc: [(Int, (name: String, latitude: Double, longitude: Double)?)] = []
                 for await r in group { acc.append(r) }
@@ -2615,8 +2630,73 @@ final class AppModel: ObservableObject {
             guard let hit, Self.resolvedNameMatches(candidates[i], hit.name) else { continue }
             let key = Self.norm(hit.name)
             guard seen.insert(key).inserted, !already.contains(key) else { continue }
-            out.append(NearbyPlace(name: hit.name, subtitle: "mentioned as “\(candidates[i])”",
-                                   latitude: hit.latitude, longitude: hit.longitude))
+            let sub = Self.norm(hit.name) == Self.norm(candidates[i]) ? "tap to map it" : "from “\(candidates[i])”"
+            out.append(NearbyPlace(name: hit.name, subtitle: sub, latitude: hit.latitude, longitude: hit.longitude))
+        }
+        return out
+    }
+
+    /// The leaf names of the note's links that are worth trying to locate: skip people/entity
+    /// folders and links that are already pinned on the map, keep the rest (bare `[[Bangkok]]`,
+    /// `[[Blue Elephant]]`, a stubbed place with no coordinate yet).
+    func linkPlaceCandidates(forNote noteID: UUID) -> [String] {
+        guard let n = note(id: noteID) else { return [] }
+        var out: [String] = []
+        var seen = Set<String>()
+        for target in n.linkTargets {
+            let fn = Folder.normalize(Self.folderPart(of: target))
+            if ["people", "authors", "contacts", "books"].contains(fn) { continue }   // entities, not places
+            if let linked = note(titled: target), linked.allPlaces.contains(where: { $0.hasCoordinate }) { continue }   // already mapped
+            let leaf = Self.leafName(target)
+            guard LocationService.looksLikePlace(leaf), seen.insert(leaf.lowercased()).inserted else { continue }
+            out.append(leaf)
+        }
+        return Array(out.prefix(8))   // cap the concurrent MapKit searches "Find locations" fires
+    }
+
+    /// The region a note is about — its NAME ("Thailand", "Bangkok") and CENTRE coordinate — so
+    /// links resolve in the right country. In priority: the travel folder/subfolder, the note's
+    /// title, its creation-location text, then any candidate that itself names a city/region/
+    /// country. Geocoded, so only a real region is used. nil if none found.
+    func inferredRegion(noteID: UUID?, candidates: [String]) async -> (name: String, center: CLLocationCoordinate2D)? {
+        var hints: [String] = []
+        if let noteID, let n = note(id: noteID) {
+            hints.append(contentsOf: Self.regionHintsFromFolder(n.folderName))  // travel/Thailand → "Thailand"
+            hints.append(n.displayName)                                        // title, e.g. "Bangkok Trip"
+            if let loc = n.location, !loc.isEmpty { hints.append(loc) }        // where it was created
+        }
+        hints.append(contentsOf: candidates)
+        for name in hints where name.count >= 3 {
+            if let c = await LocationService.regionCenter(for: name) { return (name, c) }
+        }
+        return nil
+    }
+
+    /// A coordinate pinned on a note this one LINKS to (a trip's mapped destination) — a bias to
+    /// use when there's no named region. Deliberately ignores the note's OWN places, which may be
+    /// a GPS/auto-located artifact rather than where the note is really about.
+    private func linkedPlaceCoordinate(_ noteID: UUID) -> CLLocationCoordinate2D? {
+        guard let n = note(id: noteID) else { return nil }
+        for target in n.linkTargets {
+            if let linked = note(titled: target), let p = linked.allPlaces.first(where: { $0.hasCoordinate }),
+               let lat = p.latitude, let lng = p.longitude {
+                return CLLocationCoordinate2D(latitude: lat, longitude: lng)
+            }
+        }
+        return nil
+    }
+
+    /// Region hints from a place-like folder path: the subfolder segments under travel/trips/…
+    /// ("travel/Thailand 2026" → "Thailand 2026" and "Thailand", trailing year stripped).
+    private static func regionHintsFromFolder(_ folderName: String) -> [String] {
+        let segs = folderName.split(separator: "/").map(String.init)
+        guard let top = segs.first, isPlaceLikeFolder(top) else { return [] }
+        var out: [String] = []
+        for seg in segs.dropFirst() {
+            out.append(seg)
+            let stripped = seg.replacingOccurrences(of: #"\s*\d{2,4}\s*$"#, with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespaces)
+            if stripped != seg, stripped.count >= 3 { out.append(stripped) }
         }
         return out
     }

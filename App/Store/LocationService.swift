@@ -72,16 +72,30 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
         return (loc.coordinate.latitude, loc.coordinate.longitude)
     }
 
+    /// The coordinate of a name ONLY when it names a REGION — a city, state/province, or
+    /// country — not a specific street or venue. Used to infer roughly where a note is "about"
+    /// (a trip's country/city), so its other place links resolve there instead of near you.
+    static func regionCenter(for name: String) async -> CLLocationCoordinate2D? {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard looksLikePlace(trimmed) else { return nil }
+        let geocoder = CLGeocoder()
+        guard let m = try? await geocoder.geocodeAddressString(trimmed).first, let loc = m.location else { return nil }
+        // Accept a locality / admin area / country, but not a street address (a specific spot).
+        let namesRegion = (m.locality != nil || m.administrativeArea != nil || m.country != nil)
+        return (namesRegion && m.thoroughfare == nil) ? loc.coordinate : nil
+    }
+
     /// Find a business / point of interest by name via MKLocalSearch — which understands
     /// restaurants, cafés, shops, landmarks, the things the plain address geocoder misses.
     /// Biased toward `near` when given. Returns the resolved name + coordinate, or nil.
-    static func searchPlace(_ name: String, near center: CLLocationCoordinate2D? = nil) async -> (name: String, latitude: Double, longitude: Double)? {
+    static func searchPlace(_ name: String, near center: CLLocationCoordinate2D? = nil,
+                            radiusMeters: CLLocationDistance = 60_000) async -> (name: String, latitude: Double, longitude: Double)? {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard looksLikePlace(trimmed) else { return nil }
         let request = MKLocalSearch.Request()
         request.naturalLanguageQuery = trimmed
         if let center {
-            request.region = MKCoordinateRegion(center: center, latitudinalMeters: 60_000, longitudinalMeters: 60_000)
+            request.region = MKCoordinateRegion(center: center, latitudinalMeters: radiusMeters, longitudinalMeters: radiusMeters)
         }
         guard let item = try? await MKLocalSearch(request: request).start().mapItems.first else { return nil }
         let c = item.placemark.coordinate
