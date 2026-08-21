@@ -2721,13 +2721,20 @@ final class AppModel: ObservableObject {
         return out
     }
 
-    /// Guard against MapKit fuzz: a sentence-starting word like "Had" or "Client" will resolve
-    /// to *some* nearby venue ("Lawton Gas", a hotel) that has nothing to do with what you wrote.
-    /// Keep a hit only when the resolved name actually shares a meaningful word with the mention.
+    /// Guard against MapKit fuzz: a sentence-starting word like "Had" or "Client" resolves to
+    /// *some* venue ("Lawton Gas", a hotel) unrelated to what you wrote. Keep a hit only when the
+    /// resolved name really matches the mention — but tolerantly: MapKit reformats names, so
+    /// "Hanoi" comes back "Ha Noi" and "Zürich" as "Zurich". Compare with spaces/punctuation/
+    /// diacritics stripped, either as a whole or on a shared ≥4-letter word.
     private static func resolvedNameMatches(_ mention: String, _ resolved: String) -> Bool {
-        let r = resolved.lowercased()
-        let words = mention.lowercased().split { !$0.isLetter }.map(String.init).filter { $0.count >= 4 }
-        if words.isEmpty { return r.contains(mention.lowercased()) }
+        func squash(_ s: String) -> String {
+            s.folding(options: .diacriticInsensitive, locale: nil).lowercased().filter { $0.isLetter || $0.isNumber }
+        }
+        let m = squash(mention), r = squash(resolved)
+        guard !m.isEmpty, !r.isEmpty else { return false }
+        if r.contains(m) || m.contains(r) { return true }
+        let words = mention.folding(options: .diacriticInsensitive, locale: nil).lowercased()
+            .split { !$0.isLetter }.map(String.init).filter { $0.count >= 4 }
         return words.contains { r.contains($0) }
     }
 
