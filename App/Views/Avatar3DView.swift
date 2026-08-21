@@ -916,8 +916,18 @@ struct Avatar3DView: UIViewRepresentable {
             }
             radii.sort()
             let pR = max(0.01, radii[Int(Double(radii.count - 1) * 0.85)])   // 85th-percentile radius
-            let sc = 3.0 / pR   // spread the bulk to fill the screen
-            for id in fdIds { fx[id] = (fx[id]! - cx) * sc; fy[id] = (fy[id]! - cy) * sc; fz[id] = (fz[id]! - cz) * sc }
+            // De-densify the CENTRE with a concave power remap: crowded central nodes get pushed
+            // far outward (r^gamma with gamma<1 blows up small radii) while the rim barely moves.
+            // Force sims only run ~18 iterations on a big graph so a dense core never unfolds on its
+            // own, and a solid 3-D ball always reads dense in the middle when flattened to the
+            // screen — this remap fixes both directly, independent of the sim.
+            let targetR = 3.0, gamma = 0.6
+            for id in fdIds {
+                let dx0 = fx[id]! - cx, dy0 = fy[id]! - cy, dz0 = fz[id]! - cz
+                let r = max(0.0001, (dx0 * dx0 + dy0 * dy0 + dz0 * dz0).squareRoot())
+                let s = targetR * pow(r / pR, gamma) / r   // scale ∝ r^(gamma-1): huge near centre, ~1 at rim
+                fx[id] = dx0 * s; fy[id] = dy0 * s; fz[id] = dz0 * s
+            }
         }
         // Unlinked files sit on a surrounding shell (fibonacci sphere).
         let unlinked = ids.filter { !linkedSet.contains($0) }
