@@ -29,6 +29,10 @@ struct NoteDetailView: View {
     @State private var editingPlace: PlaceRef?
     @State private var nearbyOptions: [AppModel.NearbyPlace] = []   // venues near you, to pick from
     @State private var showNearbyPicker = false
+    @State private var photoViewerData: PhotoViewerData?   // attached photos opened full-screen
+    @State private var foundLocations: [AppModel.NearbyPlace] = []   // places scanned from the text
+    @State private var showFoundPicker = false
+    @State private var scanningLocations = false
     @StateObject private var locator = LocationService()
 
     private struct LinkTarget: Identifiable { let id: UUID }
@@ -426,9 +430,29 @@ struct NoteDetailView: View {
                 Spacer()
                 if editedBody.trimmingCharacters(in: .whitespaces).count >= 3 {
                     Button { openFullEditor(note) } label: { Label("Find links", systemImage: "sparkles").font(.caption) }
+                    Button {
+                        // Scan the written note for places you mentioned and offer to attach them.
+                        scanningLocations = true
+                        Task {
+                            foundLocations = await model.findLocations(in: editedBody, forNote: note.id)
+                            scanningLocations = false
+                            showFoundPicker = true
+                        }
+                    } label: {
+                        if scanningLocations { ProgressView().controlSize(.mini) }
+                        else { Label("Find locations", systemImage: "mappin.and.ellipse").font(.caption) }
+                    }
+                    .disabled(scanningLocations)
                 }
                 Button { openFullEditor(note) } label: { Label("Edit", systemImage: "pencil").font(.caption) }
             }
+        }
+        .confirmationDialog(foundLocations.isEmpty ? "No places found in your note" : "Places you mentioned — tap to attach",
+                            isPresented: $showFoundPicker, titleVisibility: .visible) {
+            ForEach(foundLocations) { p in
+                Button("\(p.name) · \(p.subtitle)") { model.attachResolvedPlace(p, into: note.id); refreshBody(note.id) }
+            }
+            Button("Cancel", role: .cancel) {}
         }
     }
 
@@ -650,21 +674,29 @@ struct NoteDetailView: View {
                                 if let image = ImageStore.load(name) {
                                     Image(uiImage: image)
                                         .resizable().scaledToFill()
-                                        .frame(width: 84, height: 84)
-                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                        .frame(width: 110, height: 110)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                        .contentShape(RoundedRectangle(cornerRadius: 12))
+                                        .onTapGesture {   // tap to view full-screen (pinch to zoom, page between)
+                                            photoViewerData = PhotoViewerData(names: photos, start: photos.firstIndex(of: name) ?? 0)
+                                        }
                                         .overlay(alignment: .topTrailing) {
                                             Button {
                                                 model.removePhoto(from: note.id, name: name)
                                             } label: {
                                                 Image(systemName: "xmark.circle.fill")
+                                                    .font(.title3)
                                                     .foregroundStyle(.white, .black.opacity(0.5))
                                             }
-                                            .padding(3)
+                                            .padding(4)
                                         }
                                 }
                             }
                         }
                         .padding(.vertical, 2)
+                    }
+                    .fullScreenCover(item: $photoViewerData) { data in
+                        PhotoViewer(names: data.names, startIndex: data.start)
                     }
                 }
                 // Opt-in: photos taken the SAME day as this note, so you can attach the day's
@@ -1088,16 +1120,17 @@ private struct SameDayPhotoStrip: View {
                 Color.secondary.opacity(0.15)
             }
         }
-        .frame(width: 64, height: 64)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .frame(width: 104, height: 104)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay { if isAdded { Color.black.opacity(0.35) } }
         .overlay(alignment: .topTrailing) {
             if isAdded {
                 Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.white, .green).padding(2)
+                    .font(.title3)
+                    .foregroundStyle(.white, .green).padding(3)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     private func enable() async {
@@ -1112,9 +1145,121 @@ private struct SameDayPhotoStrip: View {
         let found = await PhotoLibrary.photos(on: day, limit: 24)
         await MainActor.run { assets = found }
         for a in found {
-            if let img = await PhotoLibrary.thumbnail(for: a, size: CGSize(width: 128, height: 128)) {
+            if let img = await PhotoLibrary.thumbnail(for: a, size: CGSize(width: 256, height: 256)) {
                 await MainActor.run { thumbs[a.localIdentifier] = img }
             }
         }
+    }
+}
+
+// MARK: - Full-screen photo viewer
+
+/// Data for the full-screen viewer, passed atomically via `.fullScreenCover(item:)` so the
+/// names are never empty at presentation time (the bug with a separate `isPresented` flag).
+private struct PhotoViewerData: Identifiable {
+    let id = UUID()
+    let names: [String]
+    let start: Int
+}
+
+/// Tap an attached photo to open it here: full-screen, page between the note's photos with
+/// the arrows, pinch or double-tap to zoom, drag to pan. Index-based (not a paged TabView,
+/// which renders black inside a fullScreenCover presented from a List).
+private struct PhotoViewer: View {
+    let names: [String]
+    @State private var index: Int
+    @Environment(\.dismiss) private var dismiss
+
+    init(names: [String], startIndex: Int) {
+        self.names = names
+        _index = State(initialValue: min(max(0, startIndex), max(0, names.count - 1)))
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            Group {
+                if names.indices.contains(index), let image = ImageStore.load(names[index]) {
+                    ZoomableImage(image: image)
+                } else {
+                    Text(names.isEmpty ? "No photos to show." : "Couldn't load this photo.")
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+            }
+            .id(index)   // fresh zoom/pan state when you page to a new photo
+            VStack {
+                HStack {
+                    Spacer()
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark.circle.fill").font(.largeTitle)
+                            .foregroundStyle(.white, .black.opacity(0.4))
+                    }
+                }
+                Spacer()
+                if names.count > 1 {
+                    HStack {
+                        Button { if index > 0 { index -= 1 } } label: { Image(systemName: "chevron.left.circle.fill") }
+                            .disabled(index == 0)
+                        Spacer()
+                        Text("\(index + 1) / \(names.count)").font(.headline).foregroundStyle(.white)
+                        Spacer()
+                        Button { if index < names.count - 1 { index += 1 } } label: { Image(systemName: "chevron.right.circle.fill") }
+                            .disabled(index == names.count - 1)
+                    }
+                    .font(.largeTitle)
+                    .foregroundStyle(.white.opacity(0.9), .black.opacity(0.3))
+                }
+            }
+            .padding()
+        }
+        .statusBarHidden()
+    }
+}
+
+/// A single photo that pinches to zoom (also double-tap), and drags to pan when zoomed in.
+private struct ZoomableImage: View {
+    let image: UIImage?
+    @State private var scale: CGFloat = 1
+    @State private var lastScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+
+    var body: some View {
+        // No GeometryReader: inside a paged TabView it can collapse to zero and the image
+        // renders black. scaledToFit + a greedy frame fills the page and letterboxes cleanly.
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable().scaledToFit()
+                    .scaleEffect(scale)
+                    .offset(offset)
+                    .gesture(
+                        MagnificationGesture()
+                            .onChanged { v in scale = min(5, max(1, lastScale * v)) }
+                            .onEnded { _ in
+                                lastScale = scale
+                                if scale <= 1 { withAnimation { offset = .zero; lastOffset = .zero } }
+                            }
+                    )
+                    .simultaneousGesture(
+                        DragGesture()
+                            .onChanged { v in
+                                guard scale > 1 else { return }
+                                offset = CGSize(width: lastOffset.width + v.translation.width,
+                                                height: lastOffset.height + v.translation.height)
+                            }
+                            .onEnded { _ in lastOffset = offset }
+                    )
+                    .onTapGesture(count: 2) {
+                        withAnimation {
+                            if scale > 1 { scale = 1; lastScale = 1; offset = .zero; lastOffset = .zero }
+                            else { scale = 2.5; lastScale = 2.5 }
+                        }
+                    }
+            } else {
+                Color.black
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

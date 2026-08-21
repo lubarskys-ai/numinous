@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import NaturalLanguage
 import NuminousCore
 
 /// A folder's notes, for grouped display. A struct (not a tuple) so it's
@@ -2581,6 +2582,91 @@ final class AppModel: ObservableObject {
     /// Attach an already-resolved place (picked from the nearby list) to a note — no re-geocode.
     func attachResolvedPlace(_ p: NearbyPlace, into noteID: UUID) {
         linkPlace(ensurePlaceNote(name: p.name, latitude: p.latitude, longitude: p.longitude), into: noteID)
+    }
+
+    /// Scan a note's TEXT for the places you mentioned and resolve each to a real location — so
+    /// after writing "coffee at Blue Bottle with Sam" you can attach Blue Bottle in one tap,
+    /// the location counterpart of "Find links". On-device place-name detection (NaturalLanguage)
+    /// finds the candidates; MapKit resolves them to a venue + coordinate, biased to where you
+    /// are. Skips places already linked on the note. Returns resolved, mappable places.
+    func findLocations(in text: String, forNote noteID: UUID? = nil) async -> [NearbyPlace] {
+        let candidates = Self.placeNameCandidates(in: text)
+        guard !candidates.isEmpty else { return [] }
+        let near = autoLocator.isAuthorized ? await autoLocator.currentCoordinate() : nil
+        var already = Set<String>()
+        if let noteID, let n = note(id: noteID) {
+            already = Set(n.linkTargets.map { Self.norm(Self.leafName($0)) })
+            already.formUnion(n.allPlaces.map { Self.norm($0.name) })
+        }
+        // Resolve every candidate concurrently — each is a MapKit search, and MapKit is the real
+        // filter: only names that map to a genuine nearby venue come back. Keep source order.
+        let resolved: [(Int, (name: String, latitude: Double, longitude: Double)?)] =
+            await withTaskGroup(of: (Int, (name: String, latitude: Double, longitude: Double)?).self) { group in
+                for (i, name) in candidates.enumerated() {
+                    group.addTask { (i, await LocationService.searchPlace(name, near: near)) }
+                }
+                var acc: [(Int, (name: String, latitude: Double, longitude: Double)?)] = []
+                for await r in group { acc.append(r) }
+                return acc.sorted { $0.0 < $1.0 }
+            }
+        var out: [NearbyPlace] = []
+        var seen = Set<String>()
+        for (i, hit) in resolved {
+            guard let hit, Self.resolvedNameMatches(candidates[i], hit.name) else { continue }
+            let key = Self.norm(hit.name)
+            guard seen.insert(key).inserted, !already.contains(key) else { continue }
+            out.append(NearbyPlace(name: hit.name, subtitle: "mentioned as “\(candidates[i])”",
+                                   latitude: hit.latitude, longitude: hit.longitude))
+        }
+        return out
+    }
+
+    /// Guard against MapKit fuzz: a sentence-starting word like "Had" or "Client" will resolve
+    /// to *some* nearby venue ("Lawton Gas", a hotel) that has nothing to do with what you wrote.
+    /// Keep a hit only when the resolved name actually shares a meaningful word with the mention.
+    private static func resolvedNameMatches(_ mention: String, _ resolved: String) -> Bool {
+        let r = resolved.lowercased()
+        let words = mention.lowercased().split { !$0.isLetter }.map(String.init).filter { $0.count >= 4 }
+        if words.isEmpty { return r.contains(mention.lowercased()) }
+        return words.contains { r.contains($0) }
+    }
+
+    /// Candidate place/business names in free text. NLTagger's name tags alone miss most local
+    /// businesses ("Tartine Bakery"), so we ALSO take runs of Capitalized Words and let MapKit
+    /// decide which are real venues. People that NLTagger recognizes are excluded so a friend's
+    /// name isn't offered as a place. Longer/multi-word names first — the specific ones resolve
+    /// before generic single words. Capped so "Find locations" stays a handful of searches.
+    static func placeNameCandidates(in text: String) -> [String] {
+        guard text.count >= 3 else { return [] }
+        var names: [String] = []
+        var seen = Set<String>()
+        var people = Set<String>()
+        func add(_ raw: String) {
+            let t = raw.trimmingCharacters(in: CharacterSet(charactersIn: " .,;:!?'\"()")).trimmingCharacters(in: .whitespaces)
+            guard t.count >= 3, t.contains(where: { $0.isLetter }), !people.contains(t.lowercased()) else { return }
+            if seen.insert(t.lowercased()).inserted { names.append(t) }
+        }
+        // NLTagger: keep place/org names; remember personal names so we can exclude them.
+        let tagger = NLTagger(tagSchemes: [.nameType])
+        tagger.string = text
+        let opts: NLTagger.Options = [.omitWhitespace, .omitPunctuation, .omitOther, .joinNames]
+        var tagged: [(String, NLTag)] = []
+        tagger.enumerateTags(in: text.startIndex..<text.endIndex, unit: .word, scheme: .nameType, options: opts) { tag, range in
+            if let tag { tagged.append((String(text[range]), tag)) }
+            return true
+        }
+        for (name, tag) in tagged where tag == .personalName {
+            people.insert(name.trimmingCharacters(in: .whitespaces).lowercased())
+        }
+        for (name, tag) in tagged where tag == .placeName || tag == .organizationName { add(name) }
+        // Runs of Capitalized Words — the wide net MapKit then filters.
+        if let re = try? NSRegularExpression(pattern: "[A-Z][\\p{L}'&.\\-]*(?:\\s+[A-Z][\\p{L}'&.\\-]*){0,4}") {
+            let ns = text as NSString
+            for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+                add(ns.substring(with: m.range))
+            }
+        }
+        return Array(names.sorted { $0.count > $1.count }.prefix(10))
     }
 
     /// Composer variant: a `[[places/…]]` link string for an already-resolved nearby place.
