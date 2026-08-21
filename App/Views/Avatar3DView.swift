@@ -826,6 +826,16 @@ struct Avatar3DView: UIViewRepresentable {
             // higher kRepel = more space between groups.
             let kSpring = 0.08   // tight clusters / short links
             let kRepel  = 1.35   // keeps clusters compact (gaps come from component spread below)
+            // How connected each node is. HIGH-degree nodes (hubs) otherwise pile up in the centre
+            // (the "hairball"); we give hub↔hub pairs extra repulsion so they fan out — but a hub's
+            // links to its low-degree leaves get NO boost, so those axes keep their length.
+            var degree = [UUID: Double]()
+            for e in links where fx[e.a] != nil && fx[e.b] != nil {
+                degree[e.a, default: 0] += 1; degree[e.b, default: 0] += 1
+            }
+            let hubK = 3.0        // degree above which a node counts as a hub
+            let hubSpread = 0.02  // how hard hubs push each other apart
+            let hubMax = 5.0      // cap so a super-hub can't blow up the layout
             var temp = 0.6
             let iters = fdIds.count > 800 ? 18 : (fdIds.count > 400 ? 32 : 80)
             for _ in 0..<iters {
@@ -837,7 +847,9 @@ struct Avatar3DView: UIViewRepresentable {
                         var ex = fx[A]! - fx[B]!, ey = fy[A]! - fy[B]!, ez = fz[A]! - fz[B]!
                         var dist = (ex * ex + ey * ey + ez * ez).squareRoot()
                         if dist < 0.02 { ex += 0.02; dist = 0.02 }
-                        let rep = (kRepel * kRepel) / (dist * dist)
+                        // hub factor is ~1 unless BOTH ends are hubs, so leaf/axis links are untouched.
+                        let hub = min(hubMax, 1.0 + hubSpread * max(0, (degree[A] ?? 0) - hubK) * max(0, (degree[B] ?? 0) - hubK))
+                        let rep = (kRepel * kRepel) / (dist * dist) * hub
                         dx[A, default: 0] += ex * rep; dy[A, default: 0] += ey * rep; dz[A, default: 0] += ez * rep
                         dx[B, default: 0] -= ex * rep; dy[B, default: 0] -= ey * rep; dz[B, default: 0] -= ez * rep
                     }
