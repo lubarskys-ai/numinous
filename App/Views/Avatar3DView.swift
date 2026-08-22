@@ -921,7 +921,7 @@ struct Avatar3DView: UIViewRepresentable {
             // Force sims only run ~18 iterations on a big graph so a dense core never unfolds on its
             // own, and a solid 3-D ball always reads dense in the middle when flattened to the
             // screen — this remap fixes both directly, independent of the sim.
-            let targetR = 3.0, gamma = 0.6
+            let targetR = 3.4, gamma = 0.4   // lower gamma = harder-hollowed centre
             for id in fdIds {
                 let dx0 = fx[id]! - cx, dy0 = fy[id]! - cy, dz0 = fz[id]! - cz
                 let r = max(0.0001, (dx0 * dx0 + dy0 * dy0 + dz0 * dz0).squareRoot())
