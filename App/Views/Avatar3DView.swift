@@ -976,6 +976,30 @@ struct Avatar3DView: UIViewRepresentable {
             }
         }
 
+        // A point on the SURFACE of the implied body — used to scatter skin patches over the
+        // figure once it's mature. Cycles through head / torso / the four limbs.
+        func bodySurfacePoint(_ i: Int) -> SCNVector3 {
+            func r(_ s: Int) -> Double { hrand(i, s) }
+            let th = r(40) * 2 * .pi
+            switch i % 8 {
+            case 0:                                    // head
+                let ph = acos(2 * r(41) - 1), rr = 0.15
+                return v(rr * sin(ph) * cos(th) * 0.9, 0.82 + rr * cos(ph), rr * sin(ph) * sin(th) * 0.9)
+            case 1, 2:                                 // torso (chest → belly)
+                return v(0.20 * cos(th) * 1.2, 0.36 - r(41) * 0.44, 0.20 * sin(th) * 0.7)
+            case 3:                                    // left arm
+                let a = r(41); return v(-0.20 - a * 0.30 + 0.055 * cos(th), 0.42 - a * 0.52, 0.055 * sin(th))
+            case 4:                                    // right arm
+                let a = r(41); return v( 0.20 + a * 0.30 + 0.055 * cos(th), 0.42 - a * 0.52, 0.055 * sin(th))
+            case 5:                                    // left leg
+                let a = r(41); return v(-0.11 + 0.078 * cos(th), -0.30 - a * 0.68, 0.078 * sin(th))
+            case 6:                                    // right leg
+                let a = r(41); return v( 0.11 + 0.078 * cos(th), -0.30 - a * 0.68, 0.078 * sin(th))
+            default:                                   // shoulders / upper chest
+                return v((r(41) - 0.5) * 0.34, 0.36, 0.12 * cos(th))
+            }
+        }
+
         var pos: [UUID: SCNVector3] = [:]
         // Accumulate node positions grouped by axis + a size bucket, so the ENTIRE graph
         // renders as a few batched point clouds (one draw call each) instead of one
@@ -1001,11 +1025,13 @@ struct Avatar3DView: UIViewRepresentable {
                     // the nodes keep breathing room so the connectome stays a spread web
                     // rather than collapsing into a tight knot. The translucent organ mesh
                     // (added below) supplies the actual organ silhouette.
-                    // PROTOTYPE: previewMorph forces the mature figure so the body reads on
-                    // low-maturity demo data. Set back to 0 to make it maturity-driven.
-                    let previewMorph = 0.9
+                    // The figure is only IMPLIED — nodes drift PARTWAY toward their body-part
+                    // region (never fully), so the arrangement suggests a form without snapping
+                    // into a rigid mannequin. previewMorph forces the mature stage on demo data;
+                    // set to 0 to make it fully maturity-driven ("nothing obvious until it is").
+                    let previewMorph = 0.85
                     let rm = max(regionMaturity(axisKey), previewMorph)
-                    let converge = smoothstep(0.05, 0.85, rm) * 0.92
+                    let converge = smoothstep(0.05, 0.85, rm) * 0.72
                     p = lerpV(graphPos(gn.id), bodyTarget(axisKey, i, n), converge)
                 } else {
                     p = graphPos(gn.id)   // the surrounding shell — loose, unintegrated
@@ -1047,35 +1073,32 @@ struct Avatar3DView: UIViewRepresentable {
             connectomeFloat.addChildNode(loose)
         }
 
-        // ── SKIN (prototype) ── After the connectome has resolved into node-limbs, a translucent
-        // membrane grows OVER the figure — the stage between the neural web and the solid body.
-        // Opacity ramps with maturity; previewMorph forces it visible on the demo. It doesn't
-        // write depth, so the nodes keep glowing through the forming skin.
-        let previewMorph = 0.9
-        let skinForm = smoothstep(0.3, 0.85, max(matur, previewMorph))
-        if skinForm > 0.01 {
-            func skinPart(_ geo: SCNGeometry, _ pos: SCNVector3, scale: SCNVector3 = SCNVector3(1, 1, 1), euler: SCNVector3 = SCNVector3(0, 0, 0)) {
+        // ── SKIN PATCHES (late) ── The figure itself is only IMPLIED by the network's
+        // organization; no membrane is drawn until, EVENTUALLY, skin forms as scattered PATCHES
+        // over the implied body parts — dermal plates that multiply and merge as you mature.
+        // Gated high (≥ ~0.72), so before that it's pure neural web. previewSkin forces some
+        // coverage on demo data; set to 0 to make it purely maturity-driven.
+        let previewSkin = 0.88
+        let skinCoverage = smoothstep(0.72, 1.0, max(matur, previewSkin))
+        if skinCoverage > 0.01 {
+            let patchN = 150
+            let shown = Int(Double(patchN) * skinCoverage)
+            for i in 0..<shown {
+                let plate = ball(0.052); plate.segmentCount = 8   // a small skin plate
                 let m = SCNMaterial()
                 m.lightingModel = .physicallyBased
-                m.diffuse.contents = UIColor(red: 0.86, green: 0.80, blue: 0.88, alpha: 1).withAlphaComponent(CGFloat(0.32 * skinForm))
-                m.roughness.contents = 0.55
-                m.emission.contents = UIColor(white: 0.55, alpha: 1); m.emission.intensity = 0.06
-                m.transparency = CGFloat(0.34 * skinForm)
+                m.diffuse.contents = UIColor(red: 0.87, green: 0.80, blue: 0.86, alpha: 1)
+                m.roughness.contents = 0.5
+                m.emission.contents = UIColor(white: 0.5, alpha: 1); m.emission.intensity = 0.04
+                m.transparency = CGFloat(0.55 + 0.4 * skinCoverage)   // firms up as coverage completes
                 m.writesToDepthBuffer = false
-                m.isDoubleSided = true
-                geo.materials = [m]
-                let n = SCNNode(geometry: geo)
-                n.position = pos; n.scale = scale; n.eulerAngles = euler; n.renderingOrder = 1
+                plate.materials = [m]
+                let n = SCNNode(geometry: plate)
+                n.position = bodySurfacePoint(i)
+                n.scale = v(1, 1, 0.45)                                // flattened into a plate
+                n.renderingOrder = 2
                 bodyFloat.addChildNode(n)
             }
-            skinPart(ball(0.15), v(0, 0.82, 0))                                    // head
-            skinPart(limb(0.05, 0.14), v(0, 0.63, 0))                              // neck
-            skinPart(ball(0.20), v(0, 0.34, 0), scale: v(1.4, 1.05, 0.72))         // chest
-            skinPart(ball(0.17), v(0, -0.05, 0), scale: v(1.1, 0.9, 0.72))         // pelvis
-            skinPart(limb(0.055, 0.55), v(-0.34, 0.16, 0), euler: v(0, 0, -0.52))  // left arm (down-out)
-            skinPart(limb(0.055, 0.55), v( 0.34, 0.16, 0), euler: v(0, 0, 0.52))   // right arm (down-out)
-            skinPart(limb(0.078, 0.66), v(-0.11, -0.62, 0))                        // left leg
-            skinPart(limb(0.078, 0.66), v( 0.11, -0.62, 0))                        // right leg
         }
         // (hit/label targets + the moving nodes are returned below, wired up on the main thread)
 
@@ -1117,7 +1140,14 @@ struct Avatar3DView: UIViewRepresentable {
             mat.emission.intensity = (e.cross ? 0.38 : 0.24) * linksAppear   // lighter threads
             mat.transparency = CGFloat((e.cross ? 0.42 : 0.28) * linksAppear)
             mat.writesToDepthBuffer = false
-            thread(a, b, e.cross ? 0.0026 : 0.0017, mat, name: "link:\(e.a.uuidString):\(e.b.uuidString)")
+            // Curved threads: each link bows toward the core instead of cutting straight across,
+            // so the web flows along the body it's forming rather than crisscrossing it. Drawn as
+            // a few short segments following the curve; the whole link shares one hit-test name.
+            let r: CGFloat = e.cross ? 0.0026 : 0.0017
+            let cv = curve(a, b, 6)
+            for k in 0..<(cv.count - 1) {
+                thread(cv[k], cv[k + 1], r, mat, name: "link:\(e.a.uuidString):\(e.b.uuidString)")
+            }
         }
 
         // The body and the connectome each gently float and tumble in space — a
