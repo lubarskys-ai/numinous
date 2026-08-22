@@ -1007,6 +1007,27 @@ struct Avatar3DView: UIViewRepresentable {
             }
         }
 
+        // A loose STARFISH stretch: pull the airy web out along five directions — head (up), two
+        // arms (up-out), two legs (down-out) — so it vaguely reads as a figure WITHOUT densifying.
+        // Each node is assigned a limb by a stable hash and scattered ALONG it, so the arms stay
+        // broad and see-through. This just BIASES direction; the graph's own spread does the rest.
+        let starDirs: [(Double, Double, Double)] = [
+            (0.0, 1.0, 0.05),      // head, up
+            (-0.85, 0.55, 0.0),    // left arm, up-out
+            (0.85, 0.55, 0.0),     // right arm, up-out
+            (-0.42, -0.98, 0.0),   // left leg, down-out
+            (0.42, -0.98, 0.0),    // right leg, down-out
+        ]
+        func starfishTarget(_ id: UUID, _ i: Int) -> SCNVector3 {
+            func r(_ s: Int) -> Double { hrand(i, s) }
+            let d = starDirs[(abs(id.hashValue) % 5)]
+            let along = 0.4 + r(50) * 3.0                     // scatter along the limb (spread)
+            let jit = 0.9                                     // broad limbs, stays airy
+            return v(d.0 * along + (r(51) - 0.5) * jit,
+                     d.1 * along + (r(52) - 0.5) * jit,
+                     d.2 * along + (r(53) - 0.5) * jit)
+        }
+
         var pos: [UUID: SCNVector3] = [:]
         // Accumulate node positions grouped by axis + a size bucket, so the ENTIRE graph
         // renders as a few batched point clouds (one draw call each) instead of one
@@ -1036,20 +1057,12 @@ struct Avatar3DView: UIViewRepresentable {
                     // region (never fully), so the arrangement suggests a form without snapping
                     // into a rigid mannequin. previewMorph forces the mature stage on demo data;
                     // set to 0 to make it fully maturity-driven ("nothing obvious until it is").
-                    // EARLY = spread, airy, see-through: nodes barely drift from their spread
-                    // graph positions, only faintly hinting at a form. The gathering into a dense
-                    // figure — and the body parts that go with it — is a LATE-maturity thing. So
-                    // convergence starts low and only climbs high near full maturity.
-                    // previewMorph sets the previewed stage (≈ mid, mostly spread); real value is 0.
-                    let previewMorph = 0.55
-                    let rm = max(regionMaturity(axisKey), previewMorph)
-                    let converge = smoothstep(0.4, 1.0, rm) * 0.88   // stays low until late, then gathers
-                    // Big target so that WHEN it does gather, the figure fills the view rather than
-                    // knotting centrally.
-                    let bodyScale = 2.2
-                    let t0 = bodyTarget(axisKey, i, n)
-                    let target = v(Double(t0.x) * bodyScale, Double(t0.y) * bodyScale, Double(t0.z) * bodyScale)
-                    p = lerpV(graphPos(gn.id), target, converge)
+                    // Stretch the airy web into a 5-way starfish (a vague figure) — enough to read
+                    // as head + 4 limbs, but a LOOSE pull so it stays spread and see-through, not a
+                    // dense body. (The dense figure with actual body parts is still the late stage.)
+                    _ = n
+                    let stretch = 0.55
+                    p = lerpV(graphPos(gn.id), starfishTarget(gn.id, i), stretch)
                 } else {
                     p = graphPos(gn.id)   // the surrounding shell — loose, unintegrated
                 }
