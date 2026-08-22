@@ -1036,11 +1036,16 @@ struct Avatar3DView: UIViewRepresentable {
                     // region (never fully), so the arrangement suggests a form without snapping
                     // into a rigid mannequin. previewMorph forces the mature stage on demo data;
                     // set to 0 to make it fully maturity-driven ("nothing obvious until it is").
-                    let previewMorph = 0.85
+                    // EARLY = spread, airy, see-through: nodes barely drift from their spread
+                    // graph positions, only faintly hinting at a form. The gathering into a dense
+                    // figure — and the body parts that go with it — is a LATE-maturity thing. So
+                    // convergence starts low and only climbs high near full maturity.
+                    // previewMorph sets the previewed stage (≈ mid, mostly spread); real value is 0.
+                    let previewMorph = 0.55
                     let rm = max(regionMaturity(axisKey), previewMorph)
-                    let converge = smoothstep(0.05, 0.85, rm) * 0.88   // gather enough to SUGGEST a body
-                    // Scale the implied figure up so it SPREADS across the view instead of a dense
-                    // central knot — it fills out (concentrates) naturally as connections grow.
+                    let converge = smoothstep(0.4, 1.0, rm) * 0.88   // stays low until late, then gathers
+                    // Big target so that WHEN it does gather, the figure fills the view rather than
+                    // knotting centrally.
                     let bodyScale = 2.2
                     let t0 = bodyTarget(axisKey, i, n)
                     let target = v(Double(t0.x) * bodyScale, Double(t0.y) * bodyScale, Double(t0.z) * bodyScale)
