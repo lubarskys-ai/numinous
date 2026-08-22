@@ -541,33 +541,23 @@ struct Avatar3DView: UIViewRepresentable {
         var bodySamples: [SCNVector3] = []
         // Prefer the RIGGED, animated body (Mixamo → USDZ) once the form emerges — it keeps
         // its skeleton + breathing/idle animation. Falls back to the static sculpted mesh.
+        // PROTOTYPE: the body is the THREAD structure (the axes) now — no organ meshes, no
+        // sculpted/rigged solid body, no stardust-gather. (The rigged consolidation stage will
+        // come back later as the FINAL state.) Kept behind a flag so it's easy to restore.
+        let showSculptedBody = false
         var usedRigged = false
-        if maxRegion > 0.62,
-           let rigged = RiggedBody.load(dominantColor: color(dominantAxis), growth01: growth(dominantAxis), maturity: matur) {
-            bodyFloat.addChildNode(rigged)
-            usedRigged = true
-        }
-        if let loaded = GLTFBody.load(color: color, growth: growth, regionMaturity: regionMaturity) {
-            if maxRegion > 0.62 && !usedRigged { bodyFloat.addChildNode(loaded.node) }  // solid body only LATE
-            bodySamples = loaded.samples   // static mesh surface points feed the stardust gather
-        } else if !usedRigged {
-            part(ball(0.17), "mind",    v(-0.07, 0.80, 0), scale: v(0.85, 1.15, 1.0))
-            part(ball(0.17), "meaning", v( 0.07, 0.80, 0), scale: v(0.85, 1.15, 1.0))
-            part(limb(0.065, 0.16), "body", v(0, 0.60, 0))
-            part(ball(0.27), "heart",  v(0,  0.38, 0), scale: v(1.0, 0.95, 0.72))
-            part(ball(0.22), "spirit", v(0,  0.12, 0), scale: v(0.95, 1.0, 0.80))
-            part(ball(0.22), "gut",    v(0, -0.06, 0), scale: v(1.0, 0.9, 0.82))
-            part(ball(0.24), "body",   v(0, -0.24, 0), scale: v(1.05, 0.82, 0.86))
-            part(limb(0.07, 0.66), "body", v(-0.29, 0.20, 0), euler: v(0, 0, 0.16))
-            part(limb(0.07, 0.66), "body", v( 0.29, 0.20, 0), euler: v(0, 0, -0.16))
-            part(limb(0.095, 0.80), "body", v(-0.11, -0.64, 0))
-            part(limb(0.095, 0.80), "body", v( 0.11, -0.64, 0))
-            for i in 0..<220 {
-                let ax = ["mind", "meaning", "heart", "spirit", "gut", "body"][i % 6]
-                let c = region(ax)
-                bodySamples.append(v(c.0 + (hrand(i, 4) - 0.5) * 0.22, c.1 + (hrand(i, 5) - 0.5) * 0.5, c.2 + (hrand(i, 6) - 0.5) * 0.16))
+        if showSculptedBody {
+            if maxRegion > 0.62,
+               let rigged = RiggedBody.load(dominantColor: color(dominantAxis), growth01: growth(dominantAxis), maturity: matur) {
+                bodyFloat.addChildNode(rigged)
+                usedRigged = true
+            }
+            if let loaded = GLTFBody.load(color: color, growth: growth, regionMaturity: regionMaturity) {
+                if maxRegion > 0.62 && !usedRigged { bodyFloat.addChildNode(loaded.node) }
+                bodySamples = loaded.samples
             }
         }
+        _ = usedRigged
 
         // A diffuse cloud of dust that begins scattered across the whole view and
         // gathers onto the body's surface as the avatar matures — stardust → human.
@@ -1048,20 +1038,18 @@ struct Avatar3DView: UIViewRepresentable {
                 }
             }
         }
-        // Nodes are the star: a glowing dot per note (soft additive halo + crisp core),
-        // grouped into organ shapes. The organ meshes stay a faint ghost behind them.
+        // Nodes are NOT the star anymore — the AXES form the body. Notes are just faint junctions
+        // where threads meet: tiny, neutral (no organ color), and they FADE as the figure forms
+        // (higher maturity) so the thread-anatomy reads, not a cluster of coloured spheres.
+        // Nodes stay faint junctions — the FORM comes from the density of AXES, not from nodes
+        // or thicker lines. More connections the user makes → more threads → the body fills in.
+        let nodeFade = 0.5
         for (key, pts) in cloudPts where !pts.isEmpty {
             let parts = key.split(separator: "|")
-            let axisKey = String(parts.first ?? "")
             let isHub = parts.count > 1 && parts[1] == "hub"
-            let col = color(axisKey)
-            let coreR: CGFloat = isHub ? 7 : 4.5
-            let glow = pointCloud(pts, color: col, screenRadius: coreR * 2.6,
-                                  opacity: CGFloat(0.2 * nodesAppear), additive: true)
-            glow.renderingOrder = 11
-            connectomeFloat.addChildNode(glow)
-            let core = pointCloud(pts, color: col, screenRadius: coreR,
-                                  opacity: CGFloat(0.95 * nodesAppear))
+            let coreR: CGFloat = isHub ? 3.0 : 1.8
+            let core = pointCloud(pts, color: UIColor(white: 0.85, alpha: 1), screenRadius: coreR,
+                                  opacity: CGFloat(0.6 * nodesAppear * nodeFade))
             core.renderingOrder = 12
             connectomeFloat.addChildNode(core)
         }
@@ -1073,33 +1061,9 @@ struct Avatar3DView: UIViewRepresentable {
             connectomeFloat.addChildNode(loose)
         }
 
-        // ── SKIN PATCHES (late) ── The figure itself is only IMPLIED by the network's
-        // organization; no membrane is drawn until, EVENTUALLY, skin forms as scattered PATCHES
-        // over the implied body parts — dermal plates that multiply and merge as you mature.
-        // Gated high (≥ ~0.72), so before that it's pure neural web. previewSkin forces some
-        // coverage on demo data; set to 0 to make it purely maturity-driven.
-        let previewSkin = 0.88
-        let skinCoverage = smoothstep(0.72, 1.0, max(matur, previewSkin))
-        if skinCoverage > 0.01 {
-            let patchN = 150
-            let shown = Int(Double(patchN) * skinCoverage)
-            for i in 0..<shown {
-                let plate = ball(0.052); plate.segmentCount = 8   // a small skin plate
-                let m = SCNMaterial()
-                m.lightingModel = .physicallyBased
-                m.diffuse.contents = UIColor(red: 0.87, green: 0.80, blue: 0.86, alpha: 1)
-                m.roughness.contents = 0.5
-                m.emission.contents = UIColor(white: 0.5, alpha: 1); m.emission.intensity = 0.04
-                m.transparency = CGFloat(0.55 + 0.4 * skinCoverage)   // firms up as coverage completes
-                m.writesToDepthBuffer = false
-                plate.materials = [m]
-                let n = SCNNode(geometry: plate)
-                n.position = bodySurfacePoint(i)
-                n.scale = v(1, 1, 0.45)                                // flattened into a plate
-                n.renderingOrder = 2
-                bodyFloat.addChildNode(n)
-            }
-        }
+        // No skin, no organ blobs: the AXES (the threads between notes) are what form the body —
+        // limbs, torso, head are shaped by how the connections route, not by nodes or geometry.
+        // Skin comes much later as patches (removed for now while we get the thread-body right).
         // (hit/label targets + the moving nodes are returned below, wired up on the main thread)
 
         // Curved neural threads: each link bows toward the core so it stays inside
@@ -1132,18 +1096,19 @@ struct Avatar3DView: UIViewRepresentable {
             node.renderingOrder = 11
             connectomeFloat.addChildNode(node)
         }
+        // The AXES ARE the body — but each thread stays THIN and consistent. The figure gains
+        // form only from DENSITY: the more connections you make, the more threads fill the limbs
+        // and torso. Pale, not organ-coloured; each curves toward the core so it flows along the
+        // form it's building.
         for e in links where linksAppear > 0.05 {
             guard let a = pos[e.a], let b = pos[e.b] else { continue }
-            let col = e.cross ? UIColor(red: 0.6, green: 0.85, blue: 1.0, alpha: 1) : UIColor(white: 0.78, alpha: 1)
+            let col = e.cross ? UIColor(red: 0.72, green: 0.88, blue: 1.0, alpha: 1) : UIColor(white: 0.88, alpha: 1)
             let mat = SCNMaterial(); mat.lightingModel = .constant
             mat.diffuse.contents = col; mat.emission.contents = col
-            mat.emission.intensity = (e.cross ? 0.38 : 0.24) * linksAppear   // lighter threads
-            mat.transparency = CGFloat((e.cross ? 0.42 : 0.28) * linksAppear)
+            mat.emission.intensity = (e.cross ? 0.5 : 0.36) * linksAppear
+            mat.transparency = CGFloat((e.cross ? 0.55 : 0.42) * linksAppear)
             mat.writesToDepthBuffer = false
-            // Curved threads: each link bows toward the core instead of cutting straight across,
-            // so the web flows along the body it's forming rather than crisscrossing it. Drawn as
-            // a few short segments following the curve; the whole link shares one hit-test name.
-            let r: CGFloat = e.cross ? 0.0026 : 0.0017
+            let r: CGFloat = e.cross ? 0.0024 : 0.0016   // thin, consistent — density does the work
             let cv = curve(a, b, 6)
             for k in 0..<(cv.count - 1) {
                 thread(cv[k], cv[k + 1], r, mat, name: "link:\(e.a.uuidString):\(e.b.uuidString)")
