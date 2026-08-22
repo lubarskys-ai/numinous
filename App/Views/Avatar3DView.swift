@@ -526,6 +526,13 @@ struct Avatar3DView: UIViewRepresentable {
         }
         // ── Maturation: begin as a diffuse cloud that coalesces into a body ──
         let matur = max(0, min(1, maturity))
+        // WHOLE-BODY maturity from the density of the web itself — the more connections, the more
+        // formed the avatar. Headroom-calibrated (pow<1 for early responsiveness, ~6000 links to
+        // fully grow) so today's ~hundreds of links sit in the early "gathering" band with years
+        // of room to develop. previewBodyStage ≥ 0 forces a stage for testing; <0 = real data.
+        let previewBodyStage = -1.0
+        let bodyMaturity = previewBodyStage >= 0 ? previewBodyStage
+            : pow(min(1.0, Double(links.count) / 6000.0), 0.6)
         func hrand(_ i: Int, _ salt: Int) -> Double {
             let x = sin(Double(i) * 12.9898 + Double(salt) * 78.233 + 1.7) * 43758.5453
             return x - floor(x)
@@ -1061,11 +1068,12 @@ struct Avatar3DView: UIViewRepresentable {
                     // region (never fully), so the arrangement suggests a form without snapping
                     // into a rigid mannequin. previewMorph forces the mature stage on demo data;
                     // set to 0 to make it fully maturity-driven ("nothing obvious until it is").
-                    // Stretch the airy web into a 5-way starfish (a vague figure) — enough to read
-                    // as head + 4 limbs, but a LOOSE pull so it stays spread and see-through, not a
-                    // dense body. (The dense figure with actual body parts is still the late stage.)
+                    // The gathering ARC: at low maturity the web is a loose scatter (stretch≈0);
+                    // as connections accumulate the gravitational pull to the five points tightens
+                    // and the starfish figure emerges and defines. Rises fast early so a modest web
+                    // already reads as a gathering form, easing toward a firm pull by mid-maturity.
                     _ = n
-                    let stretch = 0.66   // stronger gravitational pull toward the five points
+                    let stretch = smoothstep(0.02, 0.5, bodyMaturity) * 0.72
                     p = lerpV(graphPos(gn.id), starfishTarget(gn.id, i), stretch)
                 } else {
                     p = graphPos(gn.id)   // the surrounding shell — loose, unintegrated
