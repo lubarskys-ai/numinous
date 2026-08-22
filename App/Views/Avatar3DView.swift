@@ -1021,8 +1021,12 @@ struct Avatar3DView: UIViewRepresentable {
         func starfishTarget(_ id: UUID, _ i: Int) -> SCNVector3 {
             func r(_ s: Int) -> Double { hrand(i, s) }
             let d = starDirs[(abs(id.hashValue) % 5)]
-            let along = 0.4 + r(50) * 3.0                     // scatter along the limb (spread)
-            let jit = 0.9                                     // broad limbs, stays airy
+            // Gravitational pull toward the five POINTS: weight distance toward the limb tip
+            // (pow < 1 biases high) so mass gathers at the extremities — five attractors — with a
+            // thinner tail down the limb. Whole-body: the five points are structural (head + four
+            // limbs), populated by ALL notes regardless of axis — no per-organ split.
+            let along = 1.1 + pow(r(50), 0.42) * 2.3         // dense near the tip, tail inward
+            let jit = 0.7                                     // some spread, still airy
             return v(d.0 * along + (r(51) - 0.5) * jit,
                      d.1 * along + (r(52) - 0.5) * jit,
                      d.2 * along + (r(53) - 0.5) * jit)
@@ -1036,7 +1040,7 @@ struct Avatar3DView: UIViewRepresentable {
         var looseByAxis: [String: [SCNVector3]] = [:]  // UNLINKED nodes → loose, dim, outside
         var hitTargets: [(id: UUID, local: SCNVector3)] = []
         var labelTargets: [(id: UUID, local: SCNVector3, text: String)] = []
-        for (axisKey, group) in Dictionary(grouping: nodes, by: { $0.axis }) {
+        for (_, group) in Dictionary(grouping: nodes, by: { $0.axis }) {   // grouped only to keep hrand salts stable per group
             let n = group.count
             for (i, gn) in group.enumerated() {
                 let linked = linkedSet.contains(gn.id)
@@ -1061,7 +1065,7 @@ struct Avatar3DView: UIViewRepresentable {
                     // as head + 4 limbs, but a LOOSE pull so it stays spread and see-through, not a
                     // dense body. (The dense figure with actual body parts is still the late stage.)
                     _ = n
-                    let stretch = 0.55
+                    let stretch = 0.66   // stronger gravitational pull toward the five points
                     p = lerpV(graphPos(gn.id), starfishTarget(gn.id, i), stretch)
                 } else {
                     p = graphPos(gn.id)   // the surrounding shell — loose, unintegrated
