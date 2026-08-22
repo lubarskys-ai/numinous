@@ -787,8 +787,9 @@ struct Avatar3DView: UIViewRepresentable {
         // sculpted body takes over — so the avatar visibly forms organ-by-organ, not all
         // at once. Nodes still cluster inside each organ (organSample), so the mesh and the
         // connectome read as one thing.
+        // (Disabled: the coloured organ meshes are the old paradigm. The AXES form the body now.)
         let organAxes = ["mind", "meaning", "heart", "spirit", "gut"]
-        for axisKey in organAxes {
+        for axisKey in organAxes where showSculptedBody {
             let mr = max(0, min(1, regionMaturity(axisKey)))
             let organIn = smoothstep(0.12, 0.5, mr)     // materialize across the mid band
             let organOut = smoothstep(0.62, 0.95, mr)   // then give way to the solid body
@@ -1038,7 +1039,12 @@ struct Avatar3DView: UIViewRepresentable {
                     let previewMorph = 0.85
                     let rm = max(regionMaturity(axisKey), previewMorph)
                     let converge = smoothstep(0.05, 0.85, rm) * 0.88   // gather enough to SUGGEST a body
-                    p = lerpV(graphPos(gn.id), bodyTarget(axisKey, i, n), converge)
+                    // Scale the implied figure up so it SPREADS across the view instead of a dense
+                    // central knot — it fills out (concentrates) naturally as connections grow.
+                    let bodyScale = 2.2
+                    let t0 = bodyTarget(axisKey, i, n)
+                    let target = v(Double(t0.x) * bodyScale, Double(t0.y) * bodyScale, Double(t0.z) * bodyScale)
+                    p = lerpV(graphPos(gn.id), target, converge)
                 } else {
                     p = graphPos(gn.id)   // the surrounding shell — loose, unintegrated
                 }
@@ -1122,7 +1128,7 @@ struct Avatar3DView: UIViewRepresentable {
         // form it's building.
         for e in links where linksAppear > 0.05 {
             guard let a = pos[e.a], let b = pos[e.b] else { continue }
-            let col = e.cross ? UIColor(red: 0.72, green: 0.88, blue: 1.0, alpha: 1) : UIColor(white: 0.88, alpha: 1)
+            let col = e.cross ? UIColor(white: 0.94, alpha: 1) : UIColor(white: 0.78, alpha: 1)   // neutral, no colour
             let mat = SCNMaterial(); mat.lightingModel = .constant
             mat.diffuse.contents = col; mat.emission.contents = col
             mat.emission.intensity = (e.cross ? 0.5 : 0.36) * linksAppear
