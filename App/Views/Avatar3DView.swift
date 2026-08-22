@@ -313,19 +313,35 @@ struct Avatar3DView: UIViewRepresentable {
                 overlay.addChildNode(n)
             }
             func brightThread(_ a: SCNVector3, _ b: SCNVector3) {
-                let dx = Double(b.x - a.x), dy = Double(b.y - a.y), dz = Double(b.z - a.z)
-                let d = (dx * dx + dy * dy + dz * dz).squareRoot()
-                guard d > 1e-5 else { return }
-                let cyl = SCNCylinder(radius: 0.004, height: CGFloat(d)); cyl.radialSegmentCount = 6
-                let m = SCNMaterial(); m.lightingModel = .constant
+                // Follow the SAME curvature as the resting design (a quadratic bow toward the
+                // core), drawn as short segments, so a focused link mimics the real thread.
+                let ax = Double(a.x), ay = Double(a.y), az = Double(a.z)
+                let bx = Double(b.x), by = Double(b.y), bz = Double(b.z)
+                let cx = ((ax + bx) / 2) * 0.35, cy = (ay + by) / 2, cz = ((az + bz) / 2) * 0.35 + 0.03
                 let col = UIColor(red: 0.7, green: 0.9, blue: 1.0, alpha: 1)
-                m.diffuse.contents = col; m.emission.contents = col; m.emission.intensity = 0.9
-                m.writesToDepthBuffer = false; cyl.materials = [m]
-                let n = SCNNode(geometry: cyl)
-                n.position = SCNVector3((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2)
-                n.look(at: b, up: SCNVector3(0, 1, 0), localFront: SCNVector3(0, 1, 0))
-                n.renderingOrder = 29
-                overlay.addChildNode(n)
+                let steps = 6
+                var prev = a
+                for i in 1...steps {
+                    let t = Double(i) / Double(steps), u = 1 - t
+                    let px = u * u * ax + 2 * u * t * cx + t * t * bx
+                    let py = u * u * ay + 2 * u * t * cy + t * t * by
+                    let pz = u * u * az + 2 * u * t * cz + t * t * bz
+                    let cur = SCNVector3(Float(px), Float(py), Float(pz))
+                    let dx = px - Double(prev.x), dy = py - Double(prev.y), dz = pz - Double(prev.z)
+                    let d = (dx * dx + dy * dy + dz * dz).squareRoot()
+                    if d > 1e-5 {
+                        let cyl = SCNCylinder(radius: 0.004, height: CGFloat(d)); cyl.radialSegmentCount = 6
+                        let m = SCNMaterial(); m.lightingModel = .constant
+                        m.diffuse.contents = col; m.emission.contents = col; m.emission.intensity = 0.9
+                        m.writesToDepthBuffer = false; cyl.materials = [m]
+                        let n = SCNNode(geometry: cyl)
+                        n.position = SCNVector3(Float((Double(prev.x) + px) / 2), Float((Double(prev.y) + py) / 2), Float((Double(prev.z) + pz) / 2))
+                        n.look(at: cur, up: SCNVector3(0, 1, 0), localFront: SCNVector3(0, 1, 0))
+                        n.renderingOrder = 29
+                        overlay.addChildNode(n)
+                    }
+                    prev = cur
+                }
             }
             for (a, b) in links where ids.contains(a) && ids.contains(b) {
                 if let pa = positions[a], let pb = positions[b] { brightThread(pa, pb) }
@@ -1021,7 +1037,7 @@ struct Avatar3DView: UIViewRepresentable {
                     // set to 0 to make it fully maturity-driven ("nothing obvious until it is").
                     let previewMorph = 0.85
                     let rm = max(regionMaturity(axisKey), previewMorph)
-                    let converge = smoothstep(0.05, 0.85, rm) * 0.72
+                    let converge = smoothstep(0.05, 0.85, rm) * 0.88   // gather enough to SUGGEST a body
                     p = lerpV(graphPos(gn.id), bodyTarget(axisKey, i, n), converge)
                 } else {
                     p = graphPos(gn.id)   // the surrounding shell — loose, unintegrated
@@ -1041,22 +1057,26 @@ struct Avatar3DView: UIViewRepresentable {
         // Nodes are NOT the star anymore — the AXES form the body. Notes are just faint junctions
         // where threads meet: tiny, neutral (no organ color), and they FADE as the figure forms
         // (higher maturity) so the thread-anatomy reads, not a cluster of coloured spheres.
-        // Nodes stay faint junctions — the FORM comes from the density of AXES, not from nodes
-        // or thicker lines. More connections the user makes → more threads → the body fills in.
-        let nodeFade = 0.5
+        // Small neuron-like cell bodies at the ends of the axes (dendrites) — pale and NEUTRAL,
+        // never organ-coloured. Kept small; the form comes from the density of axes, not node size.
         for (key, pts) in cloudPts where !pts.isEmpty {
             let parts = key.split(separator: "|")
             let isHub = parts.count > 1 && parts[1] == "hub"
-            let coreR: CGFloat = isHub ? 3.0 : 1.8
-            let core = pointCloud(pts, color: UIColor(white: 0.85, alpha: 1), screenRadius: coreR,
-                                  opacity: CGFloat(0.6 * nodesAppear * nodeFade))
+            let coreR: CGFloat = isHub ? 3.4 : 2.2
+            let glow = pointCloud(pts, color: UIColor(white: 0.9, alpha: 1), screenRadius: coreR * 1.9,
+                                  opacity: CGFloat(0.13 * nodesAppear), additive: true)   // faint soma halo
+            glow.renderingOrder = 11
+            connectomeFloat.addChildNode(glow)
+            let core = pointCloud(pts, color: UIColor(white: 0.96, alpha: 1), screenRadius: coreR,
+                                  opacity: CGFloat(0.9 * nodesAppear))   // crisp cell body
             core.renderingOrder = 12
             connectomeFloat.addChildNode(core)
         }
-        // Unlinked notes: small, dim, no glow — present but clearly not part of the web.
-        for (axisKey, pts) in looseByAxis where !pts.isEmpty {
-            let loose = pointCloud(pts, color: color(axisKey), screenRadius: 2.2,
-                                   opacity: CGFloat(0.28 * nodesAppear))
+        // Unlinked notes: tiny, dim, NEUTRAL (no axis colour) — faint motes around the figure,
+        // never coloured blobs. All colour is gone from the body; the axes carry the form.
+        for (_, pts) in looseByAxis where !pts.isEmpty {
+            let loose = pointCloud(pts, color: UIColor(white: 0.7, alpha: 1), screenRadius: 1.6,
+                                   opacity: CGFloat(0.2 * nodesAppear))
             loose.renderingOrder = 10
             connectomeFloat.addChildNode(loose)
         }
