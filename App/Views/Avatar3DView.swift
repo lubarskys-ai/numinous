@@ -939,39 +939,40 @@ struct Avatar3DView: UIViewRepresentable {
         }
         func graphPos(_ id: UUID) -> SCNVector3 { v(fx[id] ?? 0, fy[id] ?? 0, fz[id] ?? 0) }
 
-        // Each axis's nodes settle into the SHAPE of its organ — heart lobes tapering to a
-        // point, brain hemispheres, a gut coil, a radiant core, an aura shell — so even a
-        // young graph coalesces into a suggestion of an organ system rather than a vague
-        // orb. Sparse notes trace a faint outline (infancy); more notes fill the organ in.
-        func organSample(_ axis: String, _ i: Int, _ n: Int) -> SCNVector3 {
-            let c = region(axis)
-            let t = (Double(i) + 0.5) / Double(max(1, n))
+        // The connectome IS the body: each axis's connected notes migrate into a HUMANOID part,
+        // so the neural web resolves into a figure — head, torso, spine, and four limbs — rather
+        // than an organ system. Which axis grows which part is the feedback: a neglected area
+        // leaves its limb sparse and unformed. Coordinates are in body space (feet ≈ y −1, crown
+        // ≈ y 0.95); the converge step below scales the whole graph down onto it as maturity rises.
+        func bodyTarget(_ axis: String, _ i: Int, _ n: Int) -> SCNVector3 {
             func r(_ salt: Int) -> Double { hrand(i, salt) }
+            let jit = 0.04
             switch axis {
-            case "heart":
-                if r(20) < 0.62 {                    // two lobes at the top
-                    let lobe = r(21) < 0.5 ? -1.0 : 1.0
-                    let rr = 0.05 * r(22).squareRoot(), ang = r(23) * 2 * .pi
-                    return v(c.0 + lobe * 0.028 + rr * cos(ang), c.1 + 0.03 + rr * sin(ang) * 0.85, c.2 + (r(24) - 0.5) * 0.05)
-                }
-                let tp = r(25)                       // tapering to a point below
-                return v(c.0 + (r(26) - 0.5) * 0.05 * (1 - tp), c.1 + 0.02 - tp * 0.09, c.2 + (r(27) - 0.5) * 0.04)
-            case "mind", "meaning":                  // a hemisphere offset to one side
+            case "mind", "meaning":                  // the HEAD (a rounded skull, split L/R by axis)
                 let side = axis == "mind" ? -1.0 : 1.0
-                let rr = 0.055 * pow(r(20), 1.0 / 3.0), th = r(21) * 2 * .pi, ph = acos(2 * r(22) - 1)
-                return v(c.0 + side * 0.03 + rr * sin(ph) * cos(th) * 0.8, c.1 + rr * cos(ph) * 0.9, c.2 + rr * sin(ph) * sin(th))
-            case "gut":                              // a serpentine coil winding downward
-                return v(c.0 + sin(t * .pi * 3) * 0.05 + (r(20) - 0.5) * 0.02,
-                         c.1 + (0.5 - t) * 0.13 + (r(21) - 0.5) * 0.02,
-                         c.2 + cos(t * .pi * 2) * 0.03 + (r(22) - 0.5) * 0.02)
-            case "body":                             // spread through torso and limbs
-                return v(c.0 + (r(20) - 0.5) * 0.17, c.1 + (r(21) - 0.5) * 0.55, c.2 + (r(22) - 0.5) * 0.10)
-            case "influences":                       // an aura shell around the figure
-                let rr = 0.15 + r(20) * 0.05, th = r(21) * 2 * .pi, ph = acos(2 * r(22) - 1)
-                return v(c.0 + rr * sin(ph) * cos(th), c.1 + rr * cos(ph) * 0.85, c.2 + rr * sin(ph) * sin(th))
-            default:                                 // spirit: a small radiant core
-                let rr = 0.045 * pow(r(20), 1.0 / 3.0), th = r(21) * 2 * .pi, ph = acos(2 * r(22) - 1)
-                return v(c.0 + rr * sin(ph) * cos(th), c.1 + rr * cos(ph), c.2 + rr * sin(ph) * sin(th))
+                let rr = 0.14 * pow(r(20), 1.0 / 3.0), th = r(21) * 2 * .pi, ph = acos(2 * r(22) - 1)
+                return v(side * 0.03 + rr * sin(ph) * cos(th) * 0.85, 0.82 + rr * cos(ph), rr * sin(ph) * sin(th) * 0.9)
+            case "heart":                            // the CHEST / upper torso (broad shoulders)
+                return v((r(20) - 0.5) * 0.34, 0.36 + (r(21) - 0.5) * 0.30, (r(22) - 0.5) * 0.15)
+            case "spirit":                           // the SPINE — a column down the core
+                let t = (Double(i) + 0.5) / Double(max(1, n))
+                return v((r(20) - 0.5) * 0.06, 0.5 - t * 0.7, -0.03 + (r(21) - 0.5) * 0.04)
+            case "gut":                              // the PELVIS / lower core
+                return v((r(20) - 0.5) * 0.24, -0.06 + (r(21) - 0.5) * 0.22, (r(22) - 0.5) * 0.12)
+            case "body":                             // the FOUR LIMBS — arms and legs
+                let along = r(30)                    // 0 = joint, 1 = extremity
+                switch i % 4 {
+                case 0: return v(-0.20 - along * 0.30, 0.42 - along * 0.52 + (r(31) - 0.5) * jit, (r(32) - 0.5) * jit)  // L arm
+                case 1: return v( 0.20 + along * 0.30, 0.42 - along * 0.52 + (r(31) - 0.5) * jit, (r(32) - 0.5) * jit)  // R arm
+                case 2: return v(-0.11 + (r(31) - 0.5) * jit, -0.30 - along * 0.68, (r(32) - 0.5) * jit)                // L leg
+                default: return v( 0.11 + (r(31) - 0.5) * jit, -0.30 - along * 0.68, (r(32) - 0.5) * jit)              // R leg
+                }
+            case "influences":                       // an aura shell around the whole figure
+                let rr = 0.55 + r(20) * 0.12, th = r(21) * 2 * .pi, ph = acos(2 * r(22) - 1)
+                return v(rr * sin(ph) * cos(th), 0.05 + rr * cos(ph) * 0.95, rr * sin(ph) * sin(th))
+            default:                                  // fallback: near the core
+                let c = region(axis)
+                return v(c.0, c.1, c.2)
             }
         }
 
@@ -1000,8 +1001,12 @@ struct Avatar3DView: UIViewRepresentable {
                     // the nodes keep breathing room so the connectome stays a spread web
                     // rather than collapsing into a tight knot. The translucent organ mesh
                     // (added below) supplies the actual organ silhouette.
-                    let converge = smoothstep(0.05, 0.9, regionMaturity(axisKey)) * 0.6
-                    p = lerpV(graphPos(gn.id), organSample(axisKey, i, n), converge)
+                    // PROTOTYPE: previewMorph forces the mature figure so the body reads on
+                    // low-maturity demo data. Set back to 0 to make it maturity-driven.
+                    let previewMorph = 0.9
+                    let rm = max(regionMaturity(axisKey), previewMorph)
+                    let converge = smoothstep(0.05, 0.85, rm) * 0.92
+                    p = lerpV(graphPos(gn.id), bodyTarget(axisKey, i, n), converge)
                 } else {
                     p = graphPos(gn.id)   // the surrounding shell — loose, unintegrated
                 }
@@ -1040,6 +1045,37 @@ struct Avatar3DView: UIViewRepresentable {
                                    opacity: CGFloat(0.28 * nodesAppear))
             loose.renderingOrder = 10
             connectomeFloat.addChildNode(loose)
+        }
+
+        // ── SKIN (prototype) ── After the connectome has resolved into node-limbs, a translucent
+        // membrane grows OVER the figure — the stage between the neural web and the solid body.
+        // Opacity ramps with maturity; previewMorph forces it visible on the demo. It doesn't
+        // write depth, so the nodes keep glowing through the forming skin.
+        let previewMorph = 0.9
+        let skinForm = smoothstep(0.3, 0.85, max(matur, previewMorph))
+        if skinForm > 0.01 {
+            func skinPart(_ geo: SCNGeometry, _ pos: SCNVector3, scale: SCNVector3 = SCNVector3(1, 1, 1), euler: SCNVector3 = SCNVector3(0, 0, 0)) {
+                let m = SCNMaterial()
+                m.lightingModel = .physicallyBased
+                m.diffuse.contents = UIColor(red: 0.86, green: 0.80, blue: 0.88, alpha: 1).withAlphaComponent(CGFloat(0.32 * skinForm))
+                m.roughness.contents = 0.55
+                m.emission.contents = UIColor(white: 0.55, alpha: 1); m.emission.intensity = 0.06
+                m.transparency = CGFloat(0.34 * skinForm)
+                m.writesToDepthBuffer = false
+                m.isDoubleSided = true
+                geo.materials = [m]
+                let n = SCNNode(geometry: geo)
+                n.position = pos; n.scale = scale; n.eulerAngles = euler; n.renderingOrder = 1
+                bodyFloat.addChildNode(n)
+            }
+            skinPart(ball(0.15), v(0, 0.82, 0))                                    // head
+            skinPart(limb(0.05, 0.14), v(0, 0.63, 0))                              // neck
+            skinPart(ball(0.20), v(0, 0.34, 0), scale: v(1.4, 1.05, 0.72))         // chest
+            skinPart(ball(0.17), v(0, -0.05, 0), scale: v(1.1, 0.9, 0.72))         // pelvis
+            skinPart(limb(0.055, 0.55), v(-0.34, 0.16, 0), euler: v(0, 0, -0.52))  // left arm (down-out)
+            skinPart(limb(0.055, 0.55), v( 0.34, 0.16, 0), euler: v(0, 0, 0.52))   // right arm (down-out)
+            skinPart(limb(0.078, 0.66), v(-0.11, -0.62, 0))                        // left leg
+            skinPart(limb(0.078, 0.66), v( 0.11, -0.62, 0))                        // right leg
         }
         // (hit/label targets + the moving nodes are returned below, wired up on the main thread)
 
