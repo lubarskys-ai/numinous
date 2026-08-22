@@ -407,14 +407,17 @@ final class AppModel: ObservableObject {
     private var noteIndexByID: [UUID: Int] = [:]
     private var noteIndexByTitle: [String: Int] = [:]
     private var folderIndexByID: [String: Int] = [:]
+    private var noteByCalendarEvent: [String: UUID] = [:]   // event externalID → note id (O(1))
 
     private func recomputeLookupIndexes() {
         noteIndexByID.removeAll(keepingCapacity: true)
         noteIndexByTitle.removeAll(keepingCapacity: true)
         folderIndexByID.removeAll(keepingCapacity: true)
+        noteByCalendarEvent.removeAll(keepingCapacity: true)
         for (i, n) in notes.enumerated() {
             noteIndexByID[n.id] = i
             noteIndexByTitle[Self.norm(n.title)] = i
+            if n.origin?.source == "calendar", let ext = n.origin?.externalID { noteByCalendarEvent[ext] = n.id }
         }
         for (i, f) in folders.enumerated() { folderIndexByID[f.id] = i }
     }
@@ -482,7 +485,10 @@ final class AppModel: ObservableObject {
     func noteExists(titled title: String) -> Bool { note(titled: title) != nil }
 
     func noteID(forCalendarEvent eventID: String) -> UUID? {
-        notes.first { $0.origin?.source == "calendar" && $0.origin?.externalID == eventID }?.id
+        // O(1) via index (built in recomputeLookupIndexes) — this is called per event ROW on every
+        // Calendar re-render, so an O(n) scan here froze the screen on a large note store.
+        if let id = noteByCalendarEvent[eventID], note(id: id) != nil { return id }
+        return notes.first { $0.origin?.source == "calendar" && $0.origin?.externalID == eventID }?.id
     }
 
     /// One top-level cabinet: a category name and the notes under it (and its subfolders).
