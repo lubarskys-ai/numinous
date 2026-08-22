@@ -317,7 +317,7 @@ struct Avatar3DView: UIViewRepresentable {
                 // core), drawn as short segments, so a focused link mimics the real thread.
                 let ax = Double(a.x), ay = Double(a.y), az = Double(a.z)
                 let bx = Double(b.x), by = Double(b.y), bz = Double(b.z)
-                let cx = ((ax + bx) / 2) * 0.35, cy = (ay + by) / 2, cz = ((az + bz) / 2) * 0.35 + 0.03
+                let cx = ((ax + bx) / 2) * 0.12, cy = ((ay + by) / 2) * 0.45, cz = ((az + bz) / 2) * 0.12 + 0.03
                 let col = UIColor(red: 0.7, green: 0.9, blue: 1.0, alpha: 1)
                 let steps = 6
                 var prev = a
@@ -1115,7 +1115,10 @@ struct Avatar3DView: UIViewRepresentable {
         // a small, slow travelling signal.
         func curve(_ a: SCNVector3, _ b: SCNVector3, _ steps: Int) -> [SCNVector3] {
             let mx = (Double(a.x) + Double(b.x)) / 2, my = (Double(a.y) + Double(b.y)) / 2, mz = (Double(a.z) + Double(b.z)) / 2
-            let cx = mx * 0.35, cy = my, cz = mz * 0.35 + 0.03   // control pulled toward the spine
+            // Control pulled HARD toward the core (torso centre): a cross-limb thread makes a sharp,
+            // curvy turn in through the middle and back out — funnelling the web through a central
+            // trunk and out along each limb, so the limbs/head carve out and the gaps stay open.
+            let cx = mx * 0.12, cy = my * 0.45, cz = mz * 0.12 + 0.03
             var pts: [SCNVector3] = []
             for i in 0...steps {
                 let t = Double(i) / Double(steps), u = 1 - t
