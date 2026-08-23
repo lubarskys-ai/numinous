@@ -27,8 +27,6 @@ struct NoteDetailView: View {
     @State private var editingLocation = false
     @State private var locationDraft = ""
     @State private var editingPlace: PlaceRef?
-    @State private var nearbyOptions: [AppModel.NearbyPlace] = []   // venues near you, to pick from
-    @State private var showNearbyPicker = false
     @State private var photoViewerData: PhotoViewerData?   // attached photos opened full-screen
     @State private var foundLocations: [AppModel.NearbyPlace] = []   // places resolved from the note's links
     @State private var showFoundPicker = false
@@ -90,8 +88,8 @@ struct NoteDetailView: View {
             }
             .sheet(isPresented: $showPlacePicker) {
                 PlacePickerView { r in
-                    model.linkPlace(model.ensurePlaceNote(name: r.name, latitude: r.latitude, longitude: r.longitude), into: note.id)
-                    refreshBody(note.id)
+                    // Store the chosen place DIRECTLY on this note (no hub); the note is the pin.
+                    model.addPlace(note.id, name: r.name, latitude: r.latitude, longitude: r.longitude)
                 }
             }
             .alert("New genre", isPresented: Binding(get: { newGenreForNote != nil }, set: { if !$0 { newGenreForNote = nil } })) {
@@ -377,15 +375,8 @@ struct NoteDetailView: View {
                 Label("Enter a place name", systemImage: "mappin")
             }
             Button {
-                // Offer the businesses/venues around you to pick from, not just an address.
-                Task {
-                    let opts = await model.nearbyPlaceOptions()
-                    if opts.isEmpty {
-                        await model.captureCurrentPlace(into: note.id); refreshBody(note.id)   // nothing near → address
-                    } else {
-                        nearbyOptions = opts; showNearbyPicker = true
-                    }
-                }
+                // One step: drop your current GPS straight onto THIS note (no separate hub).
+                Task { await model.addCurrentLocationDirectly(into: note.id); refreshBody(note.id) }
             } label: {
                 Label("Use current location", systemImage: "location.fill")
             }
@@ -393,21 +384,14 @@ struct NoteDetailView: View {
             Label(note.allPlaces.isEmpty ? "Add location" : "Add another location", systemImage: "plus.circle")
                 .foregroundStyle(.tint)
         }
-        .confirmationDialog("Where are you?", isPresented: $showNearbyPicker, titleVisibility: .visible) {
-            ForEach(nearbyOptions) { opt in
-                Button("\(opt.name) · \(opt.subtitle)") { model.attachResolvedPlace(opt, into: note.id); refreshBody(note.id) }
-            }
-            Button("Use my address instead") { Task { await model.captureCurrentPlace(into: note.id); refreshBody(note.id) } }
-            Button("Cancel", role: .cancel) {}
-        }
     }
 
-    /// Geocode a typed place name and weave it into the note as a mappable, linked place —
-    /// entered once, it becomes note text, a graph node, and a map pin.
+    /// Geocode a typed place name and store it DIRECTLY on this note — the note itself becomes
+    /// the pin, labeled with the note's own name. No separate place-hub, one seamless step.
     private func addTypedPlace(to id: UUID, name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
-        Task { await model.attachPlaceByName(trimmed, into: id); refreshBody(id) }
+        Task { await model.addLocationDirectly(name: trimmed, into: id); refreshBody(id) }
     }
 
     /// Re-sync the editable body buffer after a model action rewrote the note body (adding a

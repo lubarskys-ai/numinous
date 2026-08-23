@@ -31,7 +31,8 @@ struct MapView: View {
 
     @State private var folder: String? = nil          // nil = all folders
     @State private var period: Period = .all
-    @State private var position: MapCameraPosition = .automatic
+    // Open centered on where you are (falls back to framing all pins if location is off).
+    @State private var position: MapCameraPosition = .userLocation(fallback: .automatic)
     @State private var openNote: NoteRef?
     @State private var selection: String?             // tapped marker's stable id
     @State private var geocodedOnce = false

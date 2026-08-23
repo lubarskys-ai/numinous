@@ -2809,12 +2809,41 @@ final class AppModel: ObservableObject {
 
     /// Typed name → note: geocode it, make it a place note + pin, and link it into the note.
     func attachPlaceByName(_ name: String, into noteID: UUID) async {
-        let near = autoLocator.isAuthorized ? await autoLocator.currentCoordinate() : nil
+        let near = await searchBias()
         if let hit = await LocationService.searchPlace(name, near: near) {
             linkPlace(ensurePlaceNote(name: hit.name, latitude: hit.latitude, longitude: hit.longitude), into: noteID)
         } else if let c = await LocationService.coordinate(for: name, near: near) {
             linkPlace(ensurePlaceNote(name: name, latitude: c.latitude, longitude: c.longitude), into: noteID)
         }
+    }
+
+    /// Where to bias a place search: where you ARE now, else your Home. Stops an ambiguous name
+    /// ("Jonathan's Landing") from resolving to a same-named place across the country (Dover).
+    func searchBias() async -> CLLocationCoordinate2D? {
+        if autoLocator.isAuthorized, let c = await autoLocator.currentCoordinate() { return c }
+        if let h = homeLocation, let lat = h.latitude, let lon = h.longitude {
+            return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+        }
+        return nil
+    }
+
+    /// Add a location DIRECTLY to a note — NO separate place-hub. Geocodes the name (biased to
+    /// you / Home) and stores the coordinate on THIS note, so the note itself is the pin and its
+    /// own name is the label. One seamless step, no redundant hub note.
+    func addLocationDirectly(name: String, into noteID: UUID) async {
+        let near = await searchBias()
+        let leaf = name.trimmingCharacters(in: .whitespaces)
+        if let hit = await LocationService.searchPlace(leaf, near: near) {
+            addPlace(noteID, name: leaf, latitude: hit.latitude, longitude: hit.longitude)
+        } else if let c = await LocationService.coordinate(for: leaf, near: near) {
+            addPlace(noteID, name: leaf, latitude: c.latitude, longitude: c.longitude)
+        }
+    }
+
+    /// Current GPS → stored DIRECTLY on the note (no hub); the note is the pin.
+    func addCurrentLocationDirectly(into noteID: UUID) async {
+        guard let p = await autoLocator.currentPlaceStructured(), let lat = p.latitude, let lng = p.longitude else { return }
+        addPlace(noteID, name: p.name, latitude: lat, longitude: lng)
     }
 
     /// For the composer (a note that isn't saved yet): resolve a place to a `[[places/…]]`
