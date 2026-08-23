@@ -226,7 +226,19 @@ private struct LinkTextView: UIViewRepresentable {
         /// storage and invalidates every glyph — far too heavy to run on each keystroke and
         /// caret move (it was jittering the caret). We only pay that cost when this changes.
         private var lastStyleSignature: String?
+        /// Coalesces caret-driven restyles. While you DRAG the insertion point, the selection
+        /// changes many times a second; folding a link mid-drag reflows the text under your
+        /// finger and the caret fights you. We hold off folding until the drag settles.
+        private var pendingRestyle: DispatchWorkItem?
         init(_ parent: LinkTextView) { self.parent = parent }
+
+        /// Restyle after the caret stops moving, so a drag doesn't reflow links under the finger.
+        private func scheduleRestyle() {
+            pendingRestyle?.cancel()
+            let work = DispatchWorkItem { [weak self] in self?.restyle() }
+            pendingRestyle = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.09, execute: work)
+        }
 
         private func isHidden(_ i: Int) -> Bool { hiddenRanges.contains { NSLocationInRange(i, $0) } }
 
@@ -325,13 +337,18 @@ private struct LinkTextView: UIViewRepresentable {
             updateQuery()
         }
 
-        func textViewDidChange(_ tv: UITextView) { parent.text = tv.text; updateQuery(); restyle() }
+        func textViewDidChange(_ tv: UITextView) {
+            pendingRestyle?.cancel()   // typing supersedes a pending caret-move restyle
+            parent.text = tv.text; updateQuery(); restyle()
+        }
         func textViewDidChangeSelection(_ tv: UITextView) {
             // Sync the binding BEFORE updateQuery re-renders (showing the [[ suggestions),
             // so updateUIView never sees a stale, one-behind value to snap the caret to.
             if parent.text != tv.text { parent.text = tv.text }
             updateQuery()
-            restyle()   // fold/unfold the link the cursor just moved into or out of
+            // Fold/unfold the link the caret moved into or out of — but DEFER it so dragging
+            // the insertion point doesn't reflow links mid-gesture and yank the caret around.
+            scheduleRestyle()
         }
 
         private func caretOffset(_ tv: UITextView) -> Int? {
