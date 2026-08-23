@@ -41,6 +41,8 @@ struct ComposeView: View {
     @State private var nearbyOptions: [AppModel.NearbyPlace] = []   // venues near you, to pick from
     @State private var showNearbyPicker = false
     @State private var showFollowUp = false
+    @State private var showNamePrompt = false          // ask for a note name outside diary/notes
+    @State private var nameDraft = ""
     @State private var reminderNoteTitle = ""
     @State private var scanning = false
     @State private var didScan = false
@@ -193,6 +195,11 @@ struct ComposeView: View {
                     }
                 }
             } message: { Text("Add a place to this note.") }
+            .alert("Name this note", isPresented: $showNamePrompt) {
+                TextField("Name", text: $nameDraft)
+                Button("Cancel", role: .cancel) {}
+                Button("Save") { finishSave(name: nameDraft.trimmingCharacters(in: .whitespaces)) }
+            } message: { Text("Filed under \(categoryLabel) — give it a name (or leave blank to use the date).") }
             .sheet(item: $editSheetFor) { s in editSheet(s) }
             .sheet(isPresented: $showFollowUp, onDismiss: { dismiss() }) {
                 FollowUpSheet(noteTitle: reminderNoteTitle, defaultTitle: followUpDefault) { _ in }
@@ -327,7 +334,10 @@ struct ComposeView: View {
                 Button(role: .destructive) { location = "" } label: { Label("Clear location", systemImage: "xmark") }
             }
             Divider()
-            Button { let id = createNote(); reminderNoteTitle = model.note(id: id)?.title ?? category; showFollowUp = true } label: {
+            Button {
+                let nm = (existingNoteID == nil && !model.usesDateTitle(category)) ? Self.firstLine(of: text) : nil
+                let id = createNote(name: nm); reminderNoteTitle = model.note(id: id)?.title ?? category; showFollowUp = true
+            } label: {
                 Label("Save & remind me…", systemImage: "bell.badge")
             }
         } label: {
@@ -539,13 +549,33 @@ struct ComposeView: View {
         }
     }
 
-    private func save() { let id = createNote(); onSaved?(id); dismiss() }
+    private func save() {
+        // A note filed OUTSIDE the diary/notes folders is named by its subject — ask for
+        // that name (prefilled with the first line) rather than stamping it with the date.
+        if existingNoteID == nil, !model.usesDateTitle(category) {
+            nameDraft = Self.firstLine(of: text)
+            showNamePrompt = true
+            return
+        }
+        finishSave(name: nil)
+    }
+
+    private func finishSave(name: String?) { let id = createNote(name: name); onSaved?(id); dismiss() }
+
+    /// The first non-blank line of the text, capped — the natural name to prefill the prompt.
+    private static func firstLine(of text: String) -> String {
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            if !t.isEmpty { return String(t.prefix(60)) }
+        }
+        return ""
+    }
 
     /// Build the note body with the confirmed/kept links woven in, then persist —
     /// updating today's diary in place when we pulled one forward, otherwise creating a
     /// new note. This is the ONLY place the note text gains wikilinks from a scan.
     @discardableResult
-    private func createNote() -> UUID {
+    private func createNote(name: String? = nil) -> UUID {
         var body = text
         for s in confirmed { body = insert(s, into: body) }
         let id: UUID
@@ -558,7 +588,7 @@ struct ComposeView: View {
             id = existing
         } else {
             id = model.createCapturedNote(body: body, folder: category, intensity: intensity,
-                                          location: location.isEmpty ? nil : location)
+                                          location: location.isEmpty ? nil : location, name: name)
             // Apply the chosen date (defaults to now). setNoteDate also re-stamps the
             // date-titled name so a backdated note sorts to the right day.
             if !Calendar.current.isDate(noteDate, inSameDayAs: Date()) { model.setNoteDate(id, to: noteDate) }

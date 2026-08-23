@@ -3222,6 +3222,25 @@ final class AppModel: ObservableObject {
         return f.string(from: date)
     }
 
+    /// Whether captured notes here default to a DATE title: the catch-all "notes" folder
+    /// and any diary folder. Every other folder names its note by its subject instead.
+    func usesDateTitle(_ category: String) -> Bool {
+        let c = category.trimmingCharacters(in: CharacterSet(charactersIn: " /")).lowercased()
+        return c == "notes" || c.contains("diary")
+    }
+
+    /// A note-title leaf from user text: strip the characters that would break a
+    /// `folder/Name` path or a `[[wikilink]]`, collapse whitespace, and cap the length so a
+    /// title stays a name, not a paragraph. Nil when nothing usable is left.
+    private static func sanitizedTitleLeaf(_ raw: String?) -> String? {
+        guard var s = raw else { return nil }
+        for ch in ["[", "]", "/", "|", "\n", "\r"] { s = s.replacingOccurrences(of: ch, with: " ") }
+        s = s.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+             .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return nil }
+        return String(s.prefix(60))
+    }
+
     // MARK: - Capture (dictate/type → auto-linked note)
 
     /// Suggested wikilinks for free text — the names of notes you already have.
@@ -3408,11 +3427,17 @@ final class AppModel: ObservableObject {
     /// grow you as usual.
     @discardableResult
     func createCapturedNote(body: String, folder: String = "notes",
-                            intensity: Int? = nil, location: String? = nil) -> UUID {
+                            intensity: Int? = nil, location: String? = nil,
+                            name: String? = nil) -> UUID {
         let raw = folder.trimmingCharacters(in: CharacterSet(charactersIn: " /"))
         let category = canonicalFolderCasing(raw.isEmpty ? "notes" : raw)
         ensureCategoryFolder(category)
-        let base = category + "/" + Self.dateTimeStamp()
+        // The catch-all "notes" folder and diaries are titled by date; every other folder
+        // names its note by its subject, so it reads as [[folder/Name]] not a timestamp.
+        let leaf: String
+        if !usesDateTitle(category), let clean = Self.sanitizedTitleLeaf(name) { leaf = clean }
+        else { leaf = Self.dateTimeStamp() }
+        let base = category + "/" + leaf
         var title = base, n = 2
         while notes.contains(where: { Self.norm($0.title) == Self.norm(title) }) { title = "\(base) (\(n))"; n += 1 }
         let loc = location?.trimmingCharacters(in: .whitespaces)
