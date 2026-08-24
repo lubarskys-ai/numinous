@@ -2496,6 +2496,12 @@ final class AppModel: ObservableObject {
     @discardableResult
     func createPlaceNote(name: String, latitude: Double, longitude: Double) -> UUID {
         let leaf = name.trimmingCharacters(in: .whitespaces)
+        // Reuse the note that already represents this place, so searching it on the map and
+        // adding it merges into one node rather than creating a second pin for the same spot.
+        if let i = existingPlaceNoteIndex(named: leaf) {
+            addPlace(notes[i].id, name: leaf, latitude: latitude, longitude: longitude)
+            return notes[i].id
+        }
         let folderName = preferredPlaceFolder()
         if folder(named: folderName) == nil {
             folders.append(Folder(name: folderName, category: "Places", axisID: "meaning"))
@@ -2527,10 +2533,34 @@ final class AppModel: ObservableObject {
         return "location"
     }
 
+    /// An existing note that already REPRESENTS this physical place — matched by display name
+    /// across any place-like folder (travel/, location/, restaurants/, …). This is what makes a
+    /// place ONE node: a mapped location merges into the note that's about it instead of
+    /// spawning a parallel pin. Prefers a real (non-stub) note, then one that already carries a
+    /// coordinate, so a fleshed-out note wins over a bare `[[location/X]]` stub.
+    private func existingPlaceNoteIndex(named leaf: String) -> Int? {
+        let key = Self.norm(leaf)
+        let matches = notes.indices.filter {
+            Self.isPlaceLikeFolder(notes[$0].folderName) && Self.norm(notes[$0].displayName) == key
+        }
+        guard !matches.isEmpty else { return nil }
+        return matches.min { a, b in
+            let ra = (notes[a].isStub ? 1 : 0, notes[a].allPlaces.contains { $0.hasCoordinate } ? 0 : 1)
+            let rb = (notes[b].isStub ? 1 : 0, notes[b].allPlaces.contains { $0.hasCoordinate } ? 0 : 1)
+            return ra < rb
+        }
+    }
+
     @discardableResult
     func ensurePlaceNote(name: String, latitude: Double, longitude: Double) -> String {
         let leaf = name.replacingOccurrences(of: "/", with: "-").trimmingCharacters(in: .whitespaces)
         guard !leaf.isEmpty else { return "" }
+        // One place = one node: if a note ABOUT this place already exists, merge the coordinate
+        // INTO it and link to THAT — never create a parallel location/<Name> pin beside it.
+        if let i = existingPlaceNoteIndex(named: leaf) {
+            addPlace(notes[i].id, name: leaf, latitude: latitude, longitude: longitude)
+            return notes[i].title
+        }
         let folderName = preferredPlaceFolder()
         // Fold any stray, auto-created "places" notes into your place folder (links rewrite).
         if Folder.normalize(folderName) != "places" {
@@ -2538,16 +2568,12 @@ final class AppModel: ObservableObject {
             if !stray.isEmpty { moveNotes(stray, toFolder: folderName) }
         }
         let title = folderName + "/" + leaf
-        if let i = notes.firstIndex(where: { Self.norm($0.title) == Self.norm(title) }) {
-            addPlace(notes[i].id, name: leaf, latitude: latitude, longitude: longitude)   // fills coords, persists
-        } else {
-            if folder(named: folderName) == nil {
-                folders.append(Folder(name: folderName, category: "Places", axisID: "meaning"))
-            }
-            notes.append(Note(title: title, date: Date(), location: leaf,
-                              places: [Place(name: leaf, latitude: latitude, longitude: longitude)]))
-            persist()
+        if folder(named: folderName) == nil {
+            folders.append(Folder(name: folderName, category: "Places", axisID: "meaning"))
         }
+        notes.append(Note(title: title, date: Date(), location: leaf,
+                          places: [Place(name: leaf, latitude: latitude, longitude: longitude)]))
+        persist()
         return title
     }
 

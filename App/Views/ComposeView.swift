@@ -186,6 +186,9 @@ struct ComposeView: View {
                 Button("Save") {
                     let name = locationDraft.trimmingCharacters(in: .whitespaces)
                     guard !name.isEmpty else { return }
+                    // A place note takes the location ON ITSELF (geocoded on save); any other
+                    // note weaves a shared, linkable place node.
+                    if noteIsAboutPlace { setNoteLocation(name: name, coord: nil); return }
                     Task {
                         // Geocode the typed place into a linked, mappable place and weave it in.
                         if let link = await model.placeLink(forName: name) {
@@ -345,7 +348,10 @@ struct ComposeView: View {
         }
         .confirmationDialog("Where are you?", isPresented: $showNearbyPicker, titleVisibility: .visible) {
             ForEach(nearbyOptions) { opt in
-                Button("\(opt.name) · \(opt.subtitle)") { insertPlaceLink(model.placeLink(for: opt)) }
+                Button("\(opt.name) · \(opt.subtitle)") {
+                    if noteIsAboutPlace { setNoteLocation(name: opt.name, coord: (opt.latitude, opt.longitude)) }
+                    else { insertPlaceLink(model.placeLink(for: opt)) }
+                }
             }
             Button("Use my address instead") {
                 Task { if let link = await model.placeLink(forName: nil) { insertPlaceLink(link) } }
@@ -514,8 +520,26 @@ struct ComposeView: View {
         return Array(out.prefix(12))
     }
 
+    /// True when THIS note is itself about a place (a place-like folder). Then a location
+    /// attaches straight to the note — it IS the place node — instead of weaving a separate
+    /// `📍 [[location/X]]` hub, so we never end up with the note plus a duplicate pin.
+    private var noteIsAboutPlace: Bool { AppModel.isPlaceLikeFolder(category) }
+
+    /// Put a resolved place ON this note (its own pin), the direct path for a place note.
+    private func setNoteLocation(name: String, coord: (lat: Double, lng: Double)?) {
+        location = name; locationCoord = coord
+    }
+
     private func useCurrentLocation() async {
         locating = true
+        // A note that's ABOUT a place carries its own pin — drop the current GPS straight on it.
+        if noteIsAboutPlace {
+            if let p = await locator.currentPlaceStructured(), let la = p.latitude, let lo = p.longitude {
+                setNoteLocation(name: p.name, coord: (la, lo))
+            }
+            locating = false
+            return
+        }
         // Offer the businesses/venues around you to pick from, so the place is a real venue
         // (café, shop) rather than a street address. Entered once, its link becomes text, a
         // graph node, and a map pin. Nothing near → fall back to the GPS/address link.
