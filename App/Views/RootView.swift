@@ -61,6 +61,12 @@ struct RootView: View {
         }
         // A full-screen flourish whenever a new connection forms.
         .overlay { ConnectionSparkOverlay() }
+        // Guided first capture on a brand-new vault — the first thing a new user sees instead
+        // of an empty app. Dismisses itself once the reveal's "Enter Numinous" is tapped.
+        .fullScreenCover(isPresented: Binding(
+            get: { model.needsOnboarding },
+            set: { if !$0 { model.dismissOnboarding() } }
+        )) { OnboardingView() }
         .fullScreenCover(isPresented: $showAvatar) { AvatarExpandedView() }
         // Quick-capture (from the Action Button / Siri / Shortcuts) opens here.
         .fullScreenCover(isPresented: $showCapture) { ComposeView(prefillTitle: nil, onSaved: { _ in selection = "notes" }) }

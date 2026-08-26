@@ -79,6 +79,11 @@ final class AppModel: ObservableObject {
     /// (set from a note/folder, consumed by the avatar view, cleared when it closes).
     @Published var avatarFocus: AvatarFocus?
 
+    /// True on a brand-new, empty vault that hasn't run the guided first capture yet — drives
+    /// the onboarding cover. Never true for an existing vault, so a returning user never sees it.
+    @Published var needsOnboarding: Bool = false
+    private static let onboardedKey = "numinous.hasOnboarded"
+
     /// Graph-node ids for notes filed under a folder (and its subfolders) that actually appear
     /// in the connectome — for spotlighting a whole folder, including notes linked to nothing.
     func nodeIDs(inFolder folderPath: String) -> [UUID] {
@@ -142,6 +147,9 @@ final class AppModel: ObservableObject {
         self.folders = f
         self.notes = n
         self.axes = a
+        // Guided first capture: only a genuinely empty, never-onboarded vault (a fresh install).
+        self.needsOnboarding = !UserDefaults.standard.bool(forKey: Self.onboardedKey)
+            && !n.contains { !$0.isStub }
         self.reflectionLog = loaded?.reflections ?? []
         self.followUps = loaded?.followUps ?? []
         self.linkLearning = loaded?.linkLearning ?? LinkLearning()
@@ -3479,6 +3487,42 @@ final class AppModel: ObservableObject {
         // Auto-location for a place note is handled by save() above.
         return note.id
     }
+
+    // MARK: - Onboarding (guided first capture)
+
+    /// Seed a brand-new vault from three warm prompts — a person, a place, a book/idea — by
+    /// writing a first journal entry that LINKS to all three. The linked entities become real
+    /// notes in their own folders (people/heart, location/meaning, books/mind), so the graph
+    /// has genuine edges and lit axes from the very first moment: the "your life is already
+    /// taking shape" reveal is earned, not staged. Returns the axes that came alive. Leaves
+    /// `needsOnboarding` set so the reveal can show before `dismissOnboarding()` closes it.
+    @discardableResult
+    func completeOnboarding(person: String, place: String, interest: String) -> [Axis] {
+        var targets: [String] = []
+        if let p = Self.sanitizedTitleLeaf(person)   { targets.append("people/\(p)") }
+        if let p = Self.sanitizedTitleLeaf(place)    { targets.append("location/\(p)") }
+        if let p = Self.sanitizedTitleLeaf(interest) { targets.append("books/\(p)") }
+
+        if !targets.isEmpty {
+            let body = "My first entry — the beginnings of a life worth tending: "
+                + targets.map { "[[\($0)]]" }.joined(separator: ", ") + "."
+            createCapturedNote(body: body, folder: "notes/diary")   // creates the linked entity notes + folders
+        }
+        UserDefaults.standard.set(true, forKey: Self.onboardedKey)
+        // The axes now alive: the folders the seed touched, plus the journal's own.
+        let touched = targets.map { Self.folderPart(of: $0) } + ["notes/diary"]
+        let ids = Set(touched.compactMap { folder(named: $0)?.axisID })
+        return axes.filter { ids.contains($0.id) }
+    }
+
+    /// Dismiss onboarding without seeding (the user chose to start on their own).
+    func skipOnboarding() {
+        UserDefaults.standard.set(true, forKey: Self.onboardedKey)
+        needsOnboarding = false
+    }
+
+    /// Close the onboarding cover after the reveal.
+    func dismissOnboarding() { needsOnboarding = false }
 
     /// Ensure a category folder exists so captured notes there grow an axis; a brand
     /// new one gets a suggested axis (diary → Journal/Spirit, matching the app's
