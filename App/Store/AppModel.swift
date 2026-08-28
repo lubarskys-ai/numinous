@@ -3490,21 +3490,28 @@ final class AppModel: ObservableObject {
 
     // MARK: - Onboarding (guided first capture)
 
-    /// Seed a brand-new vault from three warm prompts — a person, a place, a book/idea — by
-    /// writing a first journal entry that LINKS to all three. The linked entities become real
-    /// notes in their own folders (people/heart, location/meaning, books/mind), so the graph
-    /// has genuine edges and lit axes from the very first moment: the "your life is already
-    /// taking shape" reveal is earned, not staged. Returns the axes that came alive. Leaves
-    /// `needsOnboarding` set so the reveal can show before `dismissOnboarding()` closes it.
+    /// Seed a brand-new vault from a short survey — a few people, hobbies, and books/ideas. Each
+    /// becomes a real note in its folder (people/heart, hobbies/meaning, books/mind) and a first
+    /// journal entry LINKS to them all, so the connectome has genuine edges and several lit axes
+    /// from the very first moment — the "your life is already taking shape" reveal is earned, not
+    /// staged, and it looks substantial rather than skeletal. Returns the axes that came alive;
+    /// leaves `needsOnboarding` set so the reveal can show before `dismissOnboarding()` closes it.
     @discardableResult
-    func completeOnboarding(person: String, place: String, interest: String) -> [Axis] {
+    func completeOnboarding(people: [String], hobbies: [String], books: [String]) -> [Axis] {
         var targets: [String] = []
-        if let p = Self.sanitizedTitleLeaf(person)   { targets.append("people/\(p)") }
-        if let p = Self.sanitizedTitleLeaf(place)    { targets.append("location/\(p)") }
-        if let p = Self.sanitizedTitleLeaf(interest) { targets.append("books/\(p)") }
+        func add(_ items: [String], to folder: String) {
+            for item in items {
+                guard let leaf = Self.sanitizedTitleLeaf(item) else { continue }
+                let t = "\(folder)/\(leaf)"
+                if !targets.contains(where: { Self.norm($0) == Self.norm(t) }) { targets.append(t) }
+            }
+        }
+        add(people, to: "people")
+        add(hobbies, to: "hobbies")
+        add(books, to: "books")
 
         if !targets.isEmpty {
-            let body = "My first entry — the beginnings of a life worth tending: "
+            let body = "The first roots of a life worth tending:\n"
                 + targets.map { "[[\($0)]]" }.joined(separator: ", ") + "."
             createCapturedNote(body: body, folder: "notes/diary")   // creates the linked entity notes + folders
         }
