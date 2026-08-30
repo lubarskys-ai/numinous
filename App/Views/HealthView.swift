@@ -130,7 +130,7 @@ struct HealthView: View {
     }
 
     private func healthNoteID(_ item: HealthItem) -> UUID? {
-        model.notes.first { $0.origin?.source == "healthkit" && $0.origin?.externalID == item.id }?.id
+        model.healthNoteID(externalID: item.id)
     }
 
     private func open(_ item: HealthItem) {

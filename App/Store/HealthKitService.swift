@@ -19,6 +19,17 @@ enum HealthKitService {
 
     enum HealthError: Error { case unavailable }
 
+    /// Does this device have Health at all? (No prompt, no permission needed.)
+    static var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
+
+    /// Have we ever asked for Health access? Reading this NEVER prompts — only `fetch` does.
+    /// It's what lets the home screen offer the import without throwing a system permission
+    /// sheet at someone who just opened the app.
+    static var accessRequested: Bool {
+        guard isAvailable else { return false }
+        return HKHealthStore().authorizationStatus(for: HKObjectType.workoutType()) != .notDetermined
+    }
+
     static func fetch(daysBack: Int = 30) async throws -> [HealthItem] {
         guard HKHealthStore.isHealthDataAvailable() else { throw HealthError.unavailable }
         let store = HKHealthStore()

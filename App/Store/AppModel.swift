@@ -416,16 +416,21 @@ final class AppModel: ObservableObject {
     private var noteIndexByTitle: [String: Int] = [:]
     private var folderIndexByID: [String: Int] = [:]
     private var noteByCalendarEvent: [String: UUID] = [:]   // event externalID → note id (O(1))
+    private var noteByHealthItem: [String: UUID] = [:]     // health sample id → note id (O(1))
 
     private func recomputeLookupIndexes() {
         noteIndexByID.removeAll(keepingCapacity: true)
         noteIndexByTitle.removeAll(keepingCapacity: true)
         folderIndexByID.removeAll(keepingCapacity: true)
         noteByCalendarEvent.removeAll(keepingCapacity: true)
+        noteByHealthItem.removeAll(keepingCapacity: true)
         for (i, n) in notes.enumerated() {
             noteIndexByID[n.id] = i
             noteIndexByTitle[Self.norm(n.title)] = i
-            if n.origin?.source == "calendar", let ext = n.origin?.externalID { noteByCalendarEvent[ext] = n.id }
+            if let ext = n.origin?.externalID {
+                if n.origin?.source == "calendar" { noteByCalendarEvent[ext] = n.id }
+                if n.origin?.source == "healthkit" { noteByHealthItem[ext] = n.id }
+            }
         }
         for (i, f) in folders.enumerated() { folderIndexByID[f.id] = i }
     }
@@ -1611,6 +1616,10 @@ final class AppModel: ObservableObject {
         ingest([imported])
         return notes.first { $0.origin?.source == "healthkit" && $0.origin?.externalID == item.id }?.id
     }
+
+    /// The note a health sample already became, if any. Index-backed: the health list asks
+    /// this for every row, and the home screen asks it for every recent activity.
+    func healthNoteID(externalID: String) -> UUID? { noteByHealthItem[externalID] }
 
     /// Map an activity's duration to a 2…5 growth intensity — the longer you were at it,
     /// the more it counts. Tunable thresholds (minutes): <10 light · 10–29 present ·

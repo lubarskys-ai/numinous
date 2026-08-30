@@ -17,6 +17,10 @@ struct HomeView: View {
     @State private var showCalendar = false
     @State private var showHealth = false
     @State private var path: [UUID] = []
+    /// Recent activity that hasn't become a note yet — the only reason to mention Health.
+    @State private var unimportedActivity = 0
+    /// Offer to connect Health once. Dismissed, it never asks again.
+    @AppStorage("health_offer_dismissed") private var healthOfferDismissed = false
 
     var body: some View {
         let balance = model.score.axisBalance(over: model.axes)
@@ -41,7 +45,7 @@ struct HomeView: View {
             .navigationDestination(for: UUID.self) { NoteDetailView(noteID: $0) }
         }
         // The digest walks every note, so build it when the data changes — not per render.
-        .task(id: model.notes.count) { digest = model.weeklyDigest() }
+        .task(id: model.notes.count) { digest = model.weeklyDigest(); await countUnimportedActivity() }
         .fullScreenCover(isPresented: $showCompose) { ComposeView(prefillTitle: nil, autofocus: true) }
         .fullScreenCover(isPresented: $showAvatar) { AvatarExpandedView() }
         .fullScreenCover(isPresented: $showCalendar) { closable { CalendarView() } }
@@ -102,11 +106,23 @@ struct HomeView: View {
 
     /// A line worth reading on the way past. Tappable when it points at someone.
     private struct Notice: Identifiable {
+        enum Action: Equatable { case none, note(UUID), health }
         let id = UUID()
         let icon: String
         let tint: Color
         let text: String
-        let noteID: UUID?
+        var action: Action = .none
+        /// Shows an explicit dismiss. Only the once-ever offers get one — a notice about
+        /// your own life isn't something to swat away.
+        var dismissible = false
+
+        init(icon: String, tint: Color, text: String, action: Action = .none, dismissible: Bool = false) {
+            self.icon = icon; self.tint = tint; self.text = text
+            self.action = action; self.dismissible = dismissible
+        }
+        init(icon: String, tint: Color, action: Action, dismissible: Bool = false, text: String) {
+            self.init(icon: icon, tint: tint, text: text, action: action, dismissible: dismissible)
+        }
     }
 
     /// At most three, most-worth-saying first. Deliberately capped: a fourth line turns a
@@ -115,21 +131,56 @@ struct HomeView: View {
         guard let digest else { return [] }
         var out: [Notice] = []
         if let reflection = digest.reflection {
-            out.append(Notice(icon: "sparkles", tint: .pink, text: reflection, noteID: nil))
+            out.append(Notice(icon: "sparkles", tint: .pink, text: reflection))
         }
         if let nudge = digest.travelNudge {
-            out.append(Notice(icon: "globe.americas", tint: .teal, text: nudge, noteID: nil))
+            out.append(Notice(icon: "globe.americas", tint: .teal, text: nudge))
         }
         if let person = digest.drifting.first {
             let since = AppModel.outOfTouchLabel(person.lastContact).map { " — \($0)" } ?? ""
             out.append(Notice(icon: "heart", tint: .pink,
-                              text: "You've drifted from \(person.name)\(since).", noteID: person.id))
+                              text: "You've drifted from \(person.name)\(since).", action: .note(person.id)))
+        }
+        if let health = healthNotice {
+            out.append(health)
         }
         if let quiet = digest.quietAxisIDs.first, let axis = model.axis(id: quiet) {
             out.append(Notice(icon: "circle", tint: axis.color,
-                              text: "\(axis.name) has been quiet this week.", noteID: nil))
+                              text: "\(axis.name) has been quiet this week."))
         }
         return Array(out.prefix(3))
+    }
+
+    /// Health, without a tab. Two states worth a line and no others:
+    ///
+    /// * never connected — offer it once, and only offer. Checking whether we've asked
+    ///   doesn't prompt, so nobody gets a system permission sheet for opening the app.
+    /// * connected, with activity that isn't a note yet — say how much, once.
+    ///
+    /// Connected and nothing pending says nothing at all, which is most days. Workouts you
+    /// already imported are ordinary notes, so they're in Notes and Folders like everything
+    /// else — the list is only ever for the ones that haven't crossed over yet.
+    private var healthNotice: Notice? {
+        guard HealthKitService.isAvailable else { return nil }
+        if !HealthKitService.accessRequested {
+            guard !healthOfferDismissed else { return nil }
+            return Notice(icon: "heart.text.square", tint: .red, action: .health, dismissible: true,
+                          text: "Turn your workouts into notes, without typing them.")
+        }
+        guard unimportedActivity > 0 else { return nil }
+        let what = unimportedActivity == 1 ? "One recent activity isn't" : "\(unimportedActivity) recent activities aren't"
+        return Notice(icon: "figure.run", tint: .red, action: .health,
+                      text: "\(what) in your notes yet.")
+    }
+
+    /// Count what's importable — only once Health is already connected, so this can never be
+    /// the thing that triggers the permission sheet.
+    private func countUnimportedActivity() async {
+        guard HealthKitService.isAvailable, HealthKitService.accessRequested else {
+            unimportedActivity = 0; return
+        }
+        let items = (try? await HealthKitService.fetch(daysBack: 14)) ?? []
+        unimportedActivity = items.filter { model.healthNoteID(externalID: $0.id) == nil }.count
     }
 
     private var noticeList: some View {
@@ -156,7 +207,7 @@ struct HomeView: View {
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
-            if notice.noteID != nil {
+            if notice.action != .none {
                 Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary).padding(.top, 3)
             }
         }
@@ -164,10 +215,27 @@ struct HomeView: View {
         .padding(.vertical, 14)
         .contentShape(Rectangle())
 
-        if let id = notice.noteID {
-            Button { path.append(id) } label: { row }.buttonStyle(.plain)
-        } else {
-            row
+        HStack(spacing: 0) {
+            switch notice.action {
+            case .none:
+                row
+            case .note(let id):
+                Button { path.append(id) } label: { row }.buttonStyle(.plain)
+            case .health:
+                Button { showHealth = true } label: { row }.buttonStyle(.plain)
+            }
+            if notice.dismissible {
+                // Tap it away and the offer never comes back; there is no second ask.
+                Button { healthOfferDismissed = true } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .padding(10)
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 6)
+                .accessibilityLabel("Don't suggest this")
+            }
         }
     }
 
@@ -176,7 +244,6 @@ struct HomeView: View {
     private var elsewhereLinks: some View {
         HStack(spacing: 22) {
             Button { showCalendar = true } label: { Label("Calendar", systemImage: "calendar") }
-            Button { showHealth = true } label: { Label("Health", systemImage: "heart.text.square") }
         }
         .font(.subheadline)
         .padding(.top, 4)
