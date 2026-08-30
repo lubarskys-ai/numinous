@@ -151,8 +151,13 @@ struct MapView: View {
                 _ = await locator.currentCoordinate()   // prompt for permission so the dot/button work
                 await backfillGeocoding()
             }
-            .onChange(of: folder) { position = .automatic }
-            .onChange(of: period) { position = .automatic }
+            // Drop the culling window as well as reframing. Pins are culled to `visibleRegion`
+            // BEFORE `.automatic` gets to frame them, so filtering to a folder whose places sit
+            // outside the current view left almost nothing on screen — and the camera then
+            // settled on that handful, which culled to the same few again. Clearing the window
+            // lets every matching place be a candidate, so `.automatic` frames the whole set.
+            .onChange(of: folder) { visibleRegion = nil; position = .automatic }
+            .onChange(of: period) { visibleRegion = nil; position = .automatic }
             .alert("Couldn’t find that place", isPresented: $searchFailed) {
                 Button("OK", role: .cancel) {}
             } message: { Text("No location matched “\(searchText)”. Try a city, address, or landmark.") }
