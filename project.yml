@@ -63,3 +63,21 @@ targets:
         # simulator build (ci.yml) and =YES for the TestFlight archive (testflight.yml).
         # For local device runs from Xcode, automatic signing picks up your Team below.
         CODE_SIGN_STYLE: Automatic
+
+# The app scheme is declared here rather than left to Xcode's auto-creation. It used to
+# live only in xcuserdata, so `xcodegen generate` destroyed it and `xcodebuild -scheme
+# Numinous` then failed with "does not contain a scheme named Numinous" — CI only ever
+# worked because it generates into an empty checkout where Xcode re-creates it.
+schemes:
+  Numinous:
+    build:
+      targets:
+        Numinous: all
+    run:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
