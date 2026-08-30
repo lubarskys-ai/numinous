@@ -8,7 +8,7 @@ struct RootView: View {
     // Initial tab can be set via the NUMINOUS_TAB env var (used for headless
     // screenshots). The avatar is no longer a tab — it's the floating companion.
     @State private var selection: String =
-        ProcessInfo.processInfo.environment["NUMINOUS_TAB"] ?? "notes"
+        ProcessInfo.processInfo.environment["NUMINOUS_TAB"] ?? "home"
     @State private var showAvatar = false
     @State private var showCapture = false
     @State private var showDiary = false
@@ -20,28 +20,29 @@ struct RootView: View {
         let balance = model.score.axisBalance(over: model.axes)
         let tint = (model.axes.max { (balance[$0.id] ?? 0) < (balance[$1.id] ?? 0) })?.color ?? .accentColor
 
+        // Four tabs, not six. You land on Home — the figure and one thing to do — and the
+        // rest are places you go FROM there. Calendar and Health used to be tabs; they're
+        // ways of slicing the same notes, so they moved behind Home rather than asking a
+        // brand-new user to choose between six filing systems on first launch.
         TabView(selection: $selection) {
+            HomeView()
+                .tabItem { Label("Home", systemImage: "house") }
+                .tag("home")
             NotesView()
                 .tabItem { Label("Notes", systemImage: "note.text") }
                 .tag("notes")
             FoldersView()
                 .tabItem { Label("Folders", systemImage: "folder") }
                 .tag("folders")
-            CalendarView()
-                .tabItem { Label("Calendar", systemImage: "calendar") }
-                .tag("calendar")
             MapView()
                 .tabItem { Label("Map", systemImage: "map") }
                 .tag("map")
-            HealthView()
-                .tabItem { Label("Health", systemImage: "heart.text.square") }
-                .tag("health")
         }
         // The companion follows you across every tab; tap it for the full avatar. It
         // hides while the keyboard is up so it never sits over a note's editing controls
         // (e.g. the "Done" button in the bottom-right).
         .overlay(alignment: .bottomTrailing) {
-            if !keyboardVisible {
+            if !keyboardVisible && selection != "home" {   // Home shows the figure full-size already
                 CompanionView(progress: model.maturity, tint: tint,
                               action: companionAction, actionStart: companionActionStart)
                     .frame(width: 100, height: 116)
