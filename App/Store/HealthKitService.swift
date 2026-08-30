@@ -22,12 +22,17 @@ enum HealthKitService {
     /// Does this device have Health at all? (No prompt, no permission needed.)
     static var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
 
+    /// One store for the lifetime of the app. Constructing an `HKHealthStore` per call is not
+    /// free, and this used to be built on every SwiftUI render.
+    private static let sharedStore: HKHealthStore? = isAvailable ? HKHealthStore() : nil
+
     /// Have we ever asked for Health access? Reading this NEVER prompts — only `fetch` does.
     /// It's what lets the home screen offer the import without throwing a system permission
-    /// sheet at someone who just opened the app.
+    /// sheet at someone who just opened the app. Still an XPC hop to the Health daemon, so
+    /// read it once into state — never from inside a view's `body`.
     static var accessRequested: Bool {
-        guard isAvailable else { return false }
-        return HKHealthStore().authorizationStatus(for: HKObjectType.workoutType()) != .notDetermined
+        guard let store = sharedStore else { return false }
+        return store.authorizationStatus(for: HKObjectType.workoutType()) != .notDetermined
     }
 
     static func fetch(daysBack: Int = 30) async throws -> [HealthItem] {

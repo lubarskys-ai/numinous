@@ -22,10 +22,15 @@ struct HomeView: View {
     @State private var unimportedActivity = 0
     /// Offer to connect Health once. Dismissed, it never asks again.
     @AppStorage("health_offer_dismissed") private var healthOfferDismissed = false
+    /// Whether Health has ever been asked for. Read once into state: querying it is a hop to
+    /// the Health daemon, and doing that from `body` made every render — every tab switch —
+    /// pay for two of them.
+    @State private var healthAccessAsked = false
 
     var body: some View {
         let balance = model.score.axisBalance(over: model.axes)
         let tint = (model.axes.max { (balance[$0.id] ?? 0) < (balance[$1.id] ?? 0) })?.color ?? .accentColor
+        let shown = notices          // computed once; it used to be evaluated twice per render
 
         NavigationStack(path: $path) {
             ZStack {
@@ -34,7 +39,7 @@ struct HomeView: View {
                     VStack(spacing: 26) {
                         figure(tint)
                         captureButton(tint)
-                        if !notices.isEmpty { noticeList }
+                        if !shown.isEmpty { noticeList(shown) }
                         elsewhereLinks
                     }
                     .padding(.horizontal, 22)
@@ -52,6 +57,8 @@ struct HomeView: View {
         .sheet(isPresented: $showGuide) { GuideView() }
         .fullScreenCover(isPresented: $showCalendar) { closable { CalendarView() } }
         .fullScreenCover(isPresented: $showHealth) { closable { HealthView() } }
+        // They may have granted access in there, which changes what Home should say.
+        .onChange(of: showHealth) { open in if !open { Task { await countUnimportedActivity() } } }
     }
 
     // MARK: - The figure
@@ -109,7 +116,9 @@ struct HomeView: View {
     /// A line worth reading on the way past. Tappable when it points at someone.
     private struct Notice: Identifiable {
         enum Action: Equatable { case none, note(UUID), health }
-        let id = UUID()
+        /// Derived from the content, NOT a fresh UUID. A new id every render makes ForEach
+        /// throw away and rebuild every row on each pass, which is felt as tab-switch lag.
+        var id: String { icon + "|" + text }
         let icon: String
         let tint: Color
         let text: String
@@ -164,7 +173,7 @@ struct HomeView: View {
     /// else — the list is only ever for the ones that haven't crossed over yet.
     private var healthNotice: Notice? {
         guard HealthKitService.isAvailable else { return nil }
-        if !HealthKitService.accessRequested {
+        if !healthAccessAsked {
             guard !healthOfferDismissed else { return nil }
             return Notice(icon: "heart.text.square", tint: .red, action: .health, dismissible: true,
                           text: "Turn your workouts into notes, without typing them.")
@@ -178,14 +187,13 @@ struct HomeView: View {
     /// Count what's importable — only once Health is already connected, so this can never be
     /// the thing that triggers the permission sheet.
     private func countUnimportedActivity() async {
-        guard HealthKitService.isAvailable, HealthKitService.accessRequested else {
-            unimportedActivity = 0; return
-        }
+        healthAccessAsked = HealthKitService.accessRequested
+        guard healthAccessAsked else { unimportedActivity = 0; return }
         let items = (try? await HealthKitService.fetch(daysBack: 14)) ?? []
         unimportedActivity = items.filter { model.healthNoteID(externalID: $0.id) == nil }.count
     }
 
-    private var noticeList: some View {
+    private func noticeList(_ notices: [Notice]) -> some View {
         VStack(spacing: 0) {
             ForEach(Array(notices.enumerated()), id: \.element.id) { i, notice in
                 if i > 0 { Divider().padding(.leading, 44) }
