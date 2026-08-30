@@ -14,6 +14,7 @@ struct HomeView: View {
     @State private var digest: AppModel.WeeklyDigest?
     @State private var showCompose = false
     @State private var showAvatar = false
+    @State private var showGuide = false
     @State private var showCalendar = false
     @State private var showHealth = false
     @State private var path: [UUID] = []
@@ -48,6 +49,7 @@ struct HomeView: View {
         .task(id: model.notes.count) { digest = model.weeklyDigest(); await countUnimportedActivity() }
         .fullScreenCover(isPresented: $showCompose) { ComposeView(prefillTitle: nil, autofocus: true) }
         .fullScreenCover(isPresented: $showAvatar) { AvatarExpandedView() }
+        .sheet(isPresented: $showGuide) { GuideView() }
         .fullScreenCover(isPresented: $showCalendar) { closable { CalendarView() } }
         .fullScreenCover(isPresented: $showHealth) { closable { HealthView() } }
     }
@@ -243,6 +245,7 @@ struct HomeView: View {
 
     private var elsewhereLinks: some View {
         HStack(spacing: 22) {
+            Button { showGuide = true } label: { Label("How it works", systemImage: "questionmark.circle") }
             Button { showCalendar = true } label: { Label("Calendar", systemImage: "calendar") }
         }
         .font(.subheadline)
