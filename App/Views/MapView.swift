@@ -409,24 +409,50 @@ struct MapView: View {
     /// Give coordinates to places that only have a name (older notes, typed places), so
     /// they appear on the map. Bounded and throttled to stay within the geocoder's limits;
     /// the map fills in live as results arrive (the model is observed).
+    /// Names the geocoder has already failed on. Without this, every launch spent its whole
+    /// budget retrying the same unresolvable names in the same order, so notes further down
+    /// the list never got a turn — which is why whole folders stayed missing from the map.
+    private static let failedKey = "geocode_failed_names"
+
     private func backfillGeocoding() async {
         guard !geocodedOnce else { return }
         geocodedOnce = true
-        let targets: [(UUID, String)] = model.notes.flatMap { n in
-            n.allPlaces.filter { !$0.hasCoordinate }.map { (n.id, $0.name) }
+
+        var failed = Set(UserDefaults.standard.stringArray(forKey: Self.failedKey) ?? [])
+
+        // One lookup per DISTINCT name, not per note. The same place on forty notes used to
+        // cost forty geocodes out of a budget of thirty.
+        var byName: [String: [UUID]] = [:]
+        for n in model.notes {
+            for p in n.allPlaces where !p.hasCoordinate {
+                let key = p.name.trimmingCharacters(in: .whitespaces)
+                guard !key.isEmpty, !failed.contains(key.lowercased()) else { continue }
+                byName[key, default: []].append(n.id)
+            }
         }
-        var results: [(id: UUID, name: String, latitude: Double, longitude: Double)] = []
+        guard !byName.isEmpty else { return }
+
+        var batch: [(id: UUID, name: String, latitude: Double, longitude: Double)] = []
         var done = 0
-        for (id, name) in targets {
-            guard done < 30 else { break }        // cap per open — stays well under geocoder limits
+        func flush() {
+            guard !batch.isEmpty else { return }
+            model.addPlaces(batch)          // save progress as we go
+            batch.removeAll(keepingCapacity: true)
+        }
+
+        for (name, ids) in byName {
+            if Task.isCancelled { break }   // left the tab — keep whatever we resolved
+            guard done < 60 else { break }
             if let c = await LocationService.coordinate(for: name) {
-                results.append((id, name, c.latitude, c.longitude))
+                for id in ids { batch.append((id, name, c.latitude, c.longitude)) }
+            } else {
+                failed.insert(name.lowercased())   // don't burn next launch's budget on it again
             }
             done += 1
-            try? await Task.sleep(nanoseconds: 250_000_000)
+            if batch.count >= 8 { flush() }
+            try? await Task.sleep(nanoseconds: 1_200_000_000)   // ~50/min, the geocoder's limit
         }
-        // Apply all at once — one save, one map refresh, instead of 30 (which made the map
-        // sticky while it geocoded in the background).
-        if !results.isEmpty { model.addPlaces(results) }
+        flush()
+        UserDefaults.standard.set(Array(failed), forKey: Self.failedKey)
     }
 }

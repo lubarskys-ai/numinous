@@ -74,7 +74,20 @@ struct RootView: View {
         // "Today's diary" (Action Button / Siri) opens the diary with the keyboard up.
         .fullScreenCover(isPresented: $showDiary) { ComposeView(prefillTitle: nil, diary: true, autofocus: true, onSaved: { _ in selection = "notes" }) }
         // The companion strolls when you change pages…
-        .onChange(of: selection) { _ in trigger(.walk) }
+        .onChange(of: selection) { _ in
+            trigger(.walk)
+            #if DEBUG
+            // Measure the actual hitch: how long the main thread stays busy between the tab
+            // changing and the run loop coming back to us. That IS the stickiness, and it
+            // tells us WHICH tab is expensive instead of us guessing.
+            let t0 = CFAbsoluteTimeGetCurrent()
+            let tab = selection
+            DispatchQueue.main.async {
+                let ms = (CFAbsoluteTimeGetCurrent() - t0) * 1000
+                if ms > 16 { print(String(format: "⏱️[perf] tab → %@ blocked main thread %.0fms", tab, ms)) }
+            }
+            #endif
+        }
         // …and does a joyful, heart-popping cheer when a new connection forms.
         .onChange(of: model.spark?.id) { id in if id != nil { trigger(.cheer) } }
         // "See in graph" from a note opens the avatar, spotlighting that note's connections.
