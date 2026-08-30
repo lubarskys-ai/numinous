@@ -519,7 +519,7 @@ final class AppModel: ObservableObject {
     private func recomputeCabinetGroups() {
         var groups: [String: [Note]] = [:]
         for note in notes {
-            let top = note.folderName.split(separator: "/").first.map(String.init) ?? ""
+            let top = String(note.folderName.prefix { $0 != "/" })
             guard !top.isEmpty else { continue }
             groups[top, default: []].append(note)
         }
@@ -794,10 +794,18 @@ final class AppModel: ObservableObject {
     }
 
     /// Notes that link *to* the given note (Obsidian-style backlinks) — from the cached index.
+    /// Resolved through `noteIndexByID`, so this costs the number of backlinks, not the number
+    /// of notes. It used to scan every note on every call, which made the callers that run it
+    /// in a loop (map pin labels, people staleness) quadratic at a few thousand notes.
     func backlinks(to note: Note) -> [Note] {
-        let ids = Set(backlinkIndex[Self.norm(note.title)] ?? [])
-        guard !ids.isEmpty else { return [] }
-        return notes.filter { $0.id != note.id && ids.contains($0.id) }
+        guard let ids = backlinkIndex[Self.norm(note.title)], !ids.isEmpty else { return [] }
+        var seen = Set<UUID>(minimumCapacity: ids.count)
+        var out: [Note] = []
+        out.reserveCapacity(ids.count)
+        for id in ids where id != note.id && seen.insert(id).inserted {
+            if let i = noteIndexByID[id] { out.append(notes[i]) }
+        }
+        return out
     }
 
     // MARK: - Mutations

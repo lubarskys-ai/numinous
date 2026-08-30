@@ -12,6 +12,10 @@ public enum WikilinkParser {
     /// Targets are trimmed; an `alias` after a `|` is dropped; empties skipped.
     /// De-duplication is case-insensitive but preserves the first-seen spelling.
     public static func extract(from text: String) -> [String] {
+        // Most notes hold no links at all, and this runs over every note on every save. The
+        // NSString bridge and the regex pass together cost far more than this substring scan,
+        // so bail before paying for either.
+        guard text.contains("[[") else { return [] }
         let ns = text as NSString
         let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
 

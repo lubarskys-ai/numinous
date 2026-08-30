@@ -420,4 +420,14 @@ h.group("Travel — regions (a patch of world, not an address)") {
     h.eq(TravelValue.groupIntoRegions([]).count, 0, "no places, no regions")
 }
 
+h.group("Wikilink extract - the no-link fast path") {
+    // The early-out must be indistinguishable from running the regex.
+    h.eq(WikilinkParser.extract(from: "plain prose with no links at all"), [], "no brackets -> no targets")
+    h.eq(WikilinkParser.extract(from: ""), [], "empty body -> no targets")
+    h.eq(WikilinkParser.extract(from: "a single [ bracket and a ] one"), [], "stray single brackets -> no targets")
+    h.eq(WikilinkParser.extract(from: "unterminated [[people/Sam"), [], "an opener with no close -> no targets")
+    // And it must not swallow real ones.
+    h.eq(WikilinkParser.extract(from: "dinner with [[people/Sam]]"), ["people/Sam"], "a real link still extracts")
+}
+
 exit(Int32(h.summarize()))
