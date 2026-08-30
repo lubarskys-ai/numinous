@@ -558,7 +558,15 @@ final class AppModel: ObservableObject {
 
     private func recomputeMappablePlaces() {
         var out: [MappablePlace] = []
+        var ground: [(id: UUID, lat: Double, lon: Double)] = []
         for n in notes {
+            // Gather the covered ground in the SAME pass — it used to be a second full walk
+            // of every note right after this one.
+            if Self.isPlaceLikeFolder(n.folderName),
+               let p = n.allPlaces.first(where: { $0.hasCoordinate }),
+               let lat = p.latitude, let lon = p.longitude {
+                ground.append((n.id, lat, lon))
+            }
             for p in n.allPlaces where p.hasCoordinate && LocationService.looksLikePlace(p.name) {
                 out.append(MappablePlace(id: "\(n.id.uuidString)|\(p.name.lowercased())",
                                          noteID: n.id, title: n.displayName, placeName: p.name,
@@ -570,7 +578,7 @@ final class AppModel: ObservableObject {
         }
         mappablePlaces = out
         placeRegions = Self.regions(from: out)
-        cachedCoveredGround = liveCoveredGround()
+        cachedCoveredGround = ground
     }
 
     /// A patch of the world you've been to — every place within `newGroundRadiusKm` of the
@@ -2241,15 +2249,18 @@ final class AppModel: ObservableObject {
         recomputeLastTended()
         let t2 = CFAbsoluteTimeGetCurrent()
         recomputeCabinetGroups()          // cache the Folders-tab grouping once, not per render
-        recomputeBacklinkIndex()          // cache backlinks once (before places — pin labels use them)
-        recomputeMappablePlaces()         // cache the Map's plottable places once, not per render
         let t3 = CFAbsoluteTimeGetCurrent()
+        recomputeBacklinkIndex()          // cache backlinks once (before places — pin labels use them)
+        let t4 = CFAbsoluteTimeGetCurrent()
+        recomputeMappablePlaces()         // cache the Map's plottable places once, not per render
+        let t5 = CFAbsoluteTimeGetCurrent()
         storage.save(currentSnapshot())   // encodes + writes on a background queue
         runAutoBackup()
         let total = (CFAbsoluteTimeGetCurrent() - t0) * 1000
         if total > 150 {   // only flag a genuinely slow persist; ~25ms is fine and shouldn't spam
-            print(String(format: "⏱️[perf] persist %.0fms (score %.0f · tended %.0f · cabinets %.0f) notes=%d links=%d",
-                         total, (t1 - t0) * 1000, (t2 - t1) * 1000, (t3 - t2) * 1000, notes.count, score.links.count))
+            print(String(format: "⏱️[perf] persist %.0fms (score %.0f · tended %.0f · cabinets %.0f · backlinks %.0f · places %.0f) notes=%d links=%d",
+                         total, (t1 - t0) * 1000, (t2 - t1) * 1000, (t3 - t2) * 1000,
+                         (t4 - t3) * 1000, (t5 - t4) * 1000, notes.count, score.links.count))
         }
     }
 
@@ -3023,9 +3034,13 @@ final class AppModel: ObservableObject {
     }
 
     /// Folders whose notes are "places" — where a location and travel value make sense.
+    /// Called once per note inside persist's recompute loops, so it allocates as little as
+    /// possible: no `split` array, no per-call array literal, a Set instead of a linear scan.
+    private static let placeLikeTops: Set<String> =
+        ["travel", "trips", "trip", "location", "locations", "places", "restaurants"]
+
     static func isPlaceLikeFolder(_ folderName: String) -> Bool {
-        let top = folderName.lowercased().split(separator: "/").first.map(String.init) ?? folderName.lowercased()
-        return ["travel", "trips", "trip", "location", "locations", "places", "restaurants"].contains(top)
+        placeLikeTops.contains(folderName.prefix { $0 != "/" }.lowercased())
     }
 
     /// Re-derive a place note's intensity from how far it is from home, whether you slept

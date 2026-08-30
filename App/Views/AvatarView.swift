@@ -35,32 +35,38 @@ struct AvatarView: View {
         NavigationStack(path: $path) {
             ZStack {
                 spaceBackground.ignoresSafeArea()
-                VStack(spacing: 12) {
-                    Avatar3DView(
-                        color: { axisColor[$0] ?? .gray },
-                        growth: { axisGrowth[$0] ?? 0 },
-                        regionMaturity: { axisMat[$0] ?? 0 },
-                        nodes: graphNodes,
-                        links: graphLinks,
-                        maturity: model.maturity,
-                        zoom: zoom,
-                        onTapNode: { path.append($0) },
-                        onZoomChange: { zoom = $0; committedZoom = $0 },
-                        onLabels: { nodeLabels = $0 },
-                        onFocus: { name in withAnimation(.easeInOut(duration: 0.2)) { focusName = name } },
-                        focusRequest: model.avatarFocus
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .overlay { labelOverlay }
-                    .overlay(alignment: .top) { focusPill }
-                    .overlay(alignment: .bottomTrailing) { zoomControls.padding(14) }
-
-                    if let reflection {
-                        reflectionCard(reflection, tint: dominantColor(balance))
-                            .padding(.horizontal)
-                            .padding(.bottom, 8)
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                // The avatar gets the WHOLE screen. The reflection and the zoom controls float
+                // over it — as a VStack sibling, the reflection card was taking real layout
+                // space and squeezing the figure into the top half.
+                Avatar3DView(
+                    color: { axisColor[$0] ?? .gray },
+                    growth: { axisGrowth[$0] ?? 0 },
+                    regionMaturity: { axisMat[$0] ?? 0 },
+                    nodes: graphNodes,
+                    links: graphLinks,
+                    maturity: model.maturity,
+                    zoom: zoom,
+                    onTapNode: { path.append($0) },
+                    onZoomChange: { zoom = $0; committedZoom = $0 },
+                    onLabels: { nodeLabels = $0 },
+                    onFocus: { name in withAnimation(.easeInOut(duration: 0.2)) { focusName = name } },
+                    focusRequest: model.avatarFocus
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay { labelOverlay }
+                .overlay(alignment: .top) { focusPill }
+                .overlay(alignment: .bottom) {
+                    VStack(spacing: 10) {
+                        HStack { Spacer(); zoomControls }
+                        if let reflection {
+                            reflectionCard(reflection, tint: dominantColor(balance))
+                                // It sits over your avatar now, so you can put it away.
+                                .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { self.reflection = nil } }
+                                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        }
                     }
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 12)
                 }
             }
             .navigationTitle("Numinous")
