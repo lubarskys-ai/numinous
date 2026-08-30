@@ -33,3 +33,19 @@ extension Color {
 extension Axis {
     var color: Color { Color(hex: colorHex) }
 }
+
+/// Distances, written the way the reader expects them — miles where they'd say miles.
+/// Shared by the note's travel reading and the map's reach bar, so the same trip never reads
+/// two different ways in two places.
+enum DistanceFormat {
+    static func short(km: Double) -> String {
+        formatter.string(from: Measurement(value: km, unit: UnitLength.kilometers))
+    }
+
+    private static let formatter: MeasurementFormatter = {
+        let f = MeasurementFormatter()
+        f.unitOptions = .naturalScale
+        f.numberFormatter.maximumFractionDigits = 0
+        return f
+    }()
+}

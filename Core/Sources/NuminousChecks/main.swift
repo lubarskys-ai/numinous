@@ -341,4 +341,83 @@ h.group("Wikilink sanitize (link quality control)") {
     h.eq(WikilinkParser.sanitize("[[a/[[b/C]] then more"), "[[b/C]] then more", "text after a repaired link survives")
 }
 
+h.group("Travel value (distance · a night away · new ground)") {
+    // Distance still sets the floor, and it saturates.
+    h.eq(TravelValue.intensity(distanceKm: 5, days: 1, isNewGround: false), 3, "around town, familiar, day trip = 3")
+    h.eq(TravelValue.intensity(distanceKm: 400, days: 1, isNewGround: false), 4, "regional, familiar, day trip = 4")
+    h.eq(TravelValue.intensity(distanceKm: 9000, days: 1, isNewGround: false), 5, "far afield alone already maxes out")
+
+    // One night away is the jump; length past that barely moves it.
+    h.eq(TravelValue.intensity(distanceKm: 5, days: 2, isNewGround: false), 4, "one night nearby beats a day trip")
+    h.eq(TravelValue.intensity(distanceKm: 5, days: 14, isNewGround: false), 4, "two weeks isn't fourteen one-nighters")
+    h.check(TravelValue.intensity(distanceKm: 5, days: 2, isNewGround: false)
+            >= TravelValue.intensity(distanceKm: 5, days: 1, isNewGround: false), "a night away never scores lower")
+
+    // Novelty separates a first visit from a return at the same distance.
+    h.eq(TravelValue.intensity(distanceKm: 400, days: 1, isNewGround: true), 5, "regional first visit = 5")
+    h.eq(TravelValue.intensity(distanceKm: 400, days: 1, isNewGround: false), 4, "same day trip, ground you know = 4")
+    // Only three steps sit above the baseline, so the top of the dial saturates fast:
+    // a night away in a familiar region already reaches it.
+    h.eq(TravelValue.intensity(distanceKm: 400, days: 2, isNewGround: false), 5, "regional, one night, familiar = 5")
+
+    // Every term only adds: no place scores lower than it would on distance alone.
+    for km in [0.0, 49.0, 50.0, 799.0, 800.0, 12000.0] {
+        let floor = TravelValue.intensity(distanceKm: km, days: 1, isNewGround: false)
+        for days in [1, 2, 3, 5, 7, 30] {
+            for novel in [false, true] {
+                h.check(TravelValue.intensity(distanceKm: km, days: days, isNewGround: novel) >= floor,
+                        "\(Int(km))km/\(days)d/novel=\(novel) never below the distance-only floor")
+            }
+        }
+    }
+    // And it stays on the 1-5 dial.
+    h.eq(TravelValue.intensity(distanceKm: 99999, days: 365, isNewGround: true), 5, "clamped at 5")
+}
+
+h.group("Travel — the reading a place shows for itself") {
+    let r = TravelValue.reading(distanceKm: 9000, days: 3, isNewGround: true)
+    h.eq(r.reasons, ["new ground", "far afield", "a night away"], "strongest reason first")
+    h.eq(r.intensity, 5, "reading agrees with the score")
+    // Terms that didn't lift the score aren't claimed as reasons.
+    h.eq(TravelValue.reading(distanceKm: 5, days: 1, isNewGround: false).reasons, [], "a familiar day trip claims nothing")
+    h.eq(TravelValue.reading(distanceKm: 400, days: 1, isNewGround: false).reasons, ["another region"], "distance alone")
+    h.eq(TravelValue.reading(distanceKm: 5, days: 9, isNewGround: false).reasons, ["a long stay"], "a long stay alone")
+    // The reading and the bare score can never disagree.
+    for km in [0.0, 60.0, 5000.0] {
+        for days in [1, 2, 6] {
+            for novel in [false, true] {
+                h.eq(TravelValue.reading(distanceKm: km, days: days, isNewGround: novel).intensity,
+                     TravelValue.intensity(distanceKm: km, days: days, isNewGround: novel),
+                     "\(Int(km))km/\(days)d/novel=\(novel) reading matches score")
+            }
+        }
+    }
+}
+
+h.group("Travel — regions (a patch of world, not an address)") {
+    func pt(_ lat: Double, _ lon: Double, _ d: Int) -> TravelValue.GeoPoint {
+        TravelValue.GeoPoint(latitude: lat, longitude: lon, date: day(d))
+    }
+    // Two spots inside San Francisco are one region; Tokyo is another.
+    let sf = pt(37.77, -122.42, 3), oak = pt(37.80, -122.27, 5), tokyo = pt(35.68, 139.69, 4)
+    let regions = TravelValue.groupIntoRegions([sf, oak, tokyo])
+    h.eq(regions.count, 2, "SF + Oakland + Tokyo = 2 regions")
+    // Anchored on the FIRST visit, whatever order they arrive in — SF (day 3) before Tokyo (day 4).
+    h.eq(regions[0].anchor, 0, "first region anchors on the earliest point")
+    h.eq(regions[0].memberIndices.sorted(), [0, 1], "Oakland joins San Francisco")
+    h.eq(regions[1].anchor, 2, "Tokyo anchors its own region")
+
+    // A later note at an already-known spot doesn't open a new region...
+    let repeated = TravelValue.groupIntoRegions([pt(37.77, -122.42, 9), pt(37.78, -122.41, 1)])
+    h.eq(repeated.count, 1, "a return visit stays in the same region")
+    h.eq(repeated[0].anchor, 1, "...and the region keeps the earlier date as its first visit")
+
+    // Every point lands in exactly one region.
+    let many = (0..<12).map { pt(Double($0) * 7, Double($0) * 11, $0) }
+    let grouped = TravelValue.groupIntoRegions(many)
+    h.eq(grouped.flatMap(\.memberIndices).sorted(), Array(0..<12), "every point is placed exactly once")
+
+    h.eq(TravelValue.groupIntoRegions([]).count, 0, "no places, no regions")
+}
+
 exit(Int32(h.summarize()))

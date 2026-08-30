@@ -564,6 +564,64 @@ final class AppModel: ObservableObject {
             }
         }
         mappablePlaces = out
+        placeRegions = Self.regions(from: out)
+        cachedCoveredGround = liveCoveredGround()
+    }
+
+    /// A patch of the world you've been to — every place within `newGroundRadiusKm` of the
+    /// first one you recorded there, gathered under the date and name of that first visit.
+    /// This is the unit the map counts in: "twelve regions, three of them new this year".
+    struct PlaceRegion: Identifiable {
+        let id: Int
+        let name: String          // what you called the first place you recorded here
+        let latitude: Double      // that first place's coordinate — the region's anchor
+        let longitude: Double
+        let firstVisit: Date
+        let placeIDs: Set<String> // MappablePlace ids that fall inside
+    }
+
+    /// Cached regions, rebuilt with `mappablePlaces`. Small (one entry per patch of world),
+    /// so the Map can count against it on every render.
+    @Published private(set) var placeRegions: [PlaceRegion] = []
+
+    /// Gather places into regions, oldest first — so each region is anchored on, and dated by,
+    /// the first place you ever recorded there. Greedy against the anchors: a place joins the
+    /// first region whose anchor is within the radius, or starts one of its own.
+    static func regions(from places: [MappablePlace]) -> [PlaceRegion] {
+        let points = places.map { TravelValue.GeoPoint(latitude: $0.latitude, longitude: $0.longitude, date: $0.date) }
+        return TravelValue.groupIntoRegions(points).enumerated().map { i, region in
+            let first = places[region.anchor]
+            return PlaceRegion(id: i, name: first.label, latitude: first.latitude, longitude: first.longitude,
+                               firstVisit: first.date, placeIDs: Set(region.memberIndices.map { places[$0].id }))
+        }
+    }
+
+    /// What the map says about your reach: how much of the world the visible places cover, how
+    /// much of it you'd never recorded before, and the one that took you furthest from home.
+    struct TravelSummary: Equatable {
+        let regions: Int
+        let newRegions: Int      // regions whose first visit falls inside the period on screen
+        let farthestName: String?
+        let farthestKm: Double
+        var isEmpty: Bool { regions == 0 }
+    }
+
+    /// Summarize the places currently on the map. `isInPeriod` is the map's own time filter, so
+    /// "new" means new *within what you're looking at* — three new regions this year, not three
+    /// new regions ever.
+    func travelSummary(for places: [MappablePlace], isInPeriod: (Date) -> Bool) -> TravelSummary {
+        let ids = Set(places.map(\.id))
+        let touched = placeRegions.filter { !$0.placeIDs.isDisjoint(with: ids) }
+        var farthestName: String?, farthestKm = 0.0
+        if let home = homeLocation, let hlat = home.latitude, let hlon = home.longitude {
+            for p in places {
+                let km = Self.distanceKm(hlat, hlon, p.latitude, p.longitude)
+                if km > farthestKm { farthestKm = km; farthestName = p.label }
+            }
+        }
+        return TravelSummary(regions: touched.count,
+                             newRegions: touched.filter { isInPeriod($0.firstVisit) }.count,
+                             farthestName: farthestName, farthestKm: farthestKm)
     }
 
     /// What a map pin should read — the meaningful thing at that spot, not raw geography.
@@ -1182,7 +1240,29 @@ final class AppModel: ObservableObject {
         let quietAxisIDs: [String]    // areas that went untended
         let drifting: [Person]        // people you've most fallen out of touch with
         let reflection: String?       // the app's current grounded observation, if any
-        var isEmpty: Bool { tendedAxisIDs.isEmpty && quietAxisIDs.isEmpty && drifting.isEmpty && reflection == nil }
+        let travelNudge: String?      // how long since you were somewhere unfamiliar, if it's been a while
+        var isEmpty: Bool {
+            tendedAxisIDs.isEmpty && quietAxisIDs.isEmpty && drifting.isEmpty
+                && reflection == nil && travelNudge == nil
+        }
+    }
+
+    /// How long it's been since you recorded a place outside your usual radius — and a nudge
+    /// if that's been a while. Only for people the map already knows travel: it stays silent
+    /// unless home is set and you've been beyond the radius at least once, so it can never
+    /// scold someone for a life it has no picture of. Deliberately not a streak — it says how
+    /// long it's been, once a week, and then leaves you alone.
+    func farAfieldNudge(quietAfterDays: Int = 90) -> String? {
+        guard let home = homeLocation, let hlat = home.latitude, let hlon = home.longitude else { return nil }
+        let far = mappablePlaces.filter {
+            Self.distanceKm(hlat, hlon, $0.latitude, $0.longitude) > TravelValue.newGroundRadiusKm
+        }
+        guard let last = far.map(\.date).max() else { return nil }
+        let days = Calendar.current.dateComponents([.day], from: last, to: Date()).day ?? 0
+        guard days >= quietAfterDays else { return nil }
+        let months = max(3, days / 30)
+        return "It's been about \(months) months since you noted a place outside your usual radius. "
+             + "One night somewhere unfamiliar counts for more than you'd think."
     }
 
     /// People (not stubs) you've fallen out of touch with, most-overdue first — for the review.
@@ -1208,7 +1288,8 @@ final class AppModel: ObservableObject {
             if let last = lastTendedByAxis[a.id], last >= weekAgo { tended.append(a.id) } else { quiet.append(a.id) }
         }
         return WeeklyDigest(tendedAxisIDs: tended, quietAxisIDs: quiet,
-                            drifting: peopleByStaleness(), reflection: currentReflection()?.text)
+                            drifting: peopleByStaleness(), reflection: currentReflection()?.text,
+                            travelNudge: farAfieldNudge())
     }
 
     // Once-a-week gating for the review card, by ISO week.
@@ -2478,6 +2559,7 @@ final class AppModel: ObservableObject {
     /// made the map sticky right after opening it.
     func addPlaces(_ items: [(id: UUID, name: String, latitude: Double, longitude: Double)]) {
         var changed = false
+        var touched: [Int] = []
         for item in items {
             guard let i = notes.firstIndex(where: { $0.id == item.id }) else { continue }
             let n = item.name.trimmingCharacters(in: .whitespaces)
@@ -2492,11 +2574,15 @@ final class AppModel: ObservableObject {
             if notes[i].places != newPlaces {
                 notes[i].places = newPlaces
                 notes[i].location = places.first?.name
-                applyTravelValue(i)
+                touched.append(i)
                 changed = true
             }
         }
-        if changed { persist() }
+        if changed {
+            let ground = liveCoveredGround()
+            for i in touched { applyTravelValue(i, coveredGround: ground) }
+            persist()
+        }
     }
 
     /// Create a note for a place you searched on the map (name + coordinate), filed under
@@ -2922,7 +3008,8 @@ final class AppModel: ObservableObject {
         } else {
             UserDefaults.standard.removeObject(forKey: Self.homeKey)
         }
-        for i in notes.indices { applyTravelValue(i) }
+        let ground = liveCoveredGround()
+        for i in notes.indices { applyTravelValue(i, coveredGround: ground) }
         persist()
     }
 
@@ -2932,32 +3019,60 @@ final class AppModel: ObservableObject {
         return ["travel", "trips", "trip", "location", "locations", "places", "restaurants"].contains(top)
     }
 
-    /// Re-derive a place note's intensity from how far it is from home and how long the trip
-    /// lasted — farther + longer grows Meaning more. No-op unless home is set and the note is
-    /// a place note with a coordinate. Mutates only; the caller persists.
-    private func applyTravelValue(_ i: Int) {
+    /// Re-derive a place note's intensity from how far it is from home, whether you slept
+    /// there, and whether it's ground you've covered before — see `TravelValue`. No-op unless
+    /// home is set and the note is a place note with a coordinate. Mutates only; the caller
+    /// persists. Pass `coveredGround` when re-deriving many notes at once so the place list is
+    /// built once instead of per note.
+    private func applyTravelValue(_ i: Int, coveredGround: [(id: UUID, lat: Double, lon: Double)]? = nil) {
         guard notes.indices.contains(i),
-              Self.isPlaceLikeFolder(notes[i].folderName),
-              let home = homeLocation, let hlat = home.latitude, let hlon = home.longitude,
-              let place = notes[i].allPlaces.first(where: { $0.hasCoordinate }),
-              let plat = place.latitude, let plon = place.longitude else { return }
-        let km = Self.distanceKm(hlat, hlon, plat, plon)
-        let days = Self.tripDays(from: notes[i].details)
-        notes[i].intensity = Self.travelIntensity(distanceKm: km, days: days)
+              let reading = travelReading(for: notes[i],
+                                          coveredGround: coveredGround ?? liveCoveredGround()) else { return }
+        notes[i].intensity = reading.intensity
     }
 
-    /// Map distance-from-home and trip length to a 1–5 intensity (the same growth dial
-    /// everything else uses): base 3, +0…2 for distance (log-tiered so it saturates — a
-    /// nearby trip and a far one both count, far more so), +0…1 for a multi-day trip.
-    static func travelIntensity(distanceKm: Double, days: Int) -> Int {
-        var score = 3.0
-        switch distanceKm {
-        case ..<50:    score += 0     // around town
-        case ..<800:   score += 1     // regional
-        default:       score += 2     // far afield
+    /// The travel reading behind a place note's intensity — the distance, the nights, whether
+    /// it's new ground, and short phrases for whichever of those actually lifted it. `nil` when
+    /// the note isn't a located place note, or you haven't set a home to measure from. This is
+    /// the same computation `applyTravelValue` scores with, so what a note shows is what it got.
+    func travelReading(for note: Note,
+                       coveredGround: [(id: UUID, lat: Double, lon: Double)]? = nil) -> TravelValue.Reading? {
+        guard Self.isPlaceLikeFolder(note.folderName),
+              let home = homeLocation, let hlat = home.latitude, let hlon = home.longitude,
+              let place = note.allPlaces.first(where: { $0.hasCoordinate }),
+              let plat = place.latitude, let plon = place.longitude else { return nil }
+        let ground = coveredGround ?? cachedCoveredGround
+        return TravelValue.reading(
+            distanceKm: Self.distanceKm(hlat, hlon, plat, plon),
+            days: Self.tripDays(from: note.details),
+            isNewGround: Self.isNewGround(lat: plat, lon: plon, excluding: note.id,
+                                          homeLat: hlat, homeLon: hlon, covered: ground))
+    }
+
+    /// Every place note that has a coordinate — the ground you've already covered, against
+    /// which a new place is a first visit or a return. Cached (rebuilt with `mappablePlaces`)
+    /// so displaying a note's reading doesn't rescan every note on each render; the write path
+    /// calls `liveCoveredGround()` instead, since it scores notes it has just mutated.
+    private var cachedCoveredGround: [(id: UUID, lat: Double, lon: Double)] = []
+
+    private func liveCoveredGround() -> [(id: UUID, lat: Double, lon: Double)] {
+        notes.compactMap { n in
+            guard Self.isPlaceLikeFolder(n.folderName),
+                  let p = n.allPlaces.first(where: { $0.hasCoordinate }),
+                  let lat = p.latitude, let lon = p.longitude else { return nil }
+            return (n.id, lat, lon)
         }
-        if days >= 7 { score += 1 } else if days >= 3 { score += 0.5 }
-        return min(5, max(1, Int(score.rounded())))
+    }
+
+    /// Is this somewhere you've never been — nothing you've recorded (and not home itself)
+    /// within `newGroundRadiusKm`? The note being scored is excluded, so a place is never
+    /// "familiar" because of itself.
+    static func isNewGround(lat: Double, lon: Double, excluding id: UUID,
+                            homeLat: Double, homeLon: Double,
+                            covered: [(id: UUID, lat: Double, lon: Double)]) -> Bool {
+        let r = TravelValue.newGroundRadiusKm
+        if distanceKm(homeLat, homeLon, lat, lon) <= r { return false }
+        return !covered.contains { $0.id != id && distanceKm($0.lat, $0.lon, lat, lon) <= r }
     }
 
     /// Trip length in days from a note's Trip start/end details (inclusive); 1 if none.
@@ -2968,13 +3083,9 @@ final class AppModel: ObservableObject {
         return max(1, days + 1)
     }
 
-    /// Great-circle distance between two lat/long points, in kilometres (haversine).
+    /// Great-circle distance between two lat/long points, in kilometres.
     static func distanceKm(_ lat1: Double, _ lon1: Double, _ lat2: Double, _ lon2: Double) -> Double {
-        let r = 6371.0
-        let dLat = (lat2 - lat1) * .pi / 180, dLon = (lon2 - lon1) * .pi / 180
-        let a = sin(dLat / 2) * sin(dLat / 2)
-            + cos(lat1 * .pi / 180) * cos(lat2 * .pi / 180) * sin(dLon / 2) * sin(dLon / 2)
-        return r * 2 * atan2(a.squareRoot(), (1 - a).squareRoot())
+        TravelValue.distanceKm(lat1, lon1, lat2, lon2)
     }
 
     // MARK: - Auto-location for place notes

@@ -367,6 +367,18 @@ struct NoteDetailView: View {
                 .accessibilityLabel("Remove \(place.name)")
             }
         }
+        if let reading = model.travelReading(for: note) {
+            HStack(spacing: 6) {
+                Image(systemName: "globe.americas")
+                Text(Self.travelReasonLine(reading))
+                Spacer(minLength: 0)
+                Text("⚡\(reading.intensity)")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Grows you \(reading.intensity) out of 5 — \(Self.travelReasonLine(reading))")
+        }
         Menu {
             Button { showPlacePicker = true } label: {
                 Label("Search for a place…", systemImage: "magnifyingglass")
@@ -384,6 +396,12 @@ struct NoteDetailView: View {
             Label(note.allPlaces.isEmpty ? "Add location" : "Add another location", systemImage: "plus.circle")
                 .foregroundStyle(.tint)
         }
+    }
+
+    /// Why this place scores what it does, in plain words: "3,140 mi from home · new ground ·
+    /// a night away". Distance is shown in the reader's own units.
+    static func travelReasonLine(_ r: TravelValue.Reading) -> String {
+        ([DistanceFormat.short(km: r.distanceKm) + " from home"] + r.reasons).joined(separator: " · ")
     }
 
     /// Geocode a typed place name and store it DIRECTLY on this note — the note itself becomes

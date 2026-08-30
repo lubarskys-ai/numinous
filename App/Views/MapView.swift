@@ -137,6 +137,7 @@ struct MapView: View {
                     searchBar
                     if searchResult != nil { saveSearchedBar }
                     filterBar(count: matching.count)
+                    reachBar(model.travelSummary(for: matching, isInPeriod: period.contains))
                 }
             }
             .overlay(alignment: .bottomLeading) { locateButton.padding(.leading, 14).padding(.bottom, 30) }
@@ -326,6 +327,47 @@ struct MapView: View {
                 .background(.ultraThinMaterial, in: Capsule())
         }
         .padding(.horizontal, 12)
+    }
+
+    // MARK: - Reach bar
+
+    /// How much ground the pins on screen actually cover — the map's own summary of your
+    /// reach, above the pins themselves. A region is a patch of world within
+    /// `newGroundRadiusKm`, so this counts places you'd call different, not addresses.
+    @ViewBuilder
+    private func reachBar(_ summary: AppModel.TravelSummary) -> some View {
+        if !summary.isEmpty {
+            HStack(spacing: 6) {
+                Image(systemName: "globe.americas").font(.caption2)
+                Text(summary.regions == 1 ? "1 region" : "\(summary.regions) regions")
+                    .fontWeight(.medium)
+                if summary.newRegions > 0, let phrase = newRegionsPhrase {
+                    Text("· \(summary.newRegions) new \(phrase)").foregroundStyle(.tint)
+                }
+                if let name = summary.farthestName, summary.farthestKm >= 50 {
+                    Text("· furthest \(name), \(DistanceFormat.short(km: summary.farthestKm))")
+                        .foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                }
+                Spacer(minLength: 0)
+            }
+            .font(.caption)
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(.secondary.opacity(0.2)))
+            .padding(.horizontal, 12)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    /// What "new" means under the period filter on screen. Nothing over all time — every
+    /// region is new the first time you record it, so the count would just repeat the total.
+    private var newRegionsPhrase: String? {
+        switch period {
+        case .all:    return nil
+        case .year:   return "this year"
+        case .month:  return "this month"
+        case .days30: return "in 30 days"
+        }
     }
 
     private func chip(_ text: String, system: String) -> some View {

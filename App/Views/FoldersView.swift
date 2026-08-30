@@ -930,7 +930,7 @@ struct AxisSettingsView: View {
                 } header: {
                     Text("Home")
                 } footer: {
-                    Text("Where you live. Travel notes grow your Meaning axis more the farther they are from home and the longer the trip.")
+                    Text("Where you live. Travel notes grow your Meaning axis more the farther they are from home, the more of a night you spent away, and the less you'd been there before.")
                 }
 
                 Section {

@@ -31,6 +31,14 @@ struct WeeklyReviewView: View {
                         }
                     } header: { Text("People you've drifted from") } footer: { Text("A gentle nudge — maybe reach out to one of them.") }
                 }
+                if let nudge = digest.travelNudge {
+                    Section {
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "globe.americas").foregroundStyle(.teal)
+                            Text(nudge).font(.callout)
+                        }
+                    } header: { Text("Where you've been") } footer: { Text("A place you don't know already grows you more than a longer trip back somewhere you do.") }
+                }
                 if let reflection = digest.reflection {
                     Section {
                         HStack(alignment: .top, spacing: 8) {
