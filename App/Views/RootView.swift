@@ -20,10 +20,9 @@ struct RootView: View {
         let balance = model.score.axisBalance(over: model.axes)
         let tint = (model.axes.max { (balance[$0.id] ?? 0) < (balance[$1.id] ?? 0) })?.color ?? .accentColor
 
-        // Four tabs, not six. You land on Home — the figure and one thing to do — and the
-        // rest are places you go FROM there. Calendar and Health used to be tabs; they're
-        // ways of slicing the same notes, so they moved behind Home rather than asking a
-        // brand-new user to choose between six filing systems on first launch.
+        // You land on Home — the figure and one thing to do. Health is no longer a tab: it's
+        // a line on Home that speaks only when it has something to import. Calendar keeps
+        // its tab; it's a place you go on purpose, not a slice of the same notes.
         TabView(selection: $selection) {
             HomeView()
                 .tabItem { Label("Home", systemImage: "house") }
@@ -34,6 +33,9 @@ struct RootView: View {
             FoldersView()
                 .tabItem { Label("Folders", systemImage: "folder") }
                 .tag("folders")
+            CalendarView()
+                .tabItem { Label("Calendar", systemImage: "calendar") }
+                .tag("calendar")
             MapView()
                 .tabItem { Label("Map", systemImage: "map") }
                 .tag("map")
