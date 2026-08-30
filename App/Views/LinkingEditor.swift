@@ -329,9 +329,13 @@ private struct LinkTextView: UIViewRepresentable {
             }
             // A leading space keeps the token clean when inserted mid-word.
             let needsSpace = range.location > 0 && !ns.substring(with: NSRange(location: range.location - 1, length: 1)).allSatisfy({ $0 == " " || $0 == "\n" })
-            let insert = (needsSpace ? " [[" : "[[")
+            // Write the whole `[[]]` and land the caret between the brackets, so you can
+            // just type the name — and so abandoning the picker leaves a closed link, not a
+            // dangling `[[`. (An empty `[[]]` doesn't match the link regex, so it stays
+            // visible and unfolded while you type into it.)
+            let insert = (needsSpace ? " [[]]" : "[[]]")
             tv.text = ns.replacingCharacters(in: range, with: insert)
-            let loc = range.location + (insert as NSString).length
+            let loc = range.location + (insert as NSString).length - 2
             tv.selectedRange = NSRange(location: loc, length: 0)
             parent.text = tv.text
             updateQuery()
@@ -379,7 +383,11 @@ private struct LinkTextView: UIViewRepresentable {
             let before = ns.substring(to: clamped) as NSString
             let open = before.range(of: "[[", options: .backwards)
             guard open.location != NSNotFound else { return }
-            let replace = NSRange(location: open.location, length: clamped - open.location)
+            // Swallow the closing `]]` sitting just past the caret — the toolbar button
+            // writes one, and without this the finished link would trail a stray `]]`.
+            var end = clamped
+            if ns.length >= end + 2, ns.substring(with: NSRange(location: end, length: 2)) == "]]" { end += 2 }
+            let replace = NSRange(location: open.location, length: end - open.location)
             let insertText = "[[\(fullTitle)]] "
             let newText = ns.replacingCharacters(in: replace, with: insertText)
             tv.text = newText
