@@ -129,7 +129,7 @@ struct HomeView: View {
 
     /// A line worth reading on the way past. Tappable when it points at someone.
     private struct Notice: Identifiable {
-        enum Action: Equatable { case none, note(UUID), health }
+        enum Action: Equatable { case none, note(UUID), health, compose }
         /// Derived from the content, NOT a fresh UUID. A new id every render makes ForEach
         /// throw away and rebuild every row on each pass, which is felt as tab-switch lag.
         var id: String { kind + "|" + text }
@@ -196,13 +196,65 @@ struct HomeView: View {
         if let health = healthNotice {
             out.append(health)
         }
-        if let quiet = digest.quietAxisIDs.first, let axis = model.axis(id: quiet) {
-            out.append(Notice(kind: "quiet:\(quiet)", icon: "circle", tint: axis.color,
-                              text: "\(axis.name) has been quiet this week.", snooze: Self.day * 7))
+        if let thin = thinnestAxis {
+            out.append(Notice(kind: "thin:\(thin.id)", icon: "circle.lefthalf.filled", tint: thin.color,
+                              text: "\(thin.name) is the thinnest part of you right now. \(suggestion(for: thin))",
+                              action: .compose, verb: "Note one", snooze: Self.day * 7))
         }
         let now = Date()
         return Array(out.filter { (ignoredUntil[$0.kind] ?? .distantPast) < now }.prefix(3))
     }
+
+    /// The part of you with the least growth behind it — and, among the three thinnest, one
+    /// that has also gone quiet this week, since that's the one most worth a nudge. This is a
+    /// deeper signal than "quiet": recency says what you skipped, share says what you've never
+    /// really fed.
+    private var thinnestAxis: Axis? {
+        let balance = model.score.axisBalance(over: model.axes)
+        guard !balance.isEmpty else { return nil }
+        let ranked = model.axes.sorted { (balance[$0.id] ?? 0) < (balance[$1.id] ?? 0) }
+        let thinnest = Array(ranked.prefix(3))
+        let quiet = Set(digest?.quietAxisIDs ?? [])
+        return thinnest.first(where: { quiet.contains($0.id) }) ?? thinnest.first
+    }
+
+    /// One concrete thing that would feed an axis. All of them happen away from the phone —
+    /// the note is what you write afterwards, not the point. Rotates by the day so the same
+    /// sentence isn't sitting there all month.
+    private func suggestion(for axis: Axis) -> String {
+        let options = Self.axisSuggestions[axis.id] ?? Self.genericSuggestions
+        let day = Calendar.current.ordinality(of: .day, in: .year, for: Date()) ?? 0
+        return options[day % options.count]
+    }
+
+    private static let genericSuggestions = [
+        "Give it an hour this week and note what came of it.",
+        "One small thing here would move it more than you'd think."
+    ]
+
+    private static let axisSuggestions: [String: [String]] = [
+        "body": ["A walk somewhere you haven't been would do it.",
+                 "The workout you already did counts — it just isn't written down.",
+                 "Something that leaves you out of breath, once this week."],
+        "gut": ["Cook something you've never made.",
+                "Note the meal that was actually worth it.",
+                "Eat somewhere new rather than somewhere good."],
+        "mind": ["The book you keep meaning to open.",
+                 "Twenty pages of something hard.",
+                 "Write down what stuck from the last thing you read."],
+        "meaning": ["One night away somewhere you've never been.",
+                    "The project you keep postponing — an hour of it.",
+                    "Somewhere new, even if it's close."],
+        "heart": ["Call the person you've drifted from.",
+                  "See someone in person rather than texting them.",
+                  "Write down who you saw this week, and what you talked about."],
+        "spirit": ["Ten minutes outside with no phone.",
+                   "Sit with something for a while before writing about it.",
+                   "Notice one thing today you'd normally walk past."],
+        "influences": ["The person whose thinking changed yours — note why.",
+                       "Where did that idea actually come from?",
+                       "Follow one thing back to its source."]
+    ]
 
     /// Health, without a tab. Two states worth a line and no others:
     ///
@@ -305,6 +357,7 @@ struct HomeView: View {
         case .none:          break
         case .note(let id):  path.append(id)
         case .health:        showHealth = true
+        case .compose:       showCompose = true
         }
     }
 
