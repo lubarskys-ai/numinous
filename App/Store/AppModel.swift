@@ -2780,7 +2780,12 @@ final class AppModel: ObservableObject {
            let slat = saved.latitude, let slon = saved.longitude {
             near = CLLocationCoordinate2D(latitude: slat, longitude: slon)
         } else if let noteID, let anchor = noteAreaCoordinate(noteID) {
-            near = anchor                                               // ~city scale
+            // An anchor is only as precise as the place it came from: a note pinned to
+            // "Canada" resolves to the country's CENTROID, and a 60km circle around that is
+            // empty wilderness. Give an inferred anchor room; pass 3 tightens around whatever
+            // actually resolves.
+            near = anchor
+            radius = 400_000
         } else if let region {
             near = region.center; radius = 900_000                      // ~country scale
         }
@@ -2825,15 +2830,27 @@ final class AppModel: ObservableObject {
             }
         }
 
+        #if DEBUG
+        print("🔎[find] candidates=\(candidates) region=\(region?.name ?? "nil") near=\(near.map { "\($0.latitude),\($0.longitude)" } ?? "global") radius=\(Int(radius / 1000))km")
+        #endif
         var found = await resolve(Array(candidates.indices), near: near, radius: radius)
         var missing = candidates.indices.filter { found[$0] == nil }
+        #if DEBUG
+        print("🔎[find] pass1 resolved=\(found.keys.sorted().map { candidates[$0] }) missing=\(missing.map { candidates[$0] })")
+        #endif
         if !missing.isEmpty, near != nil {
             found.merge(await resolve(missing, near: nil, radius: radius)) { a, _ in a }
             missing = candidates.indices.filter { found[$0] == nil }
+            #if DEBUG
+            print("🔎[find] pass2 (global) still missing=\(missing.map { candidates[$0] })")
+            #endif
         }
         if !missing.isEmpty, let anchor = found.values.first?.hit {
             let c = CLLocationCoordinate2D(latitude: anchor.latitude, longitude: anchor.longitude)
             found.merge(await resolve(missing, near: c, radius: 120_000)) { a, _ in a }
+            #if DEBUG
+            print("🔎[find] pass3 (near \(anchor.name)) still missing=\(candidates.indices.filter { found[$0] == nil }.map { candidates[$0] })")
+            #endif
         }
 
         var out: [NearbyPlace] = []
