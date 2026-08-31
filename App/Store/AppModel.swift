@@ -2743,12 +2743,11 @@ final class AppModel: ObservableObject {
         // Nothing left to locate usually means every link is already mapped — but "mapped"
         // isn't the same as "mapped correctly". Rather than do nothing, offer them again so a
         // wrong pin can be replaced.
-        var candidates: [String] = noteID.map { linkPlaceCandidates(forNote: $0) } ?? Self.placeNameCandidates(in: text)
-        var remapping = false
-        if candidates.isEmpty, let noteID {
-            candidates = linkPlaceCandidates(forNote: noteID, includeMapped: true)
-            remapping = !candidates.isEmpty
-        }
+        // Always include links that already have a coordinate. Offering only the unmapped ones
+        // meant a note with three unmapped links and one wrongly-mapped link would show the
+        // three and silently drop the fourth — the one that most needed fixing.
+        let candidates: [String] = noteID.map { linkPlaceCandidates(forNote: $0, includeMapped: true) }
+            ?? Self.placeNameCandidates(in: text)
         guard !candidates.isEmpty else { return [] }
         // Region strategy — belt and suspenders, because a country is a big fuzzy target:
         //   1) append the region NAME to each query ("Sky Bar" → "Sky Bar Thailand"), and
@@ -2771,10 +2770,7 @@ final class AppModel: ObservableObject {
             near = region.center; radius = 900_000                      // ~country scale
         }
         if near == nil, autoLocator.isAuthorized { near = await autoLocator.currentCoordinate() }
-        var already = Set<String>()
-        if !remapping, let noteID, let n = note(id: noteID) {
-            already = n.allPlaces.filter { $0.hasCoordinate }.reduce(into: Set<String>()) { $0.insert(Self.norm($1.name)) }
-        }
+        let already = Set<String>()   // nothing is suppressed; a mapped place can be re-mapped
         // Resolve in passes, because the right bias often isn't knowable up front.
         //
         //   1. with whatever bias we have (a pin on the note, its region, else where you are)
@@ -2835,7 +2831,15 @@ final class AppModel: ObservableObject {
             guard let r = found[i], r.venue || Self.resolvedNameMatches(candidates[i], r.hit.name) else { continue }
             let key = Self.norm(r.hit.name)
             guard seen.insert(key).inserted, !already.contains(key) else { continue }
-            let sub = Self.norm(r.hit.name) == Self.norm(candidates[i]) ? "tap to map it" : "from \u{201C}\(candidates[i])\u{201D}"
+            let mapped = existingPlaceNoteIndex(named: candidates[i]).map {
+                notes[$0].allPlaces.contains { $0.hasCoordinate }
+            } ?? false
+            let sub: String
+            if mapped {
+                sub = "already pinned — tap to replace"
+            } else {
+                sub = Self.norm(r.hit.name) == Self.norm(candidates[i]) ? "tap to map it" : "from \u{201C}\(candidates[i])\u{201D}"
+            }
             out.append(NearbyPlace(name: r.hit.name, subtitle: sub,
                                    latitude: r.hit.latitude, longitude: r.hit.longitude,
                                    sourceLink: candidates[i]))
