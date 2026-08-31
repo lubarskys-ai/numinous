@@ -30,10 +30,14 @@ struct CabinetView: View {
     @Binding var selection: FolderSelection
     @State private var openCategory: String?
 
-    struct Cabinet: Identifiable {
+    /// Deliberately holds NO notes array. SwiftUI compares a view's stored properties to
+    /// decide whether to re-run its body; carrying `[Note]` here meant every drawer deep-
+    /// compared thousands of notes on every update, which made EVERY tab switch cost ~270ms
+    /// once the Folders tab had been built. The drawer looks its notes up from the model.
+    struct Cabinet: Identifiable, Equatable {
         let id: String
         var name: String { id }
-        let notes: [Note]
+        let count: Int
         let color: Color
         let symbol: String
     }
@@ -54,7 +58,7 @@ struct CabinetView: View {
         let result = model.cabinetGroups.map { group in
             let folder = model.folder(named: group.id)
             let axis = model.axis(id: folder?.axisID) ?? group.notes.lazy.compactMap { model.axis(for: $0) }.first
-            return Cabinet(id: group.id, notes: group.notes,
+            return Cabinet(id: group.id, count: group.notes.count,
                            color: axis?.color ?? .secondary,
                            symbol: folderSymbol(group.id, folder?.category))
         }
@@ -112,6 +116,10 @@ private struct DrawerView: View {
     }
     @State private var memo = DrawerMemo()
     private var memoKey: String { "\(model.revision)|\(cabinet.id)" }
+    /// Looked up rather than carried — see the note on `Cabinet`.
+    private var cabinetNotes: [Note] {
+        model.cabinetGroups.first { $0.id == cabinet.id }?.notes ?? []
+    }
     let isOpen: Bool
     let onToggle: () -> Void
     let onOpenNote: (UUID) -> Void
@@ -179,7 +187,7 @@ private struct DrawerView: View {
         let base = cabinet.id.lowercased() + "/"
         var counts: [String: Int] = [:]      // lowercased subfolder path → count
         var casing: [String: String] = [:]   // lowercased → original casing
-        for n in cabinet.notes where n.folderName.lowercased().hasPrefix(base) {
+        for n in cabinetNotes where n.folderName.lowercased().hasPrefix(base) {
             let rest = n.folderName.dropFirst(cabinet.id.count + 1)
             guard let seg = rest.split(separator: "/").first.map(String.init), !seg.isEmpty else { continue }
             let path = cabinet.id + "/" + seg
@@ -192,7 +200,7 @@ private struct DrawerView: View {
             .map { (path: casing[$0]!, count: counts[$0]!) }
         memo.key = memoKey
         memo.subfolders = rows
-        memo.direct = cabinet.notes.filter { $0.folderName.lowercased() == cabinet.id.lowercased() }
+        memo.direct = cabinetNotes.filter { $0.folderName.lowercased() == cabinet.id.lowercased() }
         return rows
     }
 
@@ -211,7 +219,7 @@ private struct DrawerView: View {
                     Text(cabinet.name)
                         .font(.system(.title3, design: .rounded).weight(.semibold))
                         .foregroundStyle(.primary)
-                    Text("\(cabinet.notes.count) file\(cabinet.notes.count == 1 ? "" : "s")")
+                    Text("\(cabinet.count) file\(cabinet.count == 1 ? "" : "s")")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -254,7 +262,7 @@ private struct DrawerView: View {
             .onDrag { NSItemProvider(object: cabinet.id as NSString) }
 
             if isOpen {
-                if cabinet.notes.isEmpty {
+                if cabinet.count == 0 {
                     Text("No files yet").font(.callout).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity).padding(.vertical, 20)
                 } else {
@@ -337,7 +345,7 @@ private struct DrawerView: View {
                     }
                     if directNotes.count > gridLimit || !subfolderRows.isEmpty {
                         Button { onBrowseFolder(cabinet.id) } label: {
-                            Label("Browse all \(cabinet.notes.count), A–Z", systemImage: "list.bullet.indent")
+                            Label("Browse all \(cabinet.count), A–Z", systemImage: "list.bullet.indent")
                                 .font(.callout.weight(.medium))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 10)
