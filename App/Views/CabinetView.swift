@@ -115,6 +115,12 @@ private struct DrawerView: View {
         var direct: [Note] = []
     }
     @State private var memo = DrawerMemo()
+    /// Computed when the menu item is TAPPED, not while building the dialog. A
+    /// confirmationDialog's content and message are built eagerly on every render, and these
+    /// two each walked the whole vault twice — four full scans per drawer, ~68 per render
+    /// across the cabinet. That was the entire cost of switching tabs once Folders existed.
+    @State private var doomed: [Note] = []
+    @State private var dupCount = 0
     private var memoKey: String { "\(model.revision)|\(cabinet.id)" }
     /// Looked up rather than carried — see the note on `Cabinet`.
     private var cabinetNotes: [Note] {
@@ -389,14 +395,13 @@ private struct DrawerView: View {
             Text("This removes the note. It can't be undone.")
         }
         .confirmationDialog("Remove unlinked notes?", isPresented: $cleanupConfirm, titleVisibility: .visible) {
-            let doomed = model.unlinkedNotes(inFolder: cabinet.id)
             Button("Remove \(doomed.count) note\(doomed.count == 1 ? "" : "s")", role: .destructive) {
                 model.delete(doomed)
             }
             .disabled(doomed.isEmpty)
             Button("Cancel", role: .cancel) {}
         } message: {
-            let c = model.unlinkedNotes(inFolder: cabinet.id).count
+            let c = doomed.count
             if c == 0 {
                 Text("Every note in “\(cabinet.name)” is linked to something — nothing to remove.")
             } else {
@@ -404,13 +409,13 @@ private struct DrawerView: View {
             }
         }
         .confirmationDialog("Merge duplicates?", isPresented: $dupConfirm, titleVisibility: .visible) {
-            let n = model.mergeableDuplicateCount(inFolder: cabinet.id)
+            let n = dupCount
             Button(n > 0 ? "Merge \(n) duplicate\(n == 1 ? "" : "s")" : "Merge duplicates") {
                 model.mergeDuplicatesAndDedupe(inFolder: cabinet.id)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            let c = model.mergeableDuplicateCount(inFolder: cabinet.id)
+            let c = dupCount
             if c == 0 {
                 Text("No duplicates detected in “\(cabinet.name)”. Merging will still tidy any exact same-name copies elsewhere.")
             } else {
@@ -428,8 +433,14 @@ private struct DrawerView: View {
         Button { onRenameFolder(cabinet.id) } label: { Label("Rename or move folder…", systemImage: "pencil") }
         Button { onMergeFolder(cabinet.id) } label: { Label("Merge into…", systemImage: "arrow.triangle.merge") }
         Button { onEditAxes(cabinet.id) } label: { Label("Grows…", systemImage: "circle.hexagongrid") }
-        Button { cleanupConfirm = true } label: { Label("Remove unlinked notes…", systemImage: "sparkles") }
-        Button { dupConfirm = true } label: { Label("Merge duplicates…", systemImage: "arrow.triangle.merge") }
+        Button {
+            doomed = model.unlinkedNotes(inFolder: cabinet.id)
+            cleanupConfirm = true
+        } label: { Label("Remove unlinked notes…", systemImage: "sparkles") }
+        Button {
+            dupCount = model.mergeableDuplicateCount(inFolder: cabinet.id)
+            dupConfirm = true
+        } label: { Label("Merge duplicates…", systemImage: "arrow.triangle.merge") }
         Menu("Default intensity") {
             let intensity = model.folder(named: cabinet.id)?.defaultIntensity
             Button { model.setFolderIntensity(nil, forFolder: cabinet.id) } label: {
