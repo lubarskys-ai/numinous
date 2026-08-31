@@ -252,12 +252,21 @@ struct NotesView: View {
 
     /// Top-level categories among your written notes (e.g. "notes", "diary",
     /// "golf clubs") — entity folders are excluded.
+    private final class CategoryMemo { var key = ""; var value: [String] = [] }
+    @State private var categoryMemo = CategoryMemo()
+
     private var categories: [String] {
+        // This walked every note on EVERY render — a toolbar menu most people never open,
+        // costing a full pass plus a split allocation per note on each tab switch.
+        if categoryMemo.key == "\(model.revision)" { return categoryMemo.value }
         var seen = Set<String>()
         for note in model.notes where !note.isStub && !note.folderName.isEmpty && Self.isJournalNote(note) {
-            seen.insert(note.folderName.split(separator: "/").first.map(String.init) ?? note.folderName)
+            seen.insert(String(note.folderName.prefix { $0 != "/" }))
         }
-        return seen.sorted()
+        let result = seen.sorted()
+        categoryMemo.key = "\(model.revision)"
+        categoryMemo.value = result
+        return result
     }
 
     private func matchesFilter(_ note: Note) -> Bool {

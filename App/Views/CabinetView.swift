@@ -102,6 +102,16 @@ struct CabinetView: View {
 private struct DrawerView: View {
     @EnvironmentObject var model: AppModel
     let cabinet: CabinetView.Cabinet
+    /// Per-drawer derived lists, held across renders. Each pass is small enough to stay under
+    /// the 20ms log threshold on its own, but every drawer on screen paid one on every render,
+    /// and the sum is most of what a switch to Folders costs at a few thousand notes.
+    private final class DrawerMemo {
+        var key = ""
+        var subfolders: [(path: String, count: Int)] = []
+        var direct: [Note] = []
+    }
+    @State private var memo = DrawerMemo()
+    private var memoKey: String { "\(model.revision)|\(cabinet.id)" }
     let isOpen: Bool
     let onToggle: () -> Void
     let onOpenNote: (UUID) -> Void
@@ -165,9 +175,7 @@ private struct DrawerView: View {
     /// count — computed in ONE pass over the drawer's notes (was O(subfolders × notes)
     /// because the count was recomputed per row every render).
     private var subfolderRows: [(path: String, count: Int)] {
-        let _t0 = CFAbsoluteTimeGetCurrent()
-        defer { let ms = (CFAbsoluteTimeGetCurrent() - _t0) * 1000
-            if ms > 20 { print("⏱️[perf] subfolderRows \(Int(ms))ms cabinet=\(cabinet.id) notes=\(cabinet.notes.count)") } }
+        if memo.key == memoKey { return memo.subfolders }
         let base = cabinet.id.lowercased() + "/"
         var counts: [String: Int] = [:]      // lowercased subfolder path → count
         var casing: [String: String] = [:]   // lowercased → original casing
@@ -179,14 +187,20 @@ private struct DrawerView: View {
             if casing[key] == nil { casing[key] = path }
             counts[key, default: 0] += 1
         }
-        return counts.keys
+        let rows = counts.keys
             .sorted { casing[$0]!.localizedCaseInsensitiveCompare(casing[$1]!) == .orderedAscending }
             .map { (path: casing[$0]!, count: counts[$0]!) }
+        memo.key = memoKey
+        memo.subfolders = rows
+        memo.direct = cabinet.notes.filter { $0.folderName.lowercased() == cabinet.id.lowercased() }
+        return rows
     }
 
     /// Notes filed directly in this drawer (not in a subfolder).
     private var directNotes: [Note] {
-        cabinet.notes.filter { $0.folderName.lowercased() == cabinet.id.lowercased() }
+        if memo.key == memoKey { return memo.direct }
+        _ = subfolderRows            // fills both halves of the memo in one pass
+        return memo.direct
     }
 
     var body: some View {
