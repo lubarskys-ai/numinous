@@ -15,6 +15,7 @@ struct HomeView: View {
     @State private var showCompose = false
     @State private var showAvatar = false
     @State private var showGuide = false
+    @State private var showSetup = false
     @State private var showHealth = false
     @State private var path: [UUID] = []
     /// Recent activity that hasn't become a note yet — the only reason to mention Health.
@@ -70,6 +71,7 @@ struct HomeView: View {
         .fullScreenCover(isPresented: $showCompose) { ComposeView(prefillTitle: nil, autofocus: true) }
         .fullScreenCover(isPresented: $showAvatar) { AvatarExpandedView() }
         .sheet(isPresented: $showGuide) { GuideView() }
+        .sheet(isPresented: $showSetup) { AxisSettingsView() }
         .fullScreenCover(isPresented: $showHealth) { closable { HealthView() } }
         // They may have granted access in there, which changes what Home should say.
         .onChange(of: showHealth) { open in if !open { Task { await countUnimportedActivity() } } }
@@ -366,6 +368,7 @@ struct HomeView: View {
     private var elsewhereLinks: some View {
         HStack(spacing: 22) {
             Button { showGuide = true } label: { Label("How it works", systemImage: "questionmark.circle") }
+            Button { showSetup = true } label: { Label("Setup", systemImage: "slider.horizontal.3") }
         }
         .font(.subheadline)
         .padding(.top, 4)

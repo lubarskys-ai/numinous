@@ -46,7 +46,6 @@ struct NotesView: View {
                             }
                             Divider()
                             Button { showReview = true } label: { Label("Your week", systemImage: "sparkles") }
-                            Button { importContacts() } label: { Label("Sync contacts", systemImage: "person.crop.circle.badge.plus") }
                         } label: {
                             Label(categoryFilter ?? "All", systemImage: "line.3.horizontal.decrease.circle")
                         }
@@ -337,21 +336,6 @@ struct NotesView: View {
         return f.string(from: day)
     }
 
-    private func importContacts() {
-        Task {
-            do {
-                let contacts = try await ContactsImporter.fetchContacts()
-                let (added, updated) = model.importContacts(contacts)
-                importMessage = contacts.isEmpty
-                    ? "No contacts found on this device."
-                    : "Synced \(added) new, updated \(updated) into your Contacts folder."
-            } catch ContactsImporter.ImportError.accessDenied {
-                importMessage = "Contacts access was declined. You can enable it in Settings → Numinous."
-            } catch {
-                importMessage = "Couldn't sync contacts: \(error.localizedDescription)"
-            }
-        }
-    }
 
     static func stamp() -> String {
         let f = DateFormatter()

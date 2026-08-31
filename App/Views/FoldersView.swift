@@ -565,6 +565,25 @@ struct FoldersView: View {
     }
 }
 
+extension AxisSettingsView {
+    /// Pull contacts into the People folder. Lives here now rather than in two different
+    /// toolbars — it was duplicated in the Notes tab and the Folders add-menu.
+    func syncContacts() {
+        Task {
+            do {
+                let contacts = try await ContactsImporter.fetchContacts()
+                let (added, updated) = model.importContacts(contacts)
+                importMessage = contacts.isEmpty ? "No contacts found on this device."
+                    : "Synced \(added) new, updated \(updated) into your Contacts folder."
+            } catch ContactsImporter.ImportError.accessDenied {
+                importMessage = "Contacts access was declined. You can enable it in Settings → Numinous."
+            } catch {
+                importMessage = "Couldn't import contacts: \(error.localizedDescription)"
+            }
+        }
+    }
+}
+
 /// Wrapper so a folder path can drive a `.sheet(item:)`.
 struct FolderRef: Identifiable { let id: String }
 
@@ -897,11 +916,30 @@ struct AxisSettingsView: View {
     @State private var importing = false
     @State private var showHomePrompt = false
     @State private var homeDraft = ""
+    @State private var showReadwise = false
+    @State private var showCalendarSubscribe = false
     @StateObject private var locator = LocationService()
 
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Button { syncContacts() } label: {
+                        Label("Sync contacts", systemImage: "person.crop.circle.badge.plus")
+                    }
+                    Button { showReadwise = true } label: {
+                        Label(model.isReadwiseConnected ? "Readwise settings" : "Connect Readwise",
+                              systemImage: "books.vertical")
+                    }
+                    Button { showCalendarSubscribe = true } label: {
+                        Label("Subscribe to a calendar", systemImage: "calendar.badge.plus")
+                    }
+                } header: {
+                    Text("Connect")
+                } footer: {
+                    Text("Sources Numinous can read on this device. Everything stays here — nothing is uploaded.")
+                }
+
                 Section {
                     ForEach(model.axes) { axis in AxisEditorRow(axis: axis) }
                 } header: {
@@ -1005,7 +1043,9 @@ struct AxisSettingsView: View {
                     Text("Credits")
                 }
             }
-            .navigationTitle("Customize")
+            .navigationTitle("Setup")
+            .sheet(isPresented: $showReadwise) { ReadwiseConnectView() }
+            .sheet(isPresented: $showCalendarSubscribe) { CalendarSubscribeSheet() }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .onAppear { backupURL = model.exportBackup() }
