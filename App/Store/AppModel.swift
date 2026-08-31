@@ -1246,7 +1246,12 @@ final class AppModel: ObservableObject {
     }
 
     /// People (not stubs) you've fallen out of touch with, most-overdue first — for the review.
-    func peopleByStaleness(overdueDays: Int = 45, limit: Int = 4) -> [WeeklyDigest.Person] {
+    /// You can only drift from someone you were close to. `minTouchpoints` is how many notes
+    /// must mention a person before their silence means anything — without it, importing your
+    /// address book fills this with people you've never written a word about, which makes the
+    /// nudge worthless and slightly insulting.
+    func peopleByStaleness(overdueDays: Int = 45, minTouchpoints: Int = 3,
+                           limit: Int = 4) -> [WeeklyDigest.Person] {
         let cutoff = Calendar.current.date(byAdding: .day, value: -overdueDays, to: Date()) ?? .distantPast
         var out: [WeeklyDigest.Person] = []
         for n in notes {
@@ -1255,9 +1260,17 @@ final class AppModel: ObservableObject {
             guard top.count == 6 || top.count == 8 else { continue }   // "people" / "contacts"
             let f = top.lowercased()
             guard f == "people" || f == "contacts" else { continue }
-            let last = max(n.date, backlinks(to: n).map(\.date).max() ?? .distantPast)
-            if last < cutoff { out.append(WeeklyDigest.Person(id: n.id, name: n.displayName, lastContact: last)) }
+            // Times you actually wrote about them. A contact with no mentions was never a
+            // relationship this app saw, so there's nothing to have drifted from.
+            let mentions = backlinks(to: n)
+            guard mentions.count >= minTouchpoints else { continue }
+            let last = max(n.date, mentions.map(\.date).max() ?? .distantPast)
+            if last < cutoff {
+                out.append(WeeklyDigest.Person(id: n.id, name: n.displayName, lastContact: last))
+            }
         }
+        // Most-drifted first, but among equals prefer the people you wrote about most —
+        // the ones whose absence is most notable.
         return Array(out.sorted { $0.lastContact < $1.lastContact }.prefix(limit))
     }
 
