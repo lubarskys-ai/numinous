@@ -426,7 +426,11 @@ struct MapView: View {
         for n in model.notes {
             for p in n.allPlaces where !p.hasCoordinate {
                 let key = p.name.trimmingCharacters(in: .whitespaces)
-                guard !key.isEmpty, !failed.contains(key.lowercased()) else { continue }
+                // Only geocode names that could BE a place. Without this the backfill happily
+                // resolved things like a person's name to whatever the geocoder matched, and
+                // that coordinate then showed up as a pin somewhere it had no business being.
+                guard !key.isEmpty, LocationService.looksLikePlace(key),
+                      !failed.contains(key.lowercased()) else { continue }
                 byName[key, default: []].append(n.id)
             }
         }
