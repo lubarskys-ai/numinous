@@ -2739,8 +2739,16 @@ final class AppModel: ObservableObject {
         let region = await inferredRegion(noteID: noteID, candidates: candidates)
         var near: CLLocationCoordinate2D?
         var radius: CLLocationDistance = 60_000
-        if let region { near = region.center; radius = 900_000 }        // ~country scale
-        else if let noteID { near = linkedPlaceCoordinate(noteID) }
+        // Prefer a coordinate the note is ALREADY anchored to — a pin on the note, or on a
+        // place it links to. Biasing 60km around a known point in Bangkok beats 900km around
+        // the centroid of Thailand, which is a circle containing thousands of "Sky Bar"s.
+        // The region NAME is still appended to each query below; it's the coarse RADIUS that
+        // was doing the damage.
+        if let noteID, let anchor = noteAreaCoordinate(noteID) {
+            near = anchor                                               // ~city scale
+        } else if let region {
+            near = region.center; radius = 900_000                      // ~country scale
+        }
         if near == nil, autoLocator.isAuthorized { near = await autoLocator.currentCoordinate() }
         var already = Set<String>()
         if let noteID, let n = note(id: noteID) {
@@ -2835,8 +2843,15 @@ final class AppModel: ObservableObject {
     /// A coordinate pinned on a note this one LINKS to (a trip's mapped destination) — a bias to
     /// use when there's no named region. Deliberately ignores the note's OWN places, which may be
     /// a GPS/auto-located artifact rather than where the note is really about.
-    private func linkedPlaceCoordinate(_ noteID: UUID) -> CLLocationCoordinate2D? {
+    /// A coordinate this note is already anchored to — its OWN pinned place first, then any
+    /// place its links point at. A real coordinate the note already carries is much stronger
+    /// evidence of where you mean than a country name: it's a city, not a nation.
+    private func noteAreaCoordinate(_ noteID: UUID) -> CLLocationCoordinate2D? {
         guard let n = note(id: noteID) else { return nil }
+        if let p = n.allPlaces.first(where: { $0.hasCoordinate }),
+           let lat = p.latitude, let lng = p.longitude {
+            return CLLocationCoordinate2D(latitude: lat, longitude: lng)
+        }
         for target in n.linkTargets {
             if let linked = note(titled: target), let p = linked.allPlaces.first(where: { $0.hasCoordinate }),
                let lat = p.latitude, let lng = p.longitude {
