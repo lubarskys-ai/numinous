@@ -911,9 +911,7 @@ struct AxisSettingsView: View {
     @State private var pendingRestore: URL?
     @State private var restoreMessage: String?
     @State private var showAutoBackupPicker = false
-    @State private var showObsidianPicker = false
     @State private var importMessage: String?
-    @State private var importing = false
     @State private var showHomePrompt = false
     @State private var homeDraft = ""
     @State private var showReadwise = false
@@ -996,24 +994,6 @@ struct AxisSettingsView: View {
                 }
 
                 Section {
-                    Button { showObsidianPicker = true } label: {
-                        Label("Import from Obsidian…", systemImage: "square.and.arrow.down.on.square")
-                    }
-                    .disabled(importing)
-                    if importing {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                            Text("Importing your vault… (large or iCloud vaults can take a minute)")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                } header: {
-                    Text("Import")
-                } footer: {
-                    Text("Pick your Obsidian vault folder (put a copy in iCloud Drive first). Every markdown file becomes a note, subfolders become folders, and [[wikilinks]] resolve as usual. Notes you've already written in Numinous are never overwritten — only empty ones are filled. Recognized folders (People, Books, Workouts…) are mapped to an axis automatically; map any others by hand. Imported notes start dormant — they grant no growth until you open one and add to it.")
-                }
-
-                Section {
                     let learned = model.linkLearning.aliases.count + model.linkLearning.skips.count
                     if learned == 0 {
                         Text("Find links will learn from your Add / Skip / Edit-folder choices as you review.")
@@ -1070,21 +1050,7 @@ struct AxisSettingsView: View {
             .fileImporter(isPresented: $showAutoBackupPicker, allowedContentTypes: [.folder]) { result in
                 if case .success(let url) = result { _ = model.enableAutoBackup(folder: url) }
             }
-            .fileImporter(isPresented: $showObsidianPicker, allowedContentTypes: [.folder]) { result in
-                if case .success(let url) = result {
-                    importing = true
-                    Task {
-                        let r = await model.importObsidianVault(at: url)
-                        importing = false
-                        if r.files == 0 {
-                            importMessage = "No markdown files found in that folder."
-                        } else {
-                            importMessage = "Imported \(r.files) note\(r.files == 1 ? "" : "s") — \(r.added) new, \(r.updated) updated. Map the new folders to an axis to grow along them."
-                        }
-                    }
-                }
-            }
-            .alert("Obsidian import", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
+            .alert("Setup", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(importMessage ?? "") }
             .alert("Restore backup?", isPresented: Binding(get: { pendingRestore != nil }, set: { if !$0 { pendingRestore = nil } })) {

@@ -1005,50 +1005,6 @@ final class AppModel: ObservableObject {
         return result
     }
 
-    /// One-time import of an Obsidian vault — a folder of markdown files. Each file
-    /// becomes a note whose folder mirrors its vault subfolder, and its `[[wikilinks]]`
-    /// resolve as usual. Idempotent by the file's path within the vault (re-running
-    /// updates rather than duplicates), and — per the safe default — it never
-    /// overwrites a Numinous note that already has a body you wrote: an empty note is
-    /// filled, but your own edits are left untouched.
-    ///
-    /// Imported folders arrive with no growth axis, so the notes float in the graph
-    /// until you map their folder to an axis in the Folders tab — keeping growth
-    /// tied to engagement, not to bulk-importing a vault.
-    @discardableResult
-    func importObsidianVault(at folderURL: URL) async -> (added: Int, updated: Int, files: Int) {
-        // Reading a whole vault — potentially thousands of files, some not yet
-        // downloaded from iCloud — must NOT run on the main actor, or the UI freezes
-        // until it finishes. Parse off-main, then ingest (a model mutation) back here.
-        let scoped = folderURL.startAccessingSecurityScopedResource()
-        let parsed = await Task.detached(priority: .userInitiated) {
-            ObsidianMarkdownImporter.parse(vaultAt: folderURL)
-        }.value
-        if scoped { folderURL.stopAccessingSecurityScopedResource() }
-
-        let items: [ImportedItem] = parsed.compactMap { note in
-            let name = note.name.trimmingCharacters(in: .whitespaces)
-            guard !name.isEmpty else { return nil }
-            let folder = note.folder.isEmpty ? "notes" : note.folder
-            return ImportedItem(
-                folder: folder,
-                name: name,
-                body: note.body,
-                details: note.details,
-                date: note.date ?? Date(),
-                origin: NoteOrigin(source: "obsidian", externalID: note.relativePath),
-                folderCategory: "Obsidian",
-                folderAxisID: guessAxis(forFolderPath: folder),
-                // Start dormant: a big import brings your whole vault in as linkable,
-                // searchable notes but grants zero growth until you actually engage.
-                // Opening a note and editing its body un-dormants it (see updateBody),
-                // so the avatar grows from what you return to, not from bulk volume.
-                isDormant: true
-            )
-        }
-        let result = ingest(items)
-        return (result.added, result.updated, parsed.count)
-    }
 
     /// Best-guess growth axis for a freshly-imported folder, from its name (e.g.
     /// `People/` → Heart, `Books/` → Mind). Only *new* folders take this guess —
