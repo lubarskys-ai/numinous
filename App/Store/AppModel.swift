@@ -75,6 +75,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var folders: [Folder] = []
     @Published private(set) var axes: [Axis] = Axis.defaultSet
     @Published private(set) var score: ScoreResult
+    /// Bumped on every persist. Views memoise expensive derived collections against this, so
+    /// they recompute once per data change instead of once per render.
+    @Published private(set) var revision: Int = 0
     /// A request to open the avatar/connectome spotlighting node(s) — a note or a whole folder
     /// (set from a note/folder, consumed by the avatar view, cleared when it closes).
     @Published var avatarFocus: AvatarFocus?
@@ -1291,8 +1294,11 @@ final class AppModel: ObservableObject {
         let cutoff = Calendar.current.date(byAdding: .day, value: -overdueDays, to: Date()) ?? .distantPast
         var out: [WeeklyDigest.Person] = []
         for n in notes {
-            let f = Folder.normalize(n.folderName)
-            guard (f == "people" || f == "contacts"), !n.isStub else { continue }
+            guard !n.isStub else { continue }
+            let top = n.folderName.prefix { $0 != "/" }
+            guard top.count == 6 || top.count == 8 else { continue }   // "people" / "contacts"
+            let f = top.lowercased()
+            guard f == "people" || f == "contacts" else { continue }
             let last = max(n.date, backlinks(to: n).map(\.date).max() ?? .distantPast)
             if last < cutoff { out.append(WeeklyDigest.Person(id: n.id, name: n.displayName, lastContact: last)) }
         }
@@ -1303,6 +1309,11 @@ final class AppModel: ObservableObject {
     /// drifted from, and one grounded observation — built entirely from signals you already
     /// have (last-tended dates, staleness, the reflection engine).
     func weeklyDigest() -> WeeklyDigest {
+        let t0 = CFAbsoluteTimeGetCurrent()
+        defer {
+            let ms = (CFAbsoluteTimeGetCurrent() - t0) * 1000
+            if ms > 20 { print(String(format: "⏱️[perf] weeklyDigest %.0fms notes=%d", ms, notes.count)) }
+        }
         let weekAgo = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? .distantPast
         var tended: [String] = [], quiet: [String] = []
         for a in axes {
@@ -2250,6 +2261,7 @@ final class AppModel: ObservableObject {
 
     private func persist() {
         let t0 = CFAbsoluteTimeGetCurrent()
+        revision &+= 1
         recomputeLookupIndexes()          // O(1) note/folder lookups for everything below (+ views)
         avatarGraphDirty = true           // avatar connectome rebuilds lazily on next view
         score = engine.score(notes: notes, folders: folders, axes: axes)

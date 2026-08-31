@@ -188,14 +188,31 @@ struct NotesView: View {
 
     private struct DaySection: Identifiable { let id: Date; let title: String; let notes: [Note] }
 
+    /// Memo for `streamSections`. Filtering, grouping and sorting several thousand notes ran
+    /// on EVERY body evaluation, and a tab switch triggers several — it's the single biggest
+    /// thing the Notes tab does. A reference type so a computed property can fill it without
+    /// mutating view state.
+    private final class SectionMemo { var key = ""; var value: [DaySection] = [] }
+    @State private var sectionMemo = SectionMemo()
+
     private var streamSections: [DaySection] {
+        let key = "\(model.revision)|\(categoryFilter ?? "")"
+        if sectionMemo.key == key { return sectionMemo.value }
+
+        let t0 = CFAbsoluteTimeGetCurrent()
         let cal = Calendar.current
         let engaged = model.notes.filter { !$0.isStub && matchesFilter($0) }
         let groups = Dictionary(grouping: engaged) { cal.startOfDay(for: $0.date) }
-        return groups.keys.sorted(by: >).map { day in
+        let result = groups.keys.sorted(by: >).map { day in
             DaySection(id: day, title: Self.dayTitle(day),
                        notes: groups[day]!.sorted { $0.date > $1.date })
         }
+        let ms = (CFAbsoluteTimeGetCurrent() - t0) * 1000
+        if ms > 20 { print(String(format: "⏱️[perf] streamSections %.0fms notes=%d sections=%d",
+                                  ms, model.notes.count, result.count)) }
+        sectionMemo.key = key
+        sectionMemo.value = result
+        return result
     }
 
     /// Entity/import folders — these hold *files* (people, contacts, health records,

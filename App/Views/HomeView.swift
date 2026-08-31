@@ -62,7 +62,7 @@ struct HomeView: View {
             .navigationDestination(for: UUID.self) { NoteDetailView(noteID: $0) }
         }
         // The digest walks every note, so build it when the data changes — not per render.
-        .task(id: model.notes.count) {
+        .task(id: model.revision) {
             loadIgnored()
             digest = model.weeklyDigest()
             await countUnimportedActivity()
