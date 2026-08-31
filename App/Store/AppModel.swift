@@ -2767,10 +2767,21 @@ final class AppModel: ObservableObject {
         if let noteID, let n = note(id: noteID) {
             already = n.allPlaces.filter { $0.hasCoordinate }.reduce(into: Set<String>()) { $0.insert(Self.norm($1.name)) }
         }
-        // Resolve every candidate concurrently. Keep source order.
-        let resolved: [(Int, (name: String, latitude: Double, longitude: Double)?, Bool)] =
+        // Resolve in passes, because the right bias often isn't knowable up front.
+        //
+        //   1. with whatever bias we have (a pin on the note, its region, else where you are)
+        //   2. anything still unresolved, GLOBALLY — a note about a Kentucky trip written at
+        //      home would otherwise be searched within 60km of your house, which is why four
+        //      real distilleries came back as "not found"
+        //   3. anything STILL unresolved, near whatever did resolve — once "Woodford Reserve"
+        //      lands in Kentucky, an ambiguous name like "The Stave" can be found beside it
+        //
+        // Each pass only retries what's left, so the common case is still one round.
+        func resolve(_ pending: [Int], near: CLLocationCoordinate2D?,
+                     radius: CLLocationDistance) async -> [Int: (hit: (name: String, latitude: Double, longitude: Double), venue: Bool)] {
             await withTaskGroup(of: (Int, (name: String, latitude: Double, longitude: Double)?, Bool).self) { group in
-                for (i, name) in candidates.enumerated() {
+                for i in pending {
+                    let name = candidates[i]
                     // Append the region name UNLESS it's redundant — a link that IS the region
                     // ("Hanoi" in a Hanoi note) must not become the query "Hanoi Hanoi".
                     let n = name.lowercased()
@@ -2780,8 +2791,6 @@ final class AppModel: ObservableObject {
                     }
                     let query = suffix.map { "\(name) \($0)" } ?? name
                     group.addTask {
-                        // Venue search first; then a plain geocode, which resolves cities/regions
-                        // (like "Hanoi") that the point-of-interest search may not return.
                         if let hit = await LocationService.searchPlace(query, near: near, radiusMeters: radius) {
                             return (i, hit, true)      // venue search: trust MapKit's ranking
                         }
@@ -2791,23 +2800,36 @@ final class AppModel: ObservableObject {
                         return (i, nil, false)
                     }
                 }
-                var acc: [(Int, (name: String, latitude: Double, longitude: Double)?, Bool)] = []
-                for await r in group { acc.append(r) }
-                return acc.sorted { $0.0 < $1.0 }
+                var acc: [Int: (hit: (name: String, latitude: Double, longitude: Double), venue: Bool)] = [:]
+                for await (i, hit, venue) in group { if let hit { acc[i] = (hit, venue) } }
+                return acc
             }
+        }
+
+        var found = await resolve(Array(candidates.indices), near: near, radius: radius)
+        var missing = candidates.indices.filter { found[$0] == nil }
+        if !missing.isEmpty, near != nil {
+            found.merge(await resolve(missing, near: nil, radius: radius)) { a, _ in a }
+            missing = candidates.indices.filter { found[$0] == nil }
+        }
+        if !missing.isEmpty, let anchor = found.values.first?.hit {
+            let c = CLLocationCoordinate2D(latitude: anchor.latitude, longitude: anchor.longitude)
+            found.merge(await resolve(missing, near: c, radius: 120_000)) { a, _ in a }
+        }
+
         var out: [NearbyPlace] = []
         var seen = Set<String>()
-        for (i, hit, fromVenueSearch) in resolved {
+        for i in candidates.indices {
             // A venue's official name often isn't what you call it — "Sky Bar" resolves to
             // "Lebua at State Tower", which failed the name check and got thrown away, and an
             // empty result reads to the user as "check your connection". Trust the venue
             // search; keep the check for the plain geocode, which is the one that wanders.
-            guard let hit, fromVenueSearch || Self.resolvedNameMatches(candidates[i], hit.name) else { continue }
-            let key = Self.norm(hit.name)
+            guard let r = found[i], r.venue || Self.resolvedNameMatches(candidates[i], r.hit.name) else { continue }
+            let key = Self.norm(r.hit.name)
             guard seen.insert(key).inserted, !already.contains(key) else { continue }
-            let sub = Self.norm(hit.name) == Self.norm(candidates[i]) ? "tap to map it" : "from “\(candidates[i])”"
-            out.append(NearbyPlace(name: hit.name, subtitle: sub,
-                                   latitude: hit.latitude, longitude: hit.longitude,
+            let sub = Self.norm(r.hit.name) == Self.norm(candidates[i]) ? "tap to map it" : "from \u{201C}\(candidates[i])\u{201D}"
+            out.append(NearbyPlace(name: r.hit.name, subtitle: sub,
+                                   latitude: r.hit.latitude, longitude: r.hit.longitude,
                                    sourceLink: candidates[i]))
         }
         return out
