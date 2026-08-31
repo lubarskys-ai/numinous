@@ -78,17 +78,16 @@ struct RootView: View {
         // The companion strolls when you change pages…
         .onChange(of: selection) { _ in
             trigger(.walk)
-            #if DEBUG
             // Measure the actual hitch: how long the main thread stays busy between the tab
-            // changing and the run loop coming back to us. That IS the stickiness, and it
-            // tells us WHICH tab is expensive instead of us guessing.
+            // changing and the run loop coming back to us. NOT #if DEBUG on purpose — Debug
+            // Swift is far slower at collection and SwiftUI-diffing work, so a Debug reading
+            // tells us little about what ships. Remove once the numbers settle.
             let t0 = CFAbsoluteTimeGetCurrent()
             let tab = selection
             DispatchQueue.main.async {
                 let ms = (CFAbsoluteTimeGetCurrent() - t0) * 1000
                 if ms > 16 { print(String(format: "⏱️[perf] tab → %@ blocked main thread %.0fms", tab, ms)) }
             }
-            #endif
         }
         // …and does a joyful, heart-popping cheer when a new connection forms.
         .onChange(of: model.spark?.id) { id in if id != nil { trigger(.cheer) } }
