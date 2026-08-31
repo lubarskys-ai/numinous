@@ -45,9 +45,9 @@ struct GuideView: View {
                     section("Where things live", places)
                     plainSection("Places count for more than you'd think", """
                         A place grows you more the farther it is from home, more if you slept \
-                        there, and more if you'd never been. Set where you live under Folders → \
-                        the gear icon → Home, and the map starts weighing everywhere else \
-                        against it.
+                        there, and more if you'd never been. Set where you live under Setup on \
+                        the Home screen, and the map starts weighing everywhere else against \
+                        it.
                         """)
                     plainSection("Your week", """
                         Once a week Numinous shows what you tended and what went quiet, and \
@@ -70,7 +70,7 @@ struct GuideView: View {
     }
 
     private var opener: some View {
-        Text("Numinous holds the people, places, and things you care about, and quietly ties them together. It's built to be used for a minute and closed — the life it's about is the one happening off the screen.")
+        Text("Numinous holds what you care about — people, places, things — and ties them together. Use it for a minute, then go back to your life.")
             .font(.title3)
             .fontDesign(.serif)
             .padding(.top, 10)

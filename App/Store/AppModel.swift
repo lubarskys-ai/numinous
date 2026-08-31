@@ -1254,6 +1254,7 @@ final class AppModel: ObservableObject {
                            limit: Int = 4) -> [WeeklyDigest.Person] {
         let cutoff = Calendar.current.date(byAdding: .day, value: -overdueDays, to: Date()) ?? .distantPast
         var out: [WeeklyDigest.Person] = []
+        var mentionCount: [UUID: Int] = [:]
         for n in notes {
             guard !n.isStub else { continue }
             let top = n.folderName.prefix { $0 != "/" }
@@ -1266,12 +1267,21 @@ final class AppModel: ObservableObject {
             guard mentions.count >= minTouchpoints else { continue }
             let last = max(n.date, mentions.map(\.date).max() ?? .distantPast)
             if last < cutoff {
+                mentionCount[n.id] = mentions.count
                 out.append(WeeklyDigest.Person(id: n.id, name: n.displayName, lastContact: last))
             }
         }
-        // Most-drifted first, but among equals prefer the people you wrote about most —
-        // the ones whose absence is most notable.
-        return Array(out.sorted { $0.lastContact < $1.lastContact }.prefix(limit))
+        // Rank by how much there is to miss, not only by elapsed time: someone you wrote
+        // about forty times who's been quiet six months outranks someone you wrote about
+        // three times who's been quiet seven. Months-since x log(mentions).
+        let now = Date()
+        return Array(out.sorted { a, b in
+            func weight(_ p: WeeklyDigest.Person) -> Double {
+                let months = now.timeIntervalSince(p.lastContact) / (86_400 * 30)
+                return months * log(Double(max(1, mentionCount[p.id] ?? 1)) + 1)
+            }
+            return weight(a) > weight(b)
+        }.prefix(limit))
     }
 
     /// A gentle weekly digest: which life areas you tended, which went quiet, who you've
@@ -2764,7 +2774,12 @@ final class AppModel: ObservableObject {
         // the centroid of Thailand, which is a circle containing thousands of "Sky Bar"s.
         // The region NAME is still appended to each query below; it's the coarse RADIUS that
         // was doing the damage.
-        if let noteID, let anchor = noteAreaCoordinate(noteID) {
+        // A region you set for the folder beats everything — you told us where this is.
+        if let noteID, let n = note(id: noteID),
+           let saved = searchRegion(forFolder: n.folderName),
+           let slat = saved.latitude, let slon = saved.longitude {
+            near = CLLocationCoordinate2D(latitude: slat, longitude: slon)
+        } else if let noteID, let anchor = noteAreaCoordinate(noteID) {
             near = anchor                                               // ~city scale
         } else if let region {
             near = region.center; radius = 900_000                      // ~country scale
@@ -3092,6 +3107,53 @@ final class AppModel: ObservableObject {
         let ground = liveCoveredGround()
         for i in notes.indices { applyTravelValue(i, coveredGround: ground) }
         persist()
+    }
+
+    // MARK: - Where a folder's notes are about
+
+    /// A region you've set for a folder — "this trip happened in Lexington". Stored per
+    /// folder because a trip folder IS the unit: set it once and every note in it searches
+    /// there, instead of being asked on every note.
+    private static let folderRegionKey = "folder_search_regions"
+    private var folderRegionsLoaded = false
+    private var folderRegionsStore: [String: Place] = [:]
+
+    private func loadFolderRegions() {
+        guard !folderRegionsLoaded else { return }
+        folderRegionsLoaded = true
+        if let d = UserDefaults.standard.data(forKey: Self.folderRegionKey),
+           let v = try? JSONDecoder().decode([String: Place].self, from: d) { folderRegionsStore = v }
+    }
+
+    /// The region set for this folder, or the nearest parent that has one — so setting it on
+    /// `travel/Kentucky 2026` covers `travel/Kentucky 2026/distilleries` too.
+    func searchRegion(forFolder folder: String) -> Place? {
+        loadFolderRegions()
+        var path = folder
+        while !path.isEmpty {
+            if let p = folderRegionsStore[Folder.normalize(path)] { return p }
+            guard let slash = path.lastIndex(of: "/") else { break }
+            path = String(path[path.startIndex..<slash])
+        }
+        return nil
+    }
+
+    func setSearchRegion(_ place: Place?, forFolder folder: String) {
+        loadFolderRegions()
+        let key = Folder.normalize(folder)
+        if let place { folderRegionsStore[key] = place } else { folderRegionsStore.removeValue(forKey: key) }
+        if let d = try? JSONEncoder().encode(folderRegionsStore) {
+            UserDefaults.standard.set(d, forKey: Self.folderRegionKey)
+        }
+        objectWillChange.send()
+    }
+
+    /// What Find locations will search near, for showing in the UI: your saved region for the
+    /// folder, else whatever it inferred.
+    func searchAreaLabel(forNote noteID: UUID) -> String? {
+        guard let n = note(id: noteID) else { return nil }
+        if let saved = searchRegion(forFolder: n.folderName) { return saved.name }
+        return Self.regionHintsFromFolder(n.folderName).first
     }
 
     /// Folders whose notes are "places" — where a location and travel value make sense.

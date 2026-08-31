@@ -32,6 +32,8 @@ struct NoteDetailView: View {
     @State private var showFoundPicker = false
     @State private var scanningLocations = false
     @State private var hadLocatableLinks = false   // were there links to try, if none resolved?
+    @State private var editingArea = false        // the "search near…" prompt
+    @State private var areaDraft = ""
 
     /// Title for the Find-locations chooser: results, "couldn't resolve" (links existed but none
     /// mapped — usually no connection), or "no place links".
@@ -464,7 +466,43 @@ struct NoteDetailView: View {
             ForEach(foundLocations) { p in
                 Button("\(p.name) · \(p.subtitle)") { model.attachResolvedPlace(p, into: note.id); refreshBody(note.id) }
             }
+            // The searched area is the thing that most often makes this fail, so it's
+            // adjustable right where the failure shows up — and it sticks to the FOLDER, so a
+            // trip is told once rather than every note in it.
+            Button(model.searchAreaLabel(forNote: note.id).map { "Search near \($0)… (change)" } ?? "Set the area to search…") {
+                areaDraft = model.searchAreaLabel(forNote: note.id) ?? ""
+                editingArea = true
+            }
             Button("Cancel", role: .cancel) {}
+        }
+        .alert("Where should Numinous look?", isPresented: $editingArea) {
+            TextField("City, or city and state", text: $areaDraft)
+                .textInputAutocapitalization(.words)
+            Button("Cancel", role: .cancel) {}
+            Button("Search here") { applySearchArea(for: note) }
+        } message: {
+            Text("Applies to everything in “\(note.folderName.isEmpty ? "this folder" : note.folderName)”, so a trip only needs telling once. Leave empty to clear it.")
+        }
+    }
+
+    /// Geocode the typed area, remember it for the note's folder, and immediately re-run the
+    /// search with it — so the correction is visible straight away rather than next time.
+    private func applySearchArea(for note: Note) {
+        let typed = areaDraft.trimmingCharacters(in: .whitespaces)
+        Task {
+            if typed.isEmpty {
+                model.setSearchRegion(nil, forFolder: note.folderName)
+            } else if let c = await LocationService.coordinate(for: typed) {
+                model.setSearchRegion(Place(name: typed, latitude: c.latitude, longitude: c.longitude),
+                                      forFolder: note.folderName)
+            } else {
+                return   // couldn't place it — leave the old area alone rather than clearing it
+            }
+            scanningLocations = true
+            hadLocatableLinks = !model.linkPlaceCandidates(forNote: note.id, includeMapped: true).isEmpty
+            foundLocations = await model.findLocations(in: editedBody, forNote: note.id)
+            scanningLocations = false
+            showFoundPicker = true
         }
     }
 

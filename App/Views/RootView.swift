@@ -76,19 +76,7 @@ struct RootView: View {
         // "Today's diary" (Action Button / Siri) opens the diary with the keyboard up.
         .fullScreenCover(isPresented: $showDiary) { ComposeView(prefillTitle: nil, diary: true, autofocus: true, onSaved: { _ in selection = "notes" }) }
         // The companion strolls when you change pages…
-        .onChange(of: selection) { _ in
-            trigger(.walk)
-            // Measure the actual hitch: how long the main thread stays busy between the tab
-            // changing and the run loop coming back to us. NOT #if DEBUG on purpose — Debug
-            // Swift is far slower at collection and SwiftUI-diffing work, so a Debug reading
-            // tells us little about what ships. Remove once the numbers settle.
-            let t0 = CFAbsoluteTimeGetCurrent()
-            let tab = selection
-            DispatchQueue.main.async {
-                let ms = (CFAbsoluteTimeGetCurrent() - t0) * 1000
-                if ms > 16 { print(String(format: "⏱️[perf] tab → %@ blocked main thread %.0fms", tab, ms)) }
-            }
-        }
+        .onChange(of: selection) { _ in trigger(.walk) }
         // …and does a joyful, heart-popping cheer when a new connection forms.
         .onChange(of: model.spark?.id) { id in if id != nil { trigger(.cheer) } }
         // "See in graph" from a note opens the avatar, spotlighting that note's connections.
