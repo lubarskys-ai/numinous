@@ -25,6 +25,8 @@ struct HomeView: View {
     /// the Health daemon, and doing that from `body` made every render — every tab switch —
     /// pay for two of them.
     @State private var healthAccessAsked = false
+    /// Notices you've set aside, and when each becomes sayable again.
+    @State private var ignoredUntil: [String: Date] = [:]
 
     var body: some View {
         let balance = model.score.axisBalance(over: model.axes)
@@ -38,19 +40,33 @@ struct HomeView: View {
                     VStack(spacing: 26) {
                         figure(tint)
                         captureButton(tint)
-                        if !shown.isEmpty { noticeList(shown) }
+                        if !shown.isEmpty {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Numinous noticed")
+                                    .font(.caption.weight(.semibold))
+                                    .textCase(.uppercase)
+                                    .kerning(0.8)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.leading, 4)
+                                noticeList(shown)
+                            }
+                        }
                         elsewhereLinks
                     }
                     .padding(.horizontal, 22)
                     .padding(.top, 0)
-                    .padding(.bottom, 40)
+                    .padding(.bottom, 96)   // clear of the floating tab bar
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: UUID.self) { NoteDetailView(noteID: $0) }
         }
         // The digest walks every note, so build it when the data changes — not per render.
-        .task(id: model.notes.count) { digest = model.weeklyDigest(); await countUnimportedActivity() }
+        .task(id: model.notes.count) {
+            loadIgnored()
+            digest = model.weeklyDigest()
+            await countUnimportedActivity()
+        }
         .fullScreenCover(isPresented: $showCompose) { ComposeView(prefillTitle: nil, autofocus: true) }
         .fullScreenCover(isPresented: $showAvatar) { AvatarExpandedView() }
         .sheet(isPresented: $showGuide) { GuideView() }
@@ -116,22 +132,46 @@ struct HomeView: View {
         enum Action: Equatable { case none, note(UUID), health }
         /// Derived from the content, NOT a fresh UUID. A new id every render makes ForEach
         /// throw away and rebuild every row on each pass, which is felt as tab-switch lag.
-        var id: String { icon + "|" + text }
+        var id: String { kind + "|" + text }
+        /// Stable across wording changes, so ignoring "drifted from Sam — 3mo" doesn't come
+        /// straight back as "drifted from Sam — 4mo".
+        let kind: String
         let icon: String
         let tint: Color
         let text: String
+        /// What tapping the row does about it. `.none` means there's nothing to open.
         var action: Action = .none
-        /// Shows an explicit dismiss. Only the once-ever offers get one — a notice about
-        /// your own life isn't something to swat away.
-        var dismissible = false
+        /// What the action is called, so the row says what will happen rather than showing a
+        /// bare chevron.
+        var verb: String?
+        /// How long "not now" holds. `nil` means never come back.
+        var snooze: TimeInterval?
 
-        init(icon: String, tint: Color, text: String, action: Action = .none, dismissible: Bool = false) {
-            self.icon = icon; self.tint = tint; self.text = text
-            self.action = action; self.dismissible = dismissible
+        init(kind: String, icon: String, tint: Color, text: String,
+             action: Action = .none, verb: String? = nil, snooze: TimeInterval? = nil) {
+            self.kind = kind; self.icon = icon; self.tint = tint; self.text = text
+            self.action = action; self.verb = verb; self.snooze = snooze
         }
-        init(icon: String, tint: Color, action: Action, dismissible: Bool = false, text: String) {
-            self.init(icon: icon, tint: tint, text: text, action: action, dismissible: dismissible)
-        }
+    }
+
+    private static let day: TimeInterval = 86_400
+
+    /// What you've set aside, and until when. Ignoring is a "not now", not a delete — a life
+    /// you've drifted out of is worth raising again in a month.
+    private static let ignoredKey = "home_notices_ignored"
+
+    private func ignore(_ notice: Notice) {
+        var until = ignoredUntil
+        until[notice.kind] = Date().addingTimeInterval(notice.snooze ?? Self.day * 3650)
+        ignoredUntil = until
+        UserDefaults.standard.set(
+            until.mapValues { $0.timeIntervalSince1970 }, forKey: Self.ignoredKey)
+    }
+
+    private func loadIgnored() {
+        let raw = UserDefaults.standard.dictionary(forKey: Self.ignoredKey) as? [String: Double] ?? [:]
+        ignoredUntil = raw.compactMapValues { Date(timeIntervalSince1970: $0) }
+            .filter { $0.value > Date() }          // expired ones simply come back
     }
 
     /// At most three, most-worth-saying first. Deliberately capped: a fourth line turns a
@@ -140,24 +180,28 @@ struct HomeView: View {
         guard let digest else { return [] }
         var out: [Notice] = []
         if let reflection = digest.reflection {
-            out.append(Notice(icon: "sparkles", tint: .pink, text: reflection))
+            out.append(Notice(kind: "reflection", icon: "sparkles", tint: .pink, text: reflection,
+                              snooze: Self.day * 7))
         }
         if let nudge = digest.travelNudge {
-            out.append(Notice(icon: "globe.americas", tint: .teal, text: nudge))
+            out.append(Notice(kind: "travel", icon: "globe.americas", tint: .teal, text: nudge,
+                              snooze: Self.day * 30))
         }
         if let person = digest.drifting.first {
             let since = AppModel.outOfTouchLabel(person.lastContact).map { " — \($0)" } ?? ""
-            out.append(Notice(icon: "heart", tint: .pink,
-                              text: "You've drifted from \(person.name)\(since).", action: .note(person.id)))
+            out.append(Notice(kind: "drift:\(person.id)", icon: "heart", tint: .pink,
+                              text: "You've drifted from \(person.name)\(since).",
+                              action: .note(person.id), verb: "Open", snooze: Self.day * 30))
         }
         if let health = healthNotice {
             out.append(health)
         }
         if let quiet = digest.quietAxisIDs.first, let axis = model.axis(id: quiet) {
-            out.append(Notice(icon: "circle", tint: axis.color,
-                              text: "\(axis.name) has been quiet this week."))
+            out.append(Notice(kind: "quiet:\(quiet)", icon: "circle", tint: axis.color,
+                              text: "\(axis.name) has been quiet this week.", snooze: Self.day * 7))
         }
-        return Array(out.prefix(3))
+        let now = Date()
+        return Array(out.filter { (ignoredUntil[$0.kind] ?? .distantPast) < now }.prefix(3))
     }
 
     /// Health, without a tab. Two states worth a line and no others:
@@ -173,13 +217,15 @@ struct HomeView: View {
         guard HealthKitService.isAvailable else { return nil }
         if !healthAccessAsked {
             guard !healthOfferDismissed else { return nil }
-            return Notice(icon: "heart.text.square", tint: .red, action: .health, dismissible: true,
-                          text: "Turn your workouts into notes, without typing them.")
+            return Notice(kind: "health-offer", icon: "heart.text.square", tint: .red,
+                          text: "Turn your workouts into notes, without typing them.",
+                          action: .health, verb: "Connect")   // no snooze — ignoring means never
         }
         guard unimportedActivity > 0 else { return nil }
         let what = unimportedActivity == 1 ? "One recent activity isn't" : "\(unimportedActivity) recent activities aren't"
-        return Notice(icon: "figure.run", tint: .red, action: .health,
-                      text: "\(what) in your notes yet.")
+        return Notice(kind: "health-pending", icon: "figure.run", tint: .red,
+                      text: "\(what) in your notes yet.",
+                      action: .health, verb: "Import", snooze: Self.day * 7)
     }
 
     /// Count what's importable — only once Health is already connected, so this can never be
@@ -194,56 +240,71 @@ struct HomeView: View {
     private func noticeList(_ notices: [Notice]) -> some View {
         VStack(spacing: 0) {
             ForEach(Array(notices.enumerated()), id: \.element.id) { i, notice in
-                if i > 0 { Divider().padding(.leading, 44) }
+                if i > 0 { Divider().padding(.leading, 48) }
                 noticeRow(notice)
             }
         }
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
         .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.secondary.opacity(0.15)))
+        .animation(.easeInOut(duration: 0.22), value: notices.map(\.id))
     }
 
     @ViewBuilder
+    /// A notice you can act on or set aside. Both are explicit: a named action rather than a
+    /// bare chevron, and "Not now" rather than a silent swipe. Setting one aside is a pause,
+    /// not a delete — each kind comes back after its own interval.
     private func noticeRow(_ notice: Notice) -> some View {
-        let row = HStack(alignment: .top, spacing: 12) {
-            Image(systemName: notice.icon)
-                .font(.footnote)
-                .foregroundStyle(notice.tint)
-                .frame(width: 20)
-                .padding(.top, 2)
-            Text(notice.text)
-                .font(.callout)
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-            if notice.action != .none {
-                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary).padding(.top, 3)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: notice.icon)
+                    .font(.footnote)
+                    .foregroundStyle(notice.tint)
+                    .frame(width: 22)
+                    .padding(.top, 2)
+                Text(notice.text)
+                    .font(.callout)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        if notice.snooze == nil { healthOfferDismissed = true }
+                        ignore(notice)
+                    }
+                } label: {
+                    Text(notice.snooze == nil ? "No thanks" : "Not now")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if let verb = notice.verb, notice.action != .none {
+                    Button { act(notice) } label: {
+                        Text(verb)
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 14).padding(.vertical, 7)
+                            .background(notice.tint.opacity(0.14), in: Capsule())
+                            .foregroundStyle(notice.tint)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .contentShape(Rectangle())
+        .padding(.top, 14)
+        .padding(.bottom, 10)
+    }
 
-        HStack(spacing: 0) {
-            switch notice.action {
-            case .none:
-                row
-            case .note(let id):
-                Button { path.append(id) } label: { row }.buttonStyle(.plain)
-            case .health:
-                Button { showHealth = true } label: { row }.buttonStyle(.plain)
-            }
-            if notice.dismissible {
-                // Tap it away and the offer never comes back; there is no second ask.
-                Button { healthOfferDismissed = true } label: {
-                    Image(systemName: "xmark")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                        .padding(10)
-                }
-                .buttonStyle(.plain)
-                .padding(.trailing, 6)
-                .accessibilityLabel("Don't suggest this")
-            }
+    private func act(_ notice: Notice) {
+        switch notice.action {
+        case .none:          break
+        case .note(let id):  path.append(id)
+        case .health:        showHealth = true
         }
     }
 
