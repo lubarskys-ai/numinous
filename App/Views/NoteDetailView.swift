@@ -38,7 +38,7 @@ struct NoteDetailView: View {
     private var foundLocationsTitle: String {
         if !foundLocations.isEmpty { return "Places from your links — tap to map" }
         return hadLocatableLinks
-            ? "Couldn't place those links — check your connection and try again"
+            ? "Couldn't match those links to a place. Try adding a city to the link name."
             : "No place links to locate — try Find links first"
     }
     @StateObject private var locator = LocationService()

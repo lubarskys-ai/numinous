@@ -2740,7 +2740,15 @@ final class AppModel: ObservableObject {
     func findLocations(in text: String, forNote noteID: UUID? = nil) async -> [NearbyPlace] {
         // Source from the note's links; only fall back to a text scan when there's no note (e.g.
         // a future composer use), which the note-detail button never hits.
-        let candidates: [String] = noteID.map { linkPlaceCandidates(forNote: $0) } ?? Self.placeNameCandidates(in: text)
+        // Nothing left to locate usually means every link is already mapped — but "mapped"
+        // isn't the same as "mapped correctly". Rather than do nothing, offer them again so a
+        // wrong pin can be replaced.
+        var candidates: [String] = noteID.map { linkPlaceCandidates(forNote: $0) } ?? Self.placeNameCandidates(in: text)
+        var remapping = false
+        if candidates.isEmpty, let noteID {
+            candidates = linkPlaceCandidates(forNote: noteID, includeMapped: true)
+            remapping = !candidates.isEmpty
+        }
         guard !candidates.isEmpty else { return [] }
         // Region strategy — belt and suspenders, because a country is a big fuzzy target:
         //   1) append the region NAME to each query ("Sky Bar" → "Sky Bar Thailand"), and
@@ -2764,7 +2772,7 @@ final class AppModel: ObservableObject {
         }
         if near == nil, autoLocator.isAuthorized { near = await autoLocator.currentCoordinate() }
         var already = Set<String>()
-        if let noteID, let n = note(id: noteID) {
+        if !remapping, let noteID, let n = note(id: noteID) {
             already = n.allPlaces.filter { $0.hasCoordinate }.reduce(into: Set<String>()) { $0.insert(Self.norm($1.name)) }
         }
         // Resolve in passes, because the right bias often isn't knowable up front.
@@ -2838,14 +2846,19 @@ final class AppModel: ObservableObject {
     /// The leaf names of the note's links that are worth trying to locate: skip people/entity
     /// folders and links that are already pinned on the map, keep the rest (bare `[[Bangkok]]`,
     /// `[[Blue Elephant]]`, a stubbed place with no coordinate yet).
-    func linkPlaceCandidates(forNote noteID: UUID) -> [String] {
+    /// `includeMapped` keeps links whose note ALREADY has a coordinate. Normally they're
+    /// skipped — there's nothing to find. But a coordinate can be wrong (the old geocode
+    /// backfill resolved names that weren't places), and skipping them meant Find locations
+    /// silently had nothing to do and could never correct itself.
+    func linkPlaceCandidates(forNote noteID: UUID, includeMapped: Bool = false) -> [String] {
         guard let n = note(id: noteID) else { return [] }
         var out: [String] = []
         var seen = Set<String>()
         for target in n.linkTargets {
             let fn = Folder.normalize(Self.folderPart(of: target))
             if ["people", "authors", "contacts", "books"].contains(fn) { continue }   // entities, not places
-            if let linked = note(titled: target), linked.allPlaces.contains(where: { $0.hasCoordinate }) { continue }   // already mapped
+            if !includeMapped, let linked = note(titled: target),
+               linked.allPlaces.contains(where: { $0.hasCoordinate }) { continue }    // already mapped
             let leaf = Self.leafName(target)
             guard LocationService.looksLikePlace(leaf), seen.insert(leaf.lowercased()).inserted else { continue }
             out.append(leaf)
