@@ -73,11 +73,8 @@ schemes:
     build:
       targets:
         Numinous: all
-    # TEMPORARY: Release, to measure tab-switch cost in the configuration that actually
-    # ships. Debug Swift is far slower at collection and SwiftUI work, so Debug timings
-    # overstate the problem. Put this back to Debug once the perf question is settled.
     run:
-      config: Release
+      config: Debug
     profile:
       config: Release
     analyze:
