@@ -26,6 +26,7 @@ struct NotesView: View {
                 .navigationDestination(for: UUID.self) { NoteDetailView(noteID: $0) }
                 .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always),
                             prompt: "Search notes, text, links")
+                .onChange(of: categoryFilter) { _ in visibleDays = Self.dayPage }
                 .task(id: searchText) {   // debounce: don't scan every note on each keystroke
                     if searchText.isEmpty { debouncedQuery = ""; return }
                     try? await Task.sleep(nanoseconds: 220_000_000)
@@ -172,9 +173,16 @@ struct NotesView: View {
 
     // MARK: - Stream (reverse-chronological, grouped by day)
 
+    /// How many day-sections to hand SwiftUI at once. Rows inside a Section are lazy, but the
+    /// Sections themselves are not — at a few thousand notes that's a thousand-plus Section
+    /// views built every time the tab appears, which is most of what made switching to Notes
+    /// hitch. You almost never scroll years back anyway; when you do, the button loads more.
+    private static let dayPage = 45
+
     private func streamList(_ sections: [DaySection]) -> some View {
-        List {
-            ForEach(sections) { section in
+        let shown = sections.prefix(visibleDays)
+        return List {
+            ForEach(shown) { section in
                 Section(section.title) {
                     ForEach(section.notes) { note in
                         NavigationLink(value: note.id) { NoteRow(note: note) }
@@ -182,11 +190,24 @@ struct NotesView: View {
                     .onDelete { offsets in model.delete(offsets.map { section.notes[$0] }) }
                 }
             }
+            if sections.count > shown.count {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { visibleDays += Self.dayPage }
+                } label: {
+                    Text("Show earlier notes")
+                        .font(.subheadline)
+                        .frame(maxWidth: .infinity)
+                }
+                .listRowBackground(Color.clear)
+            }
         }
         .listStyle(.insetGrouped)
     }
 
     private struct DaySection: Identifiable { let id: Date; let title: String; let notes: [Note] }
+
+    /// Days currently on screen. Reset whenever the filter changes, so switching category
+    /// doesn't leave you scrolled through a page count that no longer means anything.
 
     /// Memo for `streamSections`. Filtering, grouping and sorting several thousand notes ran
     /// on EVERY body evaluation, and a tab switch triggers several — it's the single biggest
@@ -194,6 +215,7 @@ struct NotesView: View {
     /// mutating view state.
     private final class SectionMemo { var key = ""; var value: [DaySection] = [] }
     @State private var sectionMemo = SectionMemo()
+    @State private var visibleDays = NotesView.dayPage
 
     private var streamSections: [DaySection] {
         let key = "\(model.revision)|\(categoryFilter ?? "")"
