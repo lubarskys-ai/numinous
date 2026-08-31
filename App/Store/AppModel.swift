@@ -2691,6 +2691,9 @@ final class AppModel: ObservableObject {
         let subtitle: String
         let latitude: Double
         let longitude: Double
+        /// The `[[link]]` this came from, when it came from one — so the coordinate lands on
+        /// the note you already have for that place instead of beside it.
+        var sourceLink: String? = nil
     }
 
     /// Businesses/venues around where you are right now (nearest first) so a capture can be a
@@ -2704,6 +2707,15 @@ final class AppModel: ObservableObject {
 
     /// Attach an already-resolved place (picked from the nearby list) to a note — no re-geocode.
     func attachResolvedPlace(_ p: NearbyPlace, into noteID: UUID) {
+        // The note itself gets the place, so it carries a location of its own (and a travel
+        // value) rather than only pointing at one.
+        addPlace(noteID, name: p.name, latitude: p.latitude, longitude: p.longitude)
+        // And the coordinate merges into the note you ALREADY link to — `[[Sky Bar]]` becomes
+        // the mapped Sky Bar, instead of a second place note appearing beside it.
+        if let link = p.sourceLink, let i = existingPlaceNoteIndex(named: link) {
+            addPlace(notes[i].id, name: p.name, latitude: p.latitude, longitude: p.longitude)
+            return
+        }
         linkPlace(ensurePlaceNote(name: p.name, latitude: p.latitude, longitude: p.longitude), into: noteID)
     }
 
@@ -2735,8 +2747,8 @@ final class AppModel: ObservableObject {
             already = n.allPlaces.filter { $0.hasCoordinate }.reduce(into: Set<String>()) { $0.insert(Self.norm($1.name)) }
         }
         // Resolve every candidate concurrently. Keep source order.
-        let resolved: [(Int, (name: String, latitude: Double, longitude: Double)?)] =
-            await withTaskGroup(of: (Int, (name: String, latitude: Double, longitude: Double)?).self) { group in
+        let resolved: [(Int, (name: String, latitude: Double, longitude: Double)?, Bool)] =
+            await withTaskGroup(of: (Int, (name: String, latitude: Double, longitude: Double)?, Bool).self) { group in
                 for (i, name) in candidates.enumerated() {
                     // Append the region name UNLESS it's redundant — a link that IS the region
                     // ("Hanoi" in a Hanoi note) must not become the query "Hanoi Hanoi".
@@ -2750,26 +2762,32 @@ final class AppModel: ObservableObject {
                         // Venue search first; then a plain geocode, which resolves cities/regions
                         // (like "Hanoi") that the point-of-interest search may not return.
                         if let hit = await LocationService.searchPlace(query, near: near, radiusMeters: radius) {
-                            return (i, hit)
+                            return (i, hit, true)      // venue search: trust MapKit's ranking
                         }
                         if let c = await LocationService.coordinate(for: query, near: near) {
-                            return (i, (name: name, latitude: c.latitude, longitude: c.longitude))
+                            return (i, (name: name, latitude: c.latitude, longitude: c.longitude), false)
                         }
-                        return (i, nil)
+                        return (i, nil, false)
                     }
                 }
-                var acc: [(Int, (name: String, latitude: Double, longitude: Double)?)] = []
+                var acc: [(Int, (name: String, latitude: Double, longitude: Double)?, Bool)] = []
                 for await r in group { acc.append(r) }
                 return acc.sorted { $0.0 < $1.0 }
             }
         var out: [NearbyPlace] = []
         var seen = Set<String>()
-        for (i, hit) in resolved {
-            guard let hit, Self.resolvedNameMatches(candidates[i], hit.name) else { continue }
+        for (i, hit, fromVenueSearch) in resolved {
+            // A venue's official name often isn't what you call it — "Sky Bar" resolves to
+            // "Lebua at State Tower", which failed the name check and got thrown away, and an
+            // empty result reads to the user as "check your connection". Trust the venue
+            // search; keep the check for the plain geocode, which is the one that wanders.
+            guard let hit, fromVenueSearch || Self.resolvedNameMatches(candidates[i], hit.name) else { continue }
             let key = Self.norm(hit.name)
             guard seen.insert(key).inserted, !already.contains(key) else { continue }
             let sub = Self.norm(hit.name) == Self.norm(candidates[i]) ? "tap to map it" : "from “\(candidates[i])”"
-            out.append(NearbyPlace(name: hit.name, subtitle: sub, latitude: hit.latitude, longitude: hit.longitude))
+            out.append(NearbyPlace(name: hit.name, subtitle: sub,
+                                   latitude: hit.latitude, longitude: hit.longitude,
+                                   sourceLink: candidates[i]))
         }
         return out
     }
