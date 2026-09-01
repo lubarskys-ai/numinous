@@ -87,8 +87,13 @@ struct MapView: View {
         for mp in visible {
             byPoint[String(format: "%.5f,%.5f", mp.latitude, mp.longitude), default: []].append(mp)
         }
-        let span = visibleRegion?.span.latitudeDelta ?? 0.05
-        let fan = span * 0.018        // ~2% of what's on screen
+        // A FIXED ground distance, not a fraction of the visible span. Tying it to the span
+        // kept the spread constant on screen, so zooming in never separated anything — and at
+        // ~15pt apart, markers ~32pt wide still overlapped and read as one. Fixed metres means
+        // zooming in genuinely pulls them apart, which is what zooming is for. They converge
+        // again as you zoom out, which is the honest picture at that scale.
+        let fanMetres = 45.0
+        let fan = fanMetres / 111_320.0        // metres → degrees of latitude
 
         return visible.map { mp in
             var lat = mp.latitude, lon = mp.longitude
