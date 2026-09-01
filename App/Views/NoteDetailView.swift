@@ -462,18 +462,23 @@ struct NoteDetailView: View {
                 Button { openFullEditor(note) } label: { Label("Edit", systemImage: "pencil").font(.caption) }
             }
         }
-        .confirmationDialog(foundLocationsTitle, isPresented: $showFoundPicker, titleVisibility: .visible) {
-            ForEach(foundLocations) { p in
-                Button("\(p.name) · \(p.subtitle)") { model.attachResolvedPlace(p, into: note.id); refreshBody(note.id) }
-            }
-            // The searched area is the thing that most often makes this fail, so it's
-            // adjustable right where the failure shows up — and it sticks to the FOLDER, so a
-            // trip is told once rather than every note in it.
-            Button(model.searchAreaLabel(forNote: note.id).map { "Search near \($0)… (change)" } ?? "Set the area to search…") {
-                areaDraft = model.searchAreaLabel(forNote: note.id) ?? ""
-                editingArea = true
-            }
-            Button("Cancel", role: .cancel) {}
+        // A sheet, not a dialog: a trip note often yields several places at once, and picking
+        // them one at a time meant re-running the whole search between each.
+        .sheet(isPresented: $showFoundPicker) {
+            FoundPlacesSheet(
+                title: foundLocationsTitle,
+                places: foundLocations,
+                areaLabel: model.searchAreaLabel(forNote: note.id),
+                onAdd: { chosen in
+                    for p in chosen { model.attachResolvedPlace(p, into: note.id) }
+                    refreshBody(note.id)
+                    showFoundPicker = false
+                },
+                onChangeArea: {
+                    areaDraft = model.searchAreaLabel(forNote: note.id) ?? ""
+                    showFoundPicker = false
+                    editingArea = true
+                })
         }
         .alert("Where should Numinous look?", isPresented: $editingArea) {
             TextField("City, or city and state", text: $areaDraft)
@@ -1311,5 +1316,73 @@ private struct ZoomableImage: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+
+/// The places Find locations turned up, with checkmarks — because a trip note usually
+/// resolves several at once and adding them one at a time re-ran the whole search between
+/// each. Everything is pre-selected: the common case is "yes, all of these".
+private struct FoundPlacesSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let title: String
+    let places: [AppModel.NearbyPlace]
+    let areaLabel: String?
+    let onAdd: ([AppModel.NearbyPlace]) -> Void
+    let onChangeArea: () -> Void
+
+    @State private var chosen: Set<UUID> = []
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if places.isEmpty {
+                    Text(title).foregroundStyle(.secondary)
+                } else {
+                    Section {
+                        ForEach(places) { p in
+                            Button { toggle(p) } label: {
+                                HStack(alignment: .top, spacing: 11) {
+                                    Image(systemName: chosen.contains(p.id) ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(chosen.contains(p.id) ? Color.accentColor : .secondary)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(p.name).foregroundStyle(.primary)
+                                        Text(p.subtitle).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    } header: { Text("Tap to include or leave out") }
+                }
+                Section {
+                    Button {
+                        onChangeArea()
+                    } label: {
+                        Label(areaLabel.map { "Searching near \($0) — change" } ?? "Set the area to search…",
+                              systemImage: "scope")
+                    }
+                } footer: {
+                    Text("The area sticks to this note's folder, so a trip only needs telling once.")
+                }
+            }
+            .navigationTitle(places.isEmpty ? "No places" : "\(places.count) found")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(chosen.count == places.count ? "Add all" : "Add \(chosen.count)") {
+                        onAdd(places.filter { chosen.contains($0.id) })
+                    }
+                    .disabled(chosen.isEmpty)
+                }
+            }
+            .onAppear { chosen = Set(places.map(\.id)) }
+        }
+    }
+
+    private func toggle(_ p: AppModel.NearbyPlace) {
+        if chosen.contains(p.id) { chosen.remove(p.id) } else { chosen.insert(p.id) }
     }
 }

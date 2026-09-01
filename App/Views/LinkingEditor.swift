@@ -71,12 +71,30 @@ struct LinkingEditor: View {
     }
 
     private func matchingNotes(_ q: String) -> [Note] {
+        // Nothing typed yet — which is the instant the link button fires, since it lands the
+        // caret inside empty brackets. Offer the notes you touched MOST RECENTLY rather than
+        // whichever six happen to sit first in storage: those are arbitrary, and reading six
+        // unrelated names is worse than reading none. Selected in one pass, not by sorting
+        // several thousand notes on every keystroke.
+        if q.isEmpty {
+            var top: [Note] = []
+            for note in model.notes where !note.title.isEmpty {
+                if top.count < 6 {
+                    top.append(note)
+                    top.sort { $0.date > $1.date }
+                } else if let oldest = top.last, note.date > oldest.date {
+                    top[top.count - 1] = note
+                    top.sort { $0.date > $1.date }
+                }
+            }
+            return top
+        }
         var seen = Set<String>()
         var out: [Note] = []
         for note in model.notes where !note.title.isEmpty {
             let key = note.title.lowercased()
-            let hit = q.isEmpty || key.contains(q) || note.displayName.lowercased().contains(q)
-            if hit, seen.insert(key).inserted {
+            if key.contains(q) || note.displayName.lowercased().contains(q),
+               seen.insert(key).inserted {
                 out.append(note)
                 if out.count == 6 { break }
             }
