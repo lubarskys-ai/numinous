@@ -53,16 +53,17 @@ struct MapView: View {
         let title: String
         let coordinate: CLLocationCoordinate2D
         let color: Color
+        let symbol: String
         /// Every place sitting on this exact point. One entry is an ordinary pin; more than
         /// one draws a count and opens a list.
         let members: [AppModel.MappablePlace]
     }
 
-    /// Superscript digits, so a stack reads "Blue Bottle³" rather than stealing label width.
-    private static func superscript(_ n: Int) -> String {
-        guard n > 1 else { return "" }
-        guard n < 10 else { return "⁹⁺" }
-        return ["", "", "²", "³", "⁴", "⁵", "⁶", "⁷", "⁸", "⁹"][n]
+    /// The marker glyph: an ordinary pin for one note, or a numbered disc for a stack — so
+    /// the count is the pin itself rather than something appended to its name.
+    private static func symbol(forCount n: Int) -> String {
+        guard n > 1 else { return "mappin" }
+        return n <= 50 ? "\(n).circle.fill" : "plus.circle.fill"
     }
 
     /// Places matching the folder/time filters (from the cached `mappablePlaces`).
@@ -103,9 +104,10 @@ struct MapView: View {
             // `mp.label` is resolved once in the model (AppModel.mapLabel) — a person/venue
             // name, not raw geography — so a "Switzerland" hub linked only by Neal reads "Neal".
             return Pin(id: key,
-                       title: first.label + Self.superscript(group.count),
+                       title: first.label,
                        coordinate: CLLocationCoordinate2D(latitude: first.latitude, longitude: first.longitude),
                        color: model.axis(id: first.axisID)?.color ?? .red,
+                       symbol: Self.symbol(forCount: group.count),
                        members: group)
         }
     }
@@ -135,7 +137,7 @@ struct MapView: View {
             Map(position: $position, selection: $selection) {
                 UserAnnotation()            // the blue "you are here" dot (when authorized)
                 ForEach(currentPins) { pin in
-                    Marker(pin.title, systemImage: "mappin", coordinate: pin.coordinate)
+                    Marker(pin.title, systemImage: pin.symbol, coordinate: pin.coordinate)
                         .tint(pin.color)
                         .tag(pin.id)
                 }
