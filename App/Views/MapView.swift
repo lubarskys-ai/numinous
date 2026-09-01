@@ -77,13 +77,34 @@ struct MapView: View {
             let step = Double(visible.count) / Double(Self.markerCap)
             visible = (0..<Self.markerCap).map { visible[Int(Double($0) * step)] }
         }
+        // Several notes at the SAME place land on the same coordinate, so they stack and
+        // zooming never separates them — the gap between them is zero, and zoom multiplies
+        // zero. Fan a co-located group out around its true point by a constant ON-SCREEN
+        // distance: derived from the visible span, so the spread looks the same at every zoom
+        // and collapses back toward the real spot as you zoom in. Taps still open the right
+        // note — only the drawn position moves.
+        var byPoint: [String: [AppModel.MappablePlace]] = [:]
+        for mp in visible {
+            byPoint[String(format: "%.5f,%.5f", mp.latitude, mp.longitude), default: []].append(mp)
+        }
+        let span = visibleRegion?.span.latitudeDelta ?? 0.05
+        let fan = span * 0.018        // ~2% of what's on screen
+
         return visible.map { mp in
+            var lat = mp.latitude, lon = mp.longitude
+            let group = byPoint[String(format: "%.5f,%.5f", mp.latitude, mp.longitude)] ?? []
+            if group.count > 1, let k = group.firstIndex(where: { $0.id == mp.id }) {
+                let angle = (2 * Double.pi / Double(group.count)) * Double(k)
+                lat += fan * cos(angle)
+                // Longitude degrees shrink toward the poles; scale so the fan stays circular.
+                lon += fan * sin(angle) / max(0.2, cos(lat * .pi / 180))
+            }
             // `mp.label` is resolved once in the model (AppModel.mapLabel) — a person/venue
             // name, not raw geography — so a "Switzerland" hub linked only by Neal reads "Neal".
-            Pin(id: mp.id, noteID: mp.noteID,
-                title: mp.label,
-                coordinate: CLLocationCoordinate2D(latitude: mp.latitude, longitude: mp.longitude),
-                color: model.axis(id: mp.axisID)?.color ?? .red)
+            return Pin(id: mp.id, noteID: mp.noteID,
+                       title: mp.label,
+                       coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon),
+                       color: model.axis(id: mp.axisID)?.color ?? .red)
         }
     }
 
