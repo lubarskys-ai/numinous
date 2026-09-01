@@ -143,8 +143,13 @@ private struct LinkTextView: UIViewRepresentable {
                                        style: .plain, target: context.coordinator,
                                        action: #selector(Coordinator.insertLinkToken))
         linkItem.title = " Insert link"
+        // Text, not a symbol: there's no unambiguous "unlink" glyph, and a missing SF Symbol
+        // renders as an empty button.
+        let unlinkItem = UIBarButtonItem(title: "Unlink", style: .plain, target: context.coordinator,
+                                         action: #selector(Coordinator.unlinkAtCaret))
         bar.items = [
             linkItem,
+            unlinkItem,
             UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil),
             UIBarButtonItem(barButtonSystemItem: .done, target: tv, action: #selector(UIResponder.resignFirstResponder)),
         ]
@@ -274,6 +279,11 @@ private struct LinkTextView: UIViewRepresentable {
             lastStyleSignature = sig
 
             let storage = tv.textStorage
+            // Rewriting the whole text storage moves the insertion point — UIKit re-resolves
+            // the selection against the new attribute runs. Capture it and put it back, or
+            // the caret hops every time the fold state changes (which is every time you move
+            // in or out of a link — i.e. constantly, while editing one).
+            let selBefore = tv.selectedRange
             storage.beginEditing()
             storage.setAttributes([.font: font, .foregroundColor: UIColor.label], range: full)
             for n in names {
@@ -281,6 +291,9 @@ private struct LinkTextView: UIViewRepresentable {
                 storage.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: n.range)
             }
             storage.endEditing()
+            if tv.selectedRange != selBefore, selBefore.location + selBefore.length <= ns.length {
+                tv.selectedRange = selBefore
+            }
             hiddenRanges = hidden
             tv.typingAttributes = [.font: font, .foregroundColor: UIColor.label]
             let lm = tv.layoutManager
@@ -311,6 +324,28 @@ private struct LinkTextView: UIViewRepresentable {
                            shouldUse action: NSLayoutManager.ControlCharacterAction,
                            forControlCharacterAt charIndex: Int) -> NSLayoutManager.ControlCharacterAction {
             isHidden(charIndex) ? .zeroAdvancement : action
+        }
+
+        /// Toolbar "Unlink": turn the link the caret is in back into plain text, keeping what
+        /// it read as. Deleting a link by hand means getting a caret between four brackets and
+        /// backspacing precisely — which is exactly where the editor is hardest to control.
+        @objc func unlinkAtCaret() {
+            guard let tv = textView else { return }
+            let ns = tv.text as NSString
+            let caret = tv.selectedRange.location
+            let pieces = LinkTextView.linkPieces(in: ns)
+            // The link the caret sits in, or touches on either edge.
+            guard let piece = pieces.first(where: {
+                caret >= $0.full.location && caret <= $0.full.location + $0.full.length
+            }) else { return }
+            let visible = ns.substring(with: piece.name)
+            tv.text = ns.replacingCharacters(in: piece.full, with: visible)
+            let end = piece.full.location + (visible as NSString).length
+            tv.selectedRange = NSRange(location: end, length: 0)
+            parent.text = tv.text
+            setQuery(nil)
+            restyle()
+            parent.onCommit?(tv.text)      // the link is gone from the graph straight away
         }
 
         /// Toolbar "Link": insert a `[[` token at the caret and show the file picker.
