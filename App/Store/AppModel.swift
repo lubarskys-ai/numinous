@@ -20,7 +20,7 @@ struct LinkSuggestion: Identifiable, Equatable {
     let target: String     // wikilink target, e.g. "people/Shawna Flanagan"
     let surface: String    // exact words in the note to replace ("" if unknown)
     let isNew: Bool         // true → creates a new note on save
-    /// Folder path portion of the target ("people", "entertainment/restaurant", …).
+    /// Folder path portion of the target ("people", "travel/restaurant", …).
     var folderLabel: String {
         guard let slash = target.lastIndex(of: "/") else { return "" }
         return String(target[..<slash])
@@ -1880,7 +1880,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Rename or move a folder path (e.g. `entertainment/restaurant` →
+    /// Rename or move a folder path (e.g. `travel/restaurant` →
     /// `travel/restaurant`): every note under it (and its subfolders) moves, its
     /// links are rewritten, and the folder's settings carry over to the new path.
     func renameFolder(from oldPathRaw: String, to newPathRaw: String) {

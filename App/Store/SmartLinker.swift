@@ -20,7 +20,7 @@ enum SmartLinker {
         let surface: String
         @Guide(description: "A clean, properly capitalized and correctly spelled name or title.")
         let name: String
-        @Guide(description: "A lowercase folder for this entity: people, location, books, or notes. Use notes when you are unsure. Only use entertainment/restaurant for an actual named place to eat or drink.")
+        @Guide(description: "A lowercase folder for this entity: people, location, books, or notes. Use notes when you are unsure. Only use travel/restaurant or travel/hotel for an actual named venue.")
         let folder: String
     }
 
@@ -44,8 +44,11 @@ enum SmartLinker {
         - A city, town, neighborhood, or region → location (even if a meal or activity \
         happened there)
         - A book → books; a film or show → entertainment/film
-        - A named restaurant, cafe, or bar → entertainment/restaurant, but ONLY when it \
+        - A named restaurant, cafe, or bar → travel/restaurant, but ONLY when it \
         is genuinely a place to eat or drink. Do NOT put other things there.
+        - A named hotel, inn, or place you stayed → travel/hotel
+        - Any other named venue you physically go to (a bar, a distillery, a museum, \
+        a shop, a venue) → travel/<kind>, e.g. travel/museum
         - Anything else, or whenever you are unsure what kind of thing it is → notes
         You may reuse one of the user's existing folders only when it clearly fits: \(existing).
         For each entity copy the exact words, give a clean corrected name, and choose the folder.
