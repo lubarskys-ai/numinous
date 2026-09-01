@@ -3669,7 +3669,11 @@ final class AppModel: ObservableObject {
         "saw": "people", "see": "people", "seeing": "people", "call": "people",
         "called": "people", "calling": "people", "texted": "people", "texting": "people",
         "emailed": "people", "from": "people",
-        "at": "notes", "visited": "location", "visiting": "location", "in": "location",
+        // "at <somewhere>" is the venue pattern — a bar, a restaurant, a hotel. It used to
+        // propose notes/<name>, which is neither a place folder nor a useful one: no map pin,
+        // no travel value, and nothing linking it to where you were. travel/ gets both.
+        "at": "travel", "stayed": "travel", "staying": "travel",
+        "visited": "location", "visiting": "location", "in": "location",
     ]
 
     /// A lightweight, model-free entity guesser for when Apple's on-device model isn't
