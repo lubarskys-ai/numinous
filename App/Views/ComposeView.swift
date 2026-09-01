@@ -79,7 +79,10 @@ struct ComposeView: View {
             guard let slash = t.lastIndex(of: "/") else { return t.isEmpty ? nil : t }
             return String(t[..<slash])
         }
-        _category = State(initialValue: diary ? "notes/diary" : ((folder?.isEmpty == false) ? folder! : "notes"))
+        // Your chosen landing folder, not a hardcoded "notes". Read from UserDefaults because
+        // a SwiftUI init has no environment object yet.
+        let preferred = UserDefaults.standard.string(forKey: AppModel.defaultNoteFolderKey) ?? "notes"
+        _category = State(initialValue: diary ? "notes/diary" : ((folder?.isEmpty == false) ? folder! : preferred))
     }
 
     /// Edit an EXISTING note in place — used by "Find links" from the note detail view, so

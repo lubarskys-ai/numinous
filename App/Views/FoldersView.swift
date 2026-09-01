@@ -916,6 +916,17 @@ struct AxisSettingsView: View {
     @State private var homeDraft = ""
     @State private var showReadwise = false
     @State private var showCalendarSubscribe = false
+
+    /// Folders offered as the landing spot, with the current choice always present even if
+    /// that folder has since been renamed away.
+    private var newNoteFolderChoices: [String] {
+        var seen = Set<String>(), out: [String] = []
+        for f in [model.defaultNoteFolder, "notes", "diary"] + model.folders.map(\.name)
+        where seen.insert(f.lowercased()).inserted {
+            out.append(f)
+        }
+        return out
+    }
     @StateObject private var locator = LocationService()
 
     var body: some View {
@@ -936,6 +947,19 @@ struct AxisSettingsView: View {
                     Text("Connect")
                 } footer: {
                     Text("Sources Numinous can read on this device. Everything stays here — nothing is uploaded.")
+                }
+
+                Section {
+                    Picker("New notes go to", selection: Binding(
+                        get: { model.defaultNoteFolder },
+                        set: { model.setDefaultNoteFolder($0) }
+                    )) {
+                        ForEach(newNoteFolderChoices, id: \.self) { Text($0).tag($0) }
+                    }
+                } header: {
+                    Text("New notes")
+                } footer: {
+                    Text("Where a note starts when you tap “Note something”. You can still change it on any note before saving.")
                 }
 
                 Section {

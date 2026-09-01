@@ -3126,6 +3126,22 @@ final class AppModel: ObservableObject {
         persist()
     }
 
+    // MARK: - Where new notes go
+
+    /// The folder a brand-new note starts in. Read straight from UserDefaults by ComposeView
+    /// too, since a SwiftUI `init` can't reach the environment object.
+    static let defaultNoteFolderKey = "default_note_folder"
+
+    var defaultNoteFolder: String {
+        UserDefaults.standard.string(forKey: Self.defaultNoteFolderKey) ?? "notes"
+    }
+
+    func setDefaultNoteFolder(_ folder: String) {
+        let f = folder.trimmingCharacters(in: .whitespaces)
+        UserDefaults.standard.set(f.isEmpty ? "notes" : f, forKey: Self.defaultNoteFolderKey)
+        objectWillChange.send()
+    }
+
     // MARK: - Where a folder's notes are about
 
     /// A region you've set for a folder — "this trip happened in Lexington". Stored per
