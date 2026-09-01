@@ -44,15 +44,25 @@ struct MapView: View {
     @State private var locating = false
     @State private var locationDenied = false
     @State private var visibleRegion: MKCoordinateRegion?
+    @State private var stacked: Pin?          // a tapped marker holding several notes
 
     private struct NoteRef: Identifiable { let id: UUID }
 
     private struct Pin: Identifiable {
-        let id: String
-        let noteID: UUID
+        let id: String                          // the shared coordinate — stable across renders
         let title: String
         let coordinate: CLLocationCoordinate2D
         let color: Color
+        /// Every place sitting on this exact point. One entry is an ordinary pin; more than
+        /// one draws a count and opens a list.
+        let members: [AppModel.MappablePlace]
+    }
+
+    /// Superscript digits, so a stack reads "Blue Bottle³" rather than stealing label width.
+    private static func superscript(_ n: Int) -> String {
+        guard n > 1 else { return "" }
+        guard n < 10 else { return "⁹⁺" }
+        return ["", "", "²", "³", "⁴", "⁵", "⁶", "⁷", "⁸", "⁹"][n]
     }
 
     /// Places matching the folder/time filters (from the cached `mappablePlaces`).
@@ -77,39 +87,26 @@ struct MapView: View {
             let step = Double(visible.count) / Double(Self.markerCap)
             visible = (0..<Self.markerCap).map { visible[Int(Double($0) * step)] }
         }
-        // Several notes at the SAME place land on the same coordinate, so they stack and
-        // zooming never separates them — the gap between them is zero, and zoom multiplies
-        // zero. Fan a co-located group out around its true point by a constant ON-SCREEN
-        // distance: derived from the visible span, so the spread looks the same at every zoom
-        // and collapses back toward the real spot as you zoom in. Taps still open the right
-        // note — only the drawn position moves.
+        // Notes at the SAME place share one coordinate, so their markers stack. Spreading them
+        // apart was worse than useless: at the zoom where they'd separate, MapKit has already
+        // dropped the labels, so you get anonymous dots in a ring. One marker carrying a count
+        // is both honest and readable — tapping it lists what's there.
         var byPoint: [String: [AppModel.MappablePlace]] = [:]
+        var order: [String] = []
         for mp in visible {
-            byPoint[String(format: "%.5f,%.5f", mp.latitude, mp.longitude), default: []].append(mp)
+            let key = String(format: "%.5f,%.5f", mp.latitude, mp.longitude)
+            if byPoint[key] == nil { order.append(key) }
+            byPoint[key, default: []].append(mp)
         }
-        // A FIXED ground distance, not a fraction of the visible span. Tying it to the span
-        // kept the spread constant on screen, so zooming in never separated anything — and at
-        // ~15pt apart, markers ~32pt wide still overlapped and read as one. Fixed metres means
-        // zooming in genuinely pulls them apart, which is what zooming is for. They converge
-        // again as you zoom out, which is the honest picture at that scale.
-        let fanMetres = 45.0
-        let fan = fanMetres / 111_320.0        // metres → degrees of latitude
-
-        return visible.map { mp in
-            var lat = mp.latitude, lon = mp.longitude
-            let group = byPoint[String(format: "%.5f,%.5f", mp.latitude, mp.longitude)] ?? []
-            if group.count > 1, let k = group.firstIndex(where: { $0.id == mp.id }) {
-                let angle = (2 * Double.pi / Double(group.count)) * Double(k)
-                lat += fan * cos(angle)
-                // Longitude degrees shrink toward the poles; scale so the fan stays circular.
-                lon += fan * sin(angle) / max(0.2, cos(lat * .pi / 180))
-            }
+        return order.compactMap { key in
+            guard let group = byPoint[key], let first = group.first else { return nil }
             // `mp.label` is resolved once in the model (AppModel.mapLabel) — a person/venue
             // name, not raw geography — so a "Switzerland" hub linked only by Neal reads "Neal".
-            return Pin(id: mp.id, noteID: mp.noteID,
-                       title: mp.label,
-                       coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon),
-                       color: model.axis(id: mp.axisID)?.color ?? .red)
+            return Pin(id: key,
+                       title: first.label + Self.superscript(group.count),
+                       coordinate: CLLocationCoordinate2D(latitude: first.latitude, longitude: first.longitude),
+                       color: model.axis(id: first.axisID)?.color ?? .red,
+                       members: group)
         }
     }
 
@@ -154,8 +151,12 @@ struct MapView: View {
             .mapControls { MapUserLocationButton(); MapCompass() }
             .onMapCameraChange(frequency: .onEnd) { ctx in visibleRegion = ctx.region }
             .onChange(of: selection) { _, id in
-                guard let id, let mp = model.mappablePlaces.first(where: { $0.id == id }) else { return }
-                openNote = NoteRef(id: mp.noteID)
+                guard let id, let pin = currentPins.first(where: { $0.id == id }) else { return }
+                if pin.members.count == 1 {
+                    openNote = NoteRef(id: pin.members[0].noteID)
+                } else {
+                    stacked = pin        // several notes here — ask which
+                }
                 selection = nil
             }
             .overlay(alignment: .top) {
@@ -172,6 +173,15 @@ struct MapView: View {
             .navigationBarTitleDisplayMode(.inline)
             .sheet(item: $openNote) { ref in
                 NavigationStack { NoteDetailView(noteID: ref.id) }
+            }
+            .confirmationDialog(stacked.map { "\($0.members.count) notes here" } ?? "",
+                                isPresented: Binding(get: { stacked != nil },
+                                                     set: { if !$0 { stacked = nil } }),
+                                titleVisibility: .visible) {
+                ForEach(stacked?.members ?? [], id: \.id) { mp in
+                    Button(mp.title) { openNote = NoteRef(id: mp.noteID); stacked = nil }
+                }
+                Button("Cancel", role: .cancel) { stacked = nil }
             }
             .task {
                 _ = await locator.currentCoordinate()   // prompt for permission so the dot/button work
