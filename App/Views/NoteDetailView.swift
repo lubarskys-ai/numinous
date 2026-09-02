@@ -445,10 +445,13 @@ struct NoteDetailView: View {
                 if editedBody.trimmingCharacters(in: .whitespaces).count >= 3 {
                     Button { openFullEditor(note) } label: { Label("Find links", systemImage: "sparkles").font(.caption) }
                     Button {
-                        // Locate the note's place links and offer to map them.
+                        // Commit what's on screen FIRST. Candidates are read from the SAVED
+                        // note, so links you just typed were invisible until something else
+                        // saved them — which is why this needed pressing twice.
+                        if editedBody != note.body { model.updateBody(note.id, body: editedBody) }
                         scanningLocations = true
                         Task {
-                            hadLocatableLinks = !model.linkPlaceCandidates(forNote: note.id).isEmpty
+                            hadLocatableLinks = !model.linkPlaceCandidates(forNote: note.id, includeMapped: true).isEmpty
                             foundLocations = await model.findLocations(in: editedBody, forNote: note.id)
                             scanningLocations = false
                             showFoundPicker = true

@@ -2729,17 +2729,26 @@ final class AppModel: ObservableObject {
     }
 
     /// Attach an already-resolved place (picked from the nearby list) to a note — no re-geocode.
+    /// Always does BOTH, whatever route it takes: the note carries the place (so it has a
+    /// location of its own and a travel value), and the place note the link points at carries
+    /// the coordinate too. It used to return early when the link already had a place note,
+    /// which meant a body link was sometimes added and sometimes not — the same action
+    /// producing visibly different results.
     func attachResolvedPlace(_ p: NearbyPlace, into noteID: UUID) {
-        // The note itself gets the place, so it carries a location of its own (and a travel
-        // value) rather than only pointing at one.
         addPlace(noteID, name: p.name, latitude: p.latitude, longitude: p.longitude)
-        // And the coordinate merges into the note you ALREADY link to — `[[Sky Bar]]` becomes
-        // the mapped Sky Bar, instead of a second place note appearing beside it.
+
+        // The place note: the one this link already points at, else one matching the resolved
+        // name, else a new one. `ensurePlaceNote` merges rather than duplicating.
+        let placeTitle: String
         if let link = p.sourceLink, let i = existingPlaceNoteIndex(named: link) {
             addPlace(notes[i].id, name: p.name, latitude: p.latitude, longitude: p.longitude)
-            return
+            placeTitle = notes[i].title
+        } else {
+            placeTitle = ensurePlaceNote(name: p.name, latitude: p.latitude, longitude: p.longitude)
         }
-        linkPlace(ensurePlaceNote(name: p.name, latitude: p.latitude, longitude: p.longitude), into: noteID)
+        // And make sure the note actually links to it. `linkPlace` is a no-op when the link is
+        // already there, so this never duplicates a 📍 line.
+        linkPlace(placeTitle, into: noteID)
     }
 
     /// Locate the places a note LINKS to — the location counterpart of "Find links". It takes the
@@ -2913,7 +2922,12 @@ final class AppModel: ObservableObject {
         var creationLocation: String?
         if let noteID, let n = note(id: noteID) {
             hints.append(contentsOf: Self.regionHintsFromFolder(n.folderName))  // travel/Thailand → "Thailand"
-            hints.append(n.displayName)                                        // title, e.g. "Bangkok Trip"
+            // The note's own label, unless it's just a date — "2026-08-21 08:38" is never a
+            // region and only costs a geocode to find that out.
+            if !Self.isDateTitled(n.displayName) { hints.append(n.displayName) }
+            // Places already ON the note name where it is far better than its title does:
+            // a note pinned to "Vancouver" is about Vancouver whatever it's called.
+            hints.append(contentsOf: n.allPlaces.map(\.name).filter { !$0.isEmpty })
             creationLocation = n.location
         }
         hints.append(contentsOf: candidates)                                   // a link that IS a region
