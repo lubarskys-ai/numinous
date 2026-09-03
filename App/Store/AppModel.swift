@@ -2922,12 +2922,12 @@ final class AppModel: ObservableObject {
         var creationLocation: String?
         if let noteID, let n = note(id: noteID) {
             hints.append(contentsOf: Self.regionHintsFromFolder(n.folderName))  // travel/Thailand → "Thailand"
-            // The note's own label, unless it's just a date — "2026-08-21 08:38" is never a
-            // region and only costs a geocode to find that out.
-            if !Self.isDateTitled(n.displayName) { hints.append(n.displayName) }
-            // Places already ON the note name where it is far better than its title does:
-            // a note pinned to "Vancouver" is about Vancouver whatever it's called.
+            // Places already ON the note come FIRST — "Canada" pinned to the note says where
+            // it is; "Max Stein's Wedding" does not. Title after, and only when it isn't just
+            // a date, since "2026-08-21 08:38" is never a region and only costs a geocode to
+            // discover that.
             hints.append(contentsOf: n.allPlaces.map(\.name).filter { !$0.isEmpty })
+            if !Self.isDateTitled(n.displayName) { hints.append(n.displayName) }
             creationLocation = n.location
         }
         hints.append(contentsOf: candidates)                                   // a link that IS a region
@@ -3200,7 +3200,14 @@ final class AppModel: ObservableObject {
     func searchAreaLabel(forNote noteID: UUID) -> String? {
         guard let n = note(id: noteID) else { return nil }
         if let saved = searchRegion(forFolder: n.folderName) { return saved.name }
-        return Self.regionHintsFromFolder(n.folderName).first
+        // The note's OWN label is the obvious default and was being ignored: this only looked
+        // at the folder, so a diary note pinned to "Canada" reported nothing and the sheet
+        // said "set the area to search" as though nothing were known. Same order the search
+        // itself uses, so what's shown is what's actually used.
+        if let place = n.allPlaces.first(where: { !$0.name.isEmpty }) { return place.name }
+        if let loc = n.location, !loc.isEmpty { return loc }
+        if let folderHint = Self.regionHintsFromFolder(n.folderName).first { return folderHint }
+        return Self.isDateTitled(n.displayName) ? nil : n.displayName
     }
 
     /// Folders whose notes are "places" — where a location and travel value make sense.
