@@ -75,6 +75,10 @@ final class AppModel: ObservableObject {
     @Published private(set) var folders: [Folder] = []
     @Published private(set) var axes: [Axis] = Axis.defaultSet
     @Published private(set) var score: ScoreResult
+    /// What the last Find-locations run actually tried, when it came up short — shown in the
+    /// UI so a failure explains itself instead of reporting a bare "couldn't match".
+    @Published var lastFindSummary: String?
+
     /// Bumped on every persist. Views memoise expensive derived collections against this, so
     /// they recompute once per data change instead of once per render.
     @Published private(set) var revision: Int = 0
@@ -2765,9 +2769,17 @@ final class AppModel: ObservableObject {
         // Always include links that already have a coordinate. Offering only the unmapped ones
         // meant a note with three unmapped links and one wrongly-mapped link would show the
         // three and silently drop the fourth — the one that most needed fixing.
-        let candidates: [String] = noteID.map { linkPlaceCandidates(forNote: $0, includeMapped: true) }
+        var candidates: [String] = noteID.map { linkPlaceCandidates(forNote: $0, includeMapped: true) }
             ?? Self.placeNameCandidates(in: text)
-        guard !candidates.isEmpty else { return [] }
+        // Nothing linkable — but the note may still NAME places in plain prose, or a link may
+        // have been filed somewhere the link scan skips (people, books). Reading the text was
+        // already implemented and simply unreachable from here, which meant a note saying
+        // "dinner at Gramercy Tavern" found nothing at all.
+        if candidates.isEmpty { candidates = Self.placeNameCandidates(in: text) }
+        guard !candidates.isEmpty else {
+            lastFindSummary = "Nothing in this note looked like a place to search for."
+            return []
+        }
         // Region strategy — belt and suspenders, because a country is a big fuzzy target:
         //   1) append the region NAME to each query ("Sky Bar" → "Sky Bar Thailand"), and
         //   2) bias to the region CENTRE with a COUNTRY-SCALE radius (a tight 60 km bias around a
@@ -2885,6 +2897,12 @@ final class AppModel: ObservableObject {
                                    latitude: r.hit.latitude, longitude: r.hit.longitude,
                                    sourceLink: candidates[i]))
         }
+        // Say what was actually tried. Every failure so far has come down to "which stage
+        // dropped it", and the UI reporting a bare "couldn't match" hid that from the person
+        // best placed to see it was wrong.
+        let missed = candidates.indices.filter { found[$0] == nil }.map { candidates[$0] }
+        lastFindSummary = missed.isEmpty ? nil
+            : "Couldn't place \(missed.joined(separator: ", ")) — searched near \(region?.name ?? "you")."
         return out
     }
 

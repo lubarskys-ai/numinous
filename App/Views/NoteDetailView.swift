@@ -39,9 +39,12 @@ struct NoteDetailView: View {
     /// mapped — usually no connection), or "no place links".
     private var foundLocationsTitle: String {
         if !foundLocations.isEmpty { return "Places from your links — tap to map" }
+        // Prefer the model's own account of what it tried — it names the places that failed
+        // and the area it looked in, which is what you need to fix it.
+        if let summary = model.lastFindSummary { return summary }
         return hadLocatableLinks
             ? "Couldn't match those links to a place. Try adding a city to the link name."
-            : "No place links to locate — try Find links first"
+            : "Nothing in this note looked like a place to search for."
     }
     @StateObject private var locator = LocationService()
 
