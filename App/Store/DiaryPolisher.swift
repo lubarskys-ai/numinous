@@ -1,4 +1,5 @@
 import Foundation
+import NuminousCore
 #if canImport(FoundationModels)
 import FoundationModels
 #endif
@@ -56,6 +57,8 @@ enum DiaryPolisher {
             - Preserve EVERY specific name of a person, place, book, restaurant, film, \
             or thing exactly as I said it — these become links.
             - Invent nothing. Do not add events, feelings, or details I did not say.
+            - PLAIN TEXT ONLY. No Markdown: no *asterisks*, no **bold**, no underscores, \
+            no backticks, no bullet characters, no # headings. Just sentences.
             - Output ONLY the summarized entry, no preamble or headings.
             """
             let result = await withTimeout(seconds: 40) { () -> String? in
@@ -63,7 +66,9 @@ enum DiaryPolisher {
                 let response = try await session.respond(to: trimmed)
                 return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
             }
-            if let s = result, !s.isEmpty { return .summary(s) }
+            // Belt and braces: the model still slips in **bold** now and then, and a note is
+            // plain text, so the markers would just sit there in the entry.
+            if let s = result.map(PlainText.stripMarkdown), !s.isEmpty { return .summary(s) }
             return .skipped("On-device summarizing didn't finish in time — kept your entry as is.")
         }
         #endif

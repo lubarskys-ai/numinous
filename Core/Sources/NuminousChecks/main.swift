@@ -430,4 +430,36 @@ h.group("Wikilink extract - the no-link fast path") {
     h.eq(WikilinkParser.extract(from: "dinner with [[people/Sam]]"), ["people/Sam"], "a real link still extracts")
 }
 
+h.group("Plain text - the AI cleanup must not leave Markdown behind") {
+    // What the user actually saw: the on-device model bolding names and phrases.
+    h.eq(PlainText.stripMarkdown("I had dinner at **Gramercy Tavern** with Sam."),
+         "I had dinner at Gramercy Tavern with Sam.", "**bold** unwrapped, words kept")
+    h.eq(PlainText.stripMarkdown("It was *really* good."), "It was really good.", "*italic* unwrapped")
+    h.eq(PlainText.stripMarkdown("__Monday__ and _Tuesday_"), "Monday and Tuesday", "underscore emphasis unwrapped")
+    h.eq(PlainText.stripMarkdown("## The evening"), "The evening", "heading markers dropped")
+    h.eq(PlainText.stripMarkdown("> she said it plainly"), "she said it plainly", "quote marker dropped")
+    h.eq(PlainText.stripMarkdown("* eggs"), "- eggs", "asterisk bullet becomes a dash, not italics")
+    h.eq(PlainText.stripMarkdown("**a *b* c**"), "a b c", "nested emphasis fully unwrapped")
+    h.eq(PlainText.stripMarkdown("an unclosed **marker"), "an unclosed marker", "a marker never closed is still removed")
+
+    // Links are the whole point of a note — the stripper must not touch them.
+    h.eq(PlainText.stripMarkdown("dinner with [[people/Sam]]"), "dinner with [[people/Sam]]", "wikilinks untouched")
+    h.eq(PlainText.stripMarkdown("**[[travel/Kyoto]]** was new"), "[[travel/Kyoto]] was new", "bold around a link unwraps to the link")
+
+    // Prose that merely contains these characters must survive unchanged.
+    h.eq(PlainText.stripMarkdown("plain prose, nothing to strip"), "plain prose, nothing to strip", "clean text is returned as is")
+    h.eq(PlainText.stripMarkdown("2 * 3 = 6"), "2 * 3 = 6", "a lone asterisk is arithmetic, not emphasis")
+    h.eq(PlainText.stripMarkdown("we met at 5 # of us"), "we met at 5 # of us", "a hash mid-line is not a heading")
+    h.eq(PlainText.stripMarkdown(""), "", "empty stays empty")
+
+    // Line structure is preserved — paragraphs must not collapse.
+    h.eq(PlainText.stripMarkdown("**one**\n\n*two*"), "one\n\ntwo", "blank lines between paragraphs kept")
+
+    // Stripping is idempotent: running it twice changes nothing more.
+    for sample in ["**a** and *b*", "## h\n> q\n* i", "no markers here", "[[people/Sam]]"] {
+        let once = PlainText.stripMarkdown(sample)
+        h.eq(PlainText.stripMarkdown(once), once, "idempotent for: \(sample)")
+    }
+}
+
 exit(Int32(h.summarize()))

@@ -2887,11 +2887,17 @@ final class AppModel: ObservableObject {
             let mapped = existingPlaceNoteIndex(named: candidates[i]).map {
                 notes[$0].allPlaces.contains { $0.hasCoordinate }
             } ?? false
+            // Always say which link a result came from when the names differ. Map search
+            // answers "Blue Bottle Coffee" with whatever cafe is nearest, so a wrong match
+            // has to be visible at the moment you choose it — otherwise it lands on the map
+            // under a name you never wrote.
+            let sameName = Self.norm(r.hit.name) == Self.norm(candidates[i])
             let sub: String
-            if mapped {
-                sub = "already pinned — tap to replace"
-            } else {
-                sub = Self.norm(r.hit.name) == Self.norm(candidates[i]) ? "tap to map it" : "from \u{201C}\(candidates[i])\u{201D}"
+            switch (mapped, sameName) {
+            case (true, true):   sub = "already pinned — tap to replace"
+            case (true, false):  sub = "for \u{201C}\(candidates[i])\u{201D} — already pinned, tap to replace"
+            case (false, true):  sub = "tap to map it"
+            case (false, false): sub = "from \u{201C}\(candidates[i])\u{201D}"
             }
             out.append(NearbyPlace(name: r.hit.name, subtitle: sub,
                                    latitude: r.hit.latitude, longitude: r.hit.longitude,

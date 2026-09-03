@@ -29,7 +29,16 @@ struct NoteDetailView: View {
     @State private var editingPlace: PlaceRef?
     @State private var photoViewerData: PhotoViewerData?   // attached photos opened full-screen
     @State private var foundLocations: [AppModel.NearbyPlace] = []   // places resolved from the note's links
-    @State private var showFoundPicker = false
+    /// Drives the results sheet by VALUE. With `.sheet(isPresented:)` the content closure can
+    /// capture state from before the results landed — the sheet then shows nothing and only
+    /// works on a second press. `.sheet(item:)` is built from the results themselves.
+    @State private var foundResults: FoundResults?
+
+    private struct FoundResults: Identifiable {
+        let id = UUID()
+        let places: [AppModel.NearbyPlace]
+        let title: String
+    }
     @State private var scanningLocations = false
     @State private var hadLocatableLinks = false   // were there links to try, if none resolved?
     @State private var editingArea = false        // the "search near…" prompt
@@ -114,6 +123,33 @@ struct NoteDetailView: View {
             }
             .sheet(item: $openLinkTarget) { t in
                 NavigationStack { NoteDetailView(noteID: t.id) }
+            }
+            // These belong to the note body, but they are attached HERE rather than to the
+            // body Section: a sheet presented from inside a List section is dropped the first
+            // time, which is why Find locations used to need two presses.
+            .sheet(item: $foundResults) { results in
+                FoundPlacesSheet(
+                    title: results.title,
+                    places: results.places,
+                    areaLabel: model.searchAreaLabel(forNote: note.id),
+                    onAdd: { chosen in
+                        for p in chosen { model.attachResolvedPlace(p, into: note.id) }
+                        refreshBody(note.id)
+                        foundResults = nil
+                    },
+                    onChangeArea: {
+                        areaDraft = model.searchAreaLabel(forNote: note.id) ?? ""
+                        foundResults = nil
+                        editingArea = true
+                    })
+            }
+            .alert("Where should Numinous look?", isPresented: $editingArea) {
+                TextField("City, or city and state", text: $areaDraft)
+                    .textInputAutocapitalization(.words)
+                Button("Cancel", role: .cancel) {}
+                Button("Search here") { applySearchArea(for: note) }
+            } message: {
+                Text("Applies to everything in “\(note.folderName.isEmpty ? "this folder" : note.folderName)”, so a trip only needs telling once. Leave empty to clear it.")
             }
             .fullScreenCover(item: $fullEditNote, onDismiss: {
                 editAutofocus = false
@@ -457,7 +493,7 @@ struct NoteDetailView: View {
                             hadLocatableLinks = !model.linkPlaceCandidates(forNote: note.id, includeMapped: true).isEmpty
                             foundLocations = await model.findLocations(in: editedBody, forNote: note.id)
                             scanningLocations = false
-                            showFoundPicker = true
+                            foundResults = FoundResults(places: foundLocations, title: foundLocationsTitle)
                         }
                     } label: {
                         if scanningLocations { ProgressView().controlSize(.mini) }
@@ -467,32 +503,6 @@ struct NoteDetailView: View {
                 }
                 Button { openFullEditor(note) } label: { Label("Edit", systemImage: "pencil").font(.caption) }
             }
-        }
-        // A sheet, not a dialog: a trip note often yields several places at once, and picking
-        // them one at a time meant re-running the whole search between each.
-        .sheet(isPresented: $showFoundPicker) {
-            FoundPlacesSheet(
-                title: foundLocationsTitle,
-                places: foundLocations,
-                areaLabel: model.searchAreaLabel(forNote: note.id),
-                onAdd: { chosen in
-                    for p in chosen { model.attachResolvedPlace(p, into: note.id) }
-                    refreshBody(note.id)
-                    showFoundPicker = false
-                },
-                onChangeArea: {
-                    areaDraft = model.searchAreaLabel(forNote: note.id) ?? ""
-                    showFoundPicker = false
-                    editingArea = true
-                })
-        }
-        .alert("Where should Numinous look?", isPresented: $editingArea) {
-            TextField("City, or city and state", text: $areaDraft)
-                .textInputAutocapitalization(.words)
-            Button("Cancel", role: .cancel) {}
-            Button("Search here") { applySearchArea(for: note) }
-        } message: {
-            Text("Applies to everything in “\(note.folderName.isEmpty ? "this folder" : note.folderName)”, so a trip only needs telling once. Leave empty to clear it.")
         }
     }
 
@@ -513,7 +523,7 @@ struct NoteDetailView: View {
             hadLocatableLinks = !model.linkPlaceCandidates(forNote: note.id, includeMapped: true).isEmpty
             foundLocations = await model.findLocations(in: editedBody, forNote: note.id)
             scanningLocations = false
-            showFoundPicker = true
+            foundResults = FoundResults(places: foundLocations, title: foundLocationsTitle)
         }
     }
 
