@@ -58,6 +58,18 @@ struct ComposeView: View {
     @StateObject private var locator = LocationService()
     @State private var polishing = false
     @State private var polishNote: String?   // reason the on-device summary can't run
+    @State private var locatingPlaces = false
+    @State private var editingArea = false    // the "search near…" prompt
+    @State private var areaDraft = ""
+    /// Results of Find locations, driving the picker BY VALUE so the sheet is built from the
+    /// places rather than from state that may not have landed yet.
+    @State private var foundResults: FoundResults?
+
+    private struct FoundResults: Identifiable {
+        let id = UUID()
+        let places: [AppModel.NearbyPlace]
+        let title: String
+    }
 
     /// When true, this is "Add to today's diary": on appear it pulls today's diary entry
     /// forward (if one exists) and saves back into it instead of creating a new note.
@@ -166,6 +178,14 @@ struct ComposeView: View {
                             else { Label(didScan ? "Re-scan" : "Find links", systemImage: "sparkles") }
                         }
                         .disabled(scanning || text.trimmingCharacters(in: .whitespaces).count < 3)
+                        // Right here, next to Find links: you've just written the place names,
+                        // and having to save, leave, and come back to map them was the long way
+                        // round to something you're already looking at.
+                        Button { findPlaces() } label: {
+                            if locatingPlaces { HStack { ProgressView(); Text("Locating…") } }
+                            else { Label("Find locations", systemImage: "mappin.and.ellipse") }
+                        }
+                        .disabled(locatingPlaces || text.trimmingCharacters(in: .whitespaces).count < 3)
                         if reviewing && manualEdit {
                             Button { manualEdit = false } label: { Label("Highlights", systemImage: "highlighter") }
                         }
@@ -207,6 +227,26 @@ struct ComposeView: View {
                 Button("Save") { finishSave(name: nameDraft.trimmingCharacters(in: .whitespaces)) }
             } message: { Text("Filed under \(categoryLabel) — give it a name (or leave blank to use the date).") }
             .sheet(item: $editSheetFor) { s in editSheet(s) }
+            .sheet(item: $foundResults) { results in
+                FoundPlacesSheet(
+                    title: results.title,
+                    places: results.places,
+                    areaLabel: existingNoteID.flatMap { model.searchAreaLabel(forNote: $0) },
+                    onAdd: { chosen in addFoundPlaces(chosen); foundResults = nil },
+                    onChangeArea: {
+                        areaDraft = existingNoteID.flatMap { model.searchAreaLabel(forNote: $0) } ?? ""
+                        foundResults = nil
+                        editingArea = true
+                    })
+            }
+            .alert("Where should Numinous look?", isPresented: $editingArea) {
+                TextField("City, or city and state", text: $areaDraft)
+                    .textInputAutocapitalization(.words)
+                Button("Cancel", role: .cancel) {}
+                Button("Search here") { applySearchArea() }
+            } message: {
+                Text("Applies to everything in \u{201C}\(categoryLabel)\u{201D}, so a trip only needs telling once. Leave empty to clear it.")
+            }
             .sheet(isPresented: $showFollowUp, onDismiss: { dismiss() }) {
                 FollowUpSheet(noteTitle: reminderNoteTitle, defaultTitle: followUpDefault) { _ in }
             }
@@ -395,6 +435,67 @@ struct ComposeView: View {
             // in the strip below; "Highlights" shows the marked-up read-only view on demand.
             manualEdit = true
             scanning = false
+        }
+    }
+
+    /// Find the places this note names or links to, without leaving the editor.
+    ///
+    /// Works before the note exists: `findLocations` falls back to reading the text when
+    /// there's no note id, so a brand-new entry mentioning a restaurant can be mapped as
+    /// you write it.
+    private func findPlaces() {
+        locatingPlaces = true
+        Task {
+            let places = await model.findLocations(in: text, forNote: existingNoteID)
+            locatingPlaces = false
+            let title = places.isEmpty
+                ? (model.lastFindSummary ?? "Nothing in this note looked like a place to search for.")
+                : "Places from your note — tap to map"
+            foundResults = FoundResults(places: places, title: title)
+        }
+    }
+
+    /// Add the chosen places. An existing note takes the full route — the note carries the
+    /// place AND the place note gets the coordinate. A note that isn't saved yet can't carry
+    /// anything, so the place note is pinned now, the link is woven into the text, and the
+    /// note picks up its own location on save.
+    private func addFoundPlaces(_ chosen: [AppModel.NearbyPlace]) {
+        guard !chosen.isEmpty else { return }
+        if let id = existingNoteID {
+            for p in chosen { model.attachResolvedPlace(p, into: id) }
+            if let fresh = model.note(id: id) { text = fresh.body }
+        } else {
+            for p in chosen {
+                let title = model.pinResolvedPlace(p)
+                // The name is usually already in the text as the link we searched FROM —
+                // appending a second one would say the same thing twice.
+                if !text.contains("[[\(title)]]") {
+                    let sep = text.isEmpty || text.hasSuffix("\n") ? "" : "\n"
+                    text += sep + "📍 [[\(title)]]"
+                }
+            }
+            // Give the note itself a place, so it lands on the map rather than only its links.
+            if location.trimmingCharacters(in: .whitespaces).isEmpty, let first = chosen.first {
+                location = first.name
+                locationCoord = (first.latitude, first.longitude)
+            }
+        }
+    }
+
+    /// Remember the typed area for this note's folder and search again straight away, so the
+    /// correction shows now rather than next time.
+    private func applySearchArea() {
+        let typed = areaDraft.trimmingCharacters(in: .whitespaces)
+        Task {
+            if typed.isEmpty {
+                model.setSearchRegion(nil, forFolder: category)
+            } else if let c = await LocationService.coordinate(for: typed) {
+                model.setSearchRegion(Place(name: typed, latitude: c.latitude, longitude: c.longitude),
+                                      forFolder: category)
+            } else {
+                return   // couldn't place it — leave the old area alone rather than clearing it
+            }
+            findPlaces()
         }
     }
 

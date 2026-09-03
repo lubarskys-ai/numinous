@@ -2740,19 +2740,25 @@ final class AppModel: ObservableObject {
     /// producing visibly different results.
     func attachResolvedPlace(_ p: NearbyPlace, into noteID: UUID) {
         addPlace(noteID, name: p.name, latitude: p.latitude, longitude: p.longitude)
+        // And make sure the note actually links to the place note. `linkPlace` is a no-op when
+        // the link is already there, so this never duplicates a 📍 line.
+        linkPlace(pinResolvedPlace(p), into: noteID)
+    }
 
-        // The place note: the one this link already points at, else one matching the resolved
-        // name, else a new one. `ensurePlaceNote` merges rather than duplicating.
-        let placeTitle: String
+    /// Give the PLACE NOTE its coordinate and return that note's title, without touching any
+    /// note that refers to it. Split out of `attachResolvedPlace` for the composer, where the
+    /// note being written doesn't exist yet — it weaves `[[title]]` into the text itself and
+    /// the note gets its own location on save.
+    ///
+    /// The place note is the one this link already points at, else one matching the resolved
+    /// name, else a new one. `ensurePlaceNote` merges rather than duplicating.
+    @discardableResult
+    func pinResolvedPlace(_ p: NearbyPlace) -> String {
         if let link = p.sourceLink, let i = existingPlaceNoteIndex(named: link) {
             addPlace(notes[i].id, name: p.name, latitude: p.latitude, longitude: p.longitude)
-            placeTitle = notes[i].title
-        } else {
-            placeTitle = ensurePlaceNote(name: p.name, latitude: p.latitude, longitude: p.longitude)
+            return notes[i].title
         }
-        // And make sure the note actually links to it. `linkPlace` is a no-op when the link is
-        // already there, so this never duplicates a 📍 line.
-        linkPlace(placeTitle, into: noteID)
+        return ensurePlaceNote(name: p.name, latitude: p.latitude, longitude: p.longitude)
     }
 
     /// Locate the places a note LINKS to — the location counterpart of "Find links". It takes the
@@ -3015,6 +3021,14 @@ final class AppModel: ObservableObject {
         return words.contains { r.contains($0) }
     }
 
+    /// Is this offset the first word of a sentence — start of text, or after `.`/`!`/`?`/newline?
+    private static func startsSentence(at location: Int, in ns: NSString) -> Bool {
+        var i = location - 1
+        while i >= 0, ns.character(at: i) == 32 || ns.character(at: i) == 9 { i -= 1 }
+        guard i >= 0 else { return true }
+        return ".!?\n\u{201C}\"".unicodeScalars.map { UInt16($0.value) }.contains(ns.character(at: i))
+    }
+
     /// Candidate place/business names in free text. NLTagger's name tags alone miss most local
     /// businesses ("Tartine Bakery"), so we ALSO take runs of Capitalized Words and let MapKit
     /// decide which are real venues. People that NLTagger recognizes are excluded so a friend's
@@ -3047,7 +3061,13 @@ final class AppModel: ObservableObject {
         if let re = try? NSRegularExpression(pattern: "[A-Z][\\p{L}'&.\\-]*(?:\\s+[A-Z][\\p{L}'&.\\-]*){0,4}") {
             let ns = text as NSString
             for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
-                add(ns.substring(with: m.range))
+                let run = ns.substring(with: m.range)
+                // A lone capital at the start of a sentence is capitalized by grammar, not
+                // because it names anything: "Lunch at Tartine Bakery" was searching for
+                // "Lunch" and offering whatever bar came back. Multi-word runs still count,
+                // and a real place there is normally caught by NLTagger above.
+                if !run.contains(where: { $0.isWhitespace }), Self.startsSentence(at: m.range.location, in: ns) { continue }
+                add(run)
             }
         }
         return Array(names.sorted { $0.count > $1.count }.prefix(10))
