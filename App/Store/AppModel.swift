@@ -2766,7 +2766,12 @@ final class AppModel: ObservableObject {
     /// and resolves each to a venue via MapKit — biased to the note's INFERRED REGION (a place
     /// already pinned on it, its travel folder name, where it was created, or a city/country it
     /// names) so a Bangkok trip's links resolve in Bangkok, not near you. Returns mappable places.
-    func findLocations(in text: String, forNote noteID: UUID? = nil) async -> [NearbyPlace] {
+    /// `alsoScanText` reads the passed-in text ON TOP of the note's links, instead of only as a
+    /// fallback. The editor needs it: a note's links are whatever was last SAVED, so a place you
+    /// just typed is invisible until you save — which closes the editor. Reading both means what
+    /// you are looking at counts.
+    func findLocations(in text: String, forNote noteID: UUID? = nil,
+                       alsoScanText: Bool = false) async -> [NearbyPlace] {
         // Source from the note's links; only fall back to a text scan when there's no note (e.g.
         // a future composer use), which the note-detail button never hits.
         // Nothing left to locate usually means every link is already mapped — but "mapped"
@@ -2781,7 +2786,15 @@ final class AppModel: ObservableObject {
         // have been filed somewhere the link scan skips (people, books). Reading the text was
         // already implemented and simply unreachable from here, which meant a note saying
         // "dinner at Gramercy Tavern" found nothing at all.
-        if candidates.isEmpty { candidates = Self.placeNameCandidates(in: text) }
+        if alsoScanText || candidates.isEmpty {
+            var seen = Set(candidates.map(Self.norm))
+            for c in Self.placeNameCandidates(in: text) where seen.insert(Self.norm(c)).inserted {
+                candidates.append(c)
+            }
+            // Each candidate is up to three MapKit round trips, so keep the union to the same
+            // handful a single source would have produced.
+            candidates = Array(candidates.prefix(10))
+        }
         guard !candidates.isEmpty else {
             lastFindSummary = "Nothing in this note looked like a place to search for."
             return []
@@ -3040,7 +3053,7 @@ final class AppModel: ObservableObject {
         var seen = Set<String>()
         var people = Set<String>()
         func add(_ raw: String) {
-            let t = raw.trimmingCharacters(in: CharacterSet(charactersIn: " .,;:!?'\"()")).trimmingCharacters(in: .whitespaces)
+            let t = raw.trimmingCharacters(in: CharacterSet(charactersIn: " .,;:!?'\u{2019}\"()")).trimmingCharacters(in: .whitespaces)
             guard t.count >= 3, t.contains(where: { $0.isLetter }), !people.contains(t.lowercased()) else { return }
             if seen.insert(t.lowercased()).inserted { names.append(t) }
         }
@@ -3058,7 +3071,16 @@ final class AppModel: ObservableObject {
         }
         for (name, tag) in tagged where tag == .placeName || tag == .organizationName { add(name) }
         // Runs of Capitalized Words — the wide net MapKit then filters.
-        if let re = try? NSRegularExpression(pattern: "[A-Z][\\p{L}'&.\\-]*(?:\\s+[A-Z][\\p{L}'&.\\-]*){0,4}") {
+        // The apostrophe class must include the CURLY one: iOS substitutes \u{2019} as you
+        // type, so "Please Don\u{2019}t Tell" was breaking into "Please Don" and "Tell" — and
+        // "Tell" then resolved to Tell City, Indiana.
+        //
+        // No "." in the class, so a run can't cross a sentence: "…with Sam. Drinks after…"
+        // was one candidate, "Sam. Drinks", which came back as a bowling alley. It costs the
+        // leading initial of a name like "St. Mark's Basilica" — "Mark's Basilica" still
+        // finds it, and a cross-sentence run finds something that was never there.
+        let word = "[\\p{L}'\u{2019}\u{02BC}&\\-]*"
+        if let re = try? NSRegularExpression(pattern: "[A-Z]\(word)(?:\\s+[A-Z]\(word)){0,4}") {
             let ns = text as NSString
             for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
                 let run = ns.substring(with: m.range)

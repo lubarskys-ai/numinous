@@ -446,7 +446,10 @@ struct ComposeView: View {
     private func findPlaces() {
         locatingPlaces = true
         Task {
-            let places = await model.findLocations(in: text, forNote: existingNoteID)
+            // alsoScanText: the note's links are whatever was last saved, so a place you
+            // just typed would otherwise stay invisible until you save — which closes the
+            // editor, which is the round trip this button exists to avoid.
+            let places = await model.findLocations(in: text, forNote: existingNoteID, alsoScanText: true)
             locatingPlaces = false
             let title = places.isEmpty
                 ? (model.lastFindSummary ?? "Nothing in this note looked like a place to search for.")
