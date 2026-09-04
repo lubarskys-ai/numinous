@@ -82,17 +82,16 @@ enum AxisArt {
 
     /// The full-fidelity picture for an option, in that axis's colour.
     ///
-    /// A composition, not an icon on a swatch: two off-hue glows, grain, and a subject drawn
-    /// larger than the frame so the circle CROPS it. That crop is the difference — an icon is
-    /// centred with air around it, a picture runs off the edge. Everything is seeded from the
-    /// option id, so each choice is its own image and stays that image.
+    /// NO CONTAINER. The form is drawn on transparency and floats on its own — a shape in a
+    /// filled circle is an app icon by construction, however the inside is composed, and no
+    /// amount of work on the inside changes that.
     ///
-    /// It is still placeholder art. Generated compositions have a ceiling, and the real
-    /// version of this idea wants illustration or photography; what this can settle is the
-    /// mechanic and the composition, not the final look.
+    /// The form is a gradient masked by the shape, plus grain, so it has depth without a
+    /// badge around it. Because it sits on transparency, pixellation eats the silhouette too:
+    /// a young axis is a scatter of loose blocks that gathers into a recognisable thing.
     ///
-    /// Drawn as a CIRCLE on transparency — the silhouette then pixellates along with the
-    /// contents, so a young axis is a blocky smudge rather than a crisp disc full of blocks.
+    /// Still placeholder art. A symbol is a symbol; the real version wants illustration, and
+    /// what this can settle is the mechanic, not the final look.
     static func source(_ option: Option, tint: UIColor) -> UIImage {
         let cacheKey = "\(option.id)|\(tint.hashValue)"
         if let hit = sourceCache[cacheKey] { return hit }
@@ -112,62 +111,43 @@ enum AxisArt {
         }
 
         let size = CGSize(width: side, height: side)
+        let config = UIImage.SymbolConfiguration(pointSize: side * 0.95, weight: .regular)
+        let glyph = (UIImage(systemName: option.symbol, withConfiguration: config)
+                     ?? UIImage(systemName: "circle.fill", withConfiguration: config))?
+            .withTintColor(.white, renderingMode: .alwaysOriginal)
+
         let image = UIGraphicsImageRenderer(size: size).image { ctx in
             let c = ctx.cgContext
-            c.addEllipse(in: CGRect(origin: .zero, size: size))
-            c.clip()
-
-            // Ground: a deep-to-light wash at a per-option angle.
-            let angle = rnd() * .pi * 2
-            let start = CGPoint(x: side / 2 - cos(angle) * side, y: side / 2 - sin(angle) * side)
-            let end = CGPoint(x: side / 2 + cos(angle) * side, y: side / 2 + sin(angle) * side)
+            // Paint the colour across the whole square…
             if let g = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                                  colors: [shade(0, -0.10, 0.20).cgColor, shade(0.02, 0.10, -0.30).cgColor] as CFArray,
+                                  colors: [shade(0.04, -0.16, 0.26).cgColor,
+                                           shade(-0.02, 0.14, -0.16).cgColor] as CFArray,
                                   locations: [0, 1]) {
-                c.drawLinearGradient(g, start: start, end: end,
+                let angle = rnd() * .pi * 2
+                c.drawLinearGradient(g,
+                                     start: CGPoint(x: side/2 - cos(angle)*side/2, y: side/2 - sin(angle)*side/2),
+                                     end: CGPoint(x: side/2 + cos(angle)*side/2, y: side/2 + sin(angle)*side/2),
                                      options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
             }
-
-            // Two soft glows pulled slightly off the axis hue — what keeps it from reading flat.
-            for i in 0..<2 {
-                let gx = side * (0.18 + rnd() * 0.64), gy = side * (0.16 + rnd() * 0.62)
-                let radius = side * (0.34 + rnd() * 0.30)
-                let hueShift: CGFloat = i == 0 ? 0.055 : -0.06
-                let glow = shade(hueShift, -0.18, 0.28, 0.55)
-                if let g = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                                      colors: [glow.cgColor, glow.withAlphaComponent(0).cgColor] as CFArray,
-                                      locations: [0, 1]) {
-                    c.drawRadialGradient(g, startCenter: CGPoint(x: gx, y: gy), startRadius: 0,
-                                         endCenter: CGPoint(x: gx, y: gy), endRadius: radius, options: [])
-                }
-            }
-
-            // The subject, drawn BIGGER THAN THE FRAME and off-centre, so the circle crops it.
-            // This is the whole difference between an icon and a picture: an icon sits
-            // centred inside its badge with air around it; a photograph runs off the edge.
-            let config = UIImage.SymbolConfiguration(pointSize: side * (1.02 + rnd() * 0.30), weight: .light)
-            let glyph = UIImage(systemName: option.symbol, withConfiguration: config)
-                ?? UIImage(systemName: "circle.fill", withConfiguration: config)
-            if let glyph {
-                let tinted = glyph.withTintColor(.white.withAlphaComponent(0.55), renderingMode: .alwaysOriginal)
-                let cx = side * (0.30 + rnd() * 0.42), cy = side * (0.30 + rnd() * 0.42)
-                tinted.draw(in: CGRect(x: cx - tinted.size.width / 2, y: cy - tinted.size.height / 2,
-                                       width: tinted.size.width, height: tinted.size.height))
-            }
-
-            // Grain. A perfectly smooth gradient is the other tell of generated art, and it
-            // also gives the pixellation something to bite on early in the arc.
-            for _ in 0..<420 {
-                let x = rnd() * side, y = rnd() * side
+            // …grain, so it is not a flawless digital gradient and the blocks have something
+            // to bite on early in the arc…
+            for _ in 0..<500 {
                 let v = rnd()
-                c.setFillColor(UIColor(white: v > 0.5 ? 1 : 0, alpha: 0.05 + rnd() * 0.05).cgColor)
-                c.fill(CGRect(x: x, y: y, width: 2.5, height: 2.5))
+                c.setFillColor(UIColor(white: v > 0.5 ? 1 : 0, alpha: 0.06).cgColor)
+                c.fill(CGRect(x: rnd() * side, y: rnd() * side, width: 3, height: 3))
             }
-
-            // A breath of shadow at the rim so the disc has some body.
-            c.setStrokeColor(UIColor.black.withAlphaComponent(0.16).cgColor)
-            c.setLineWidth(side * 0.08)
-            c.strokeEllipse(in: CGRect(origin: .zero, size: size).insetBy(dx: -side * 0.02, dy: -side * 0.02))
+            // …then keep only what falls inside the form. The mask has to cover the WHOLE
+            // canvas: destinationIn only clears the rect it is drawn into, so masking with the
+            // glyph's own (smaller) rect left the gradient standing either side of it as two
+            // bars. Centre the glyph on a full-size transparent layer and mask with that.
+            if let glyph {
+                let mask = UIGraphicsImageRenderer(size: size).image { _ in
+                    glyph.draw(in: CGRect(x: (side - glyph.size.width) / 2,
+                                          y: (side - glyph.size.height) / 2,
+                                          width: glyph.size.width, height: glyph.size.height))
+                }
+                mask.draw(in: CGRect(origin: .zero, size: size), blendMode: .destinationIn, alpha: 1)
+            }
         }
         sourceCache[cacheKey] = image
         return image

@@ -15,9 +15,12 @@ import NuminousCore
 struct AxesView: View {
     @EnvironmentObject var model: AppModel
 
-    // Design space the discs are laid out in, scaled to fit — as in ConstellationView.
+    // The field is a canvas of EXACTLY this size, scaled to fit whatever it is given.
+    // `.position` inside an unsized ZStack resolves against a space that is not the
+    // GeometryReader's, which is why two rounds of tuning kept leaving half the field below
+    // the fold. With an explicit frame the coordinates mean what they say.
     private let dw: CGFloat = 340
-    private let dh: CGFloat = 640
+    private let dh: CGFloat = 560
 
     // Canvas pan + pinch.
     @State private var scale: CGFloat = 1
@@ -40,9 +43,9 @@ struct AxesView: View {
     var body: some View {
         NavigationStack {
             GeometryReader { geo in
-                let s = min(geo.size.width / dw, geo.size.height / dh)
-                let ox = (geo.size.width - dw * s) / 2
-                let oy = (geo.size.height - dh * s) / 2
+                // Once per render, not once per disc per frame.
+                let mats = preview == nil ? model.axisMaturities() : [:]
+                let fit = min(geo.size.width / dw, geo.size.height / dh)
 
                 ZStack {
                     // The canvas itself takes the pan; discs take their own drags, so pushing
@@ -58,12 +61,26 @@ struct AxesView: View {
                                 }
                         )
 
-                    ForEach(Array(model.axes.enumerated()), id: \.element.id) { index, axis in
-                        disc(axis, index: index, maturity: maturity(axis))
-                            .position(place(index, axis: axis, scale: s, ox: ox, oy: oy))
+                    // ONE timeline for the whole field, not one per disc: seven independent
+                    // animation clocks were seven separate invalidation storms.
+                    TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { timeline in
+                        let t = timeline.date.timeIntervalSinceReferenceDate
+                        // The ZStack is load-bearing. A bare ForEach as TimelineView's content
+                        // is not stacked — the forms accumulate down the screen instead of
+                        // sitting where .position puts them, which is why the field kept
+                        // running off the bottom no matter how the coordinates were tuned.
+                        ZStack {
+                            ForEach(Array(model.axes.enumerated()), id: \.element.id) { index, axis in
+                                let m = preview ?? (mats[axis.id] ?? 0)
+                                form(axis, maturity: m)
+                                    .position(place(index, axis: axis, t: t))
+                            }
+                        }
                     }
                 }
-                .scaleEffect(zoom, anchor: .center)
+                .frame(width: dw, height: dh)
+                .scaleEffect(fit * zoom, anchor: .center)
+                .frame(width: geo.size.width, height: geo.size.height)
                 .offset(x: offset.width + drag.width, y: offset.height + drag.height)
                 .simultaneousGesture(
                     MagnificationGesture()
@@ -91,6 +108,7 @@ struct AxesView: View {
         }
     }
 
+    /// Only for the picker sheet — the field itself reads the whole set once per render.
     private func maturity(_ axis: Axis) -> Double {
         preview ?? (model.axisMaturities()[axis.id] ?? 0)
     }
@@ -111,54 +129,53 @@ struct AxesView: View {
 
     // MARK: - Placement and drift
 
-    /// Hand-placed scatter, not a grid — the point of the screen is that these are seven
-    /// separate things, and a grid says "rows of the same thing".
+    /// Hand-placed scatter in unit coordinates, not a grid — the point of the screen is that
+    /// these are seven separate things, and a grid says "rows of the same thing". Kept clear
+    /// of the very top and bottom so a form's label never lands under the tab bar.
     private static let anchors: [CGPoint] = [
-        CGPoint(x: 100, y: 86),
-        CGPoint(x: 246, y: 178),
-        CGPoint(x: 84,  y: 268),
-        CGPoint(x: 244, y: 372),
-        CGPoint(x: 96,  y: 452),
-        CGPoint(x: 248, y: 556),
-        CGPoint(x: 106, y: 626),
+        CGPoint(x: 96,  y: 62),
+        CGPoint(x: 248, y: 140),
+        CGPoint(x: 82,  y: 220),
+        CGPoint(x: 250, y: 300),
+        CGPoint(x: 92,  y: 378),
+        CGPoint(x: 250, y: 444),
+        CGPoint(x: 108, y: 496),
     ]
 
-    private func place(_ index: Int, axis: Axis, scale s: CGFloat, ox: CGFloat, oy: CGFloat) -> CGPoint {
+    private func place(_ index: Int, axis: Axis, t: TimeInterval) -> CGPoint {
         let base = Self.anchors[index % Self.anchors.count]
         let nudge = nudges[axis.id] ?? .zero
         let live = dragging?.id == axis.id ? (dragging?.translation ?? .zero) : .zero
-        return CGPoint(x: ox + (base.x + nudge.width + live.width) * s,
-                       y: oy + (base.y + nudge.height + live.height) * s)
+        // A slow breath, not a jitter: ~5pt over the better part of half a minute, each on
+        // its own period so the field never pulses in unison.
+        let phase = Double(index) * 1.9
+        let dx = CGFloat(sin(t / 19.0 + phase) * 5)
+        let dy = CGFloat(cos(t / 26.0 + phase * 1.4) * 6)
+        // Snapped to whole points. Pixel blocks moved across fractions of a point resample
+        // every frame, and that shimmer is what read as shaky.
+        return CGPoint(x: (base.x + nudge.width + live.width + dx).rounded(),
+                       y: (base.y + nudge.height + live.height + dy).rounded())
     }
 
     /// Size carries growth too, quietly: a part you have barely touched is a small far-off
     /// thing, a grown one is close and present. Pixellation still does the real work.
-    private func diameter(_ m: Double) -> CGFloat { 78 + 36 * CGFloat(min(1, max(0, m))) }
+    private func diameter(_ m: Double) -> CGFloat { 88 + 38 * CGFloat(min(1, max(0, m))) }
 
-    private func disc(_ axis: Axis, index: Int, maturity m: Double) -> some View {
+    private func form(_ axis: Axis, maturity m: Double) -> some View {
         let option = AxisArt.chosen(for: axis.id)
         let d = diameter(m)
-        // Each drifts on its own slow, out-of-phase loop, so the screen is never quite still
-        // and never in lockstep.
-        return TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
-            let t = timeline.date.timeIntervalSinceReferenceDate
-            let phase = Double(index) * 1.7
-            let dx = CGFloat(sin(t / 5.5 + phase) * 7)
-            let dy = CGFloat(cos(t / 7.3 + phase * 1.3) * 9)
-            VStack(spacing: 7) {
-                Image(uiImage: AxisArt.rendered(option, tint: UIColor(axis.color), maturity: m))
-                    .resizable()
-                    .interpolation(.none)          // never let SwiftUI smooth the blocks away
-                    .frame(width: d, height: d)
-                    .shadow(color: axis.color.opacity(0.35), radius: 14, y: 6)
-                VStack(spacing: 1) {
-                    Text(axis.name).font(.footnote.weight(.semibold))
-                    Text(readout(m)).font(.caption2).foregroundStyle(.secondary)
-                }
-                .fixedSize()
-                .frame(height: 30)
+        return VStack(spacing: 6) {
+            Image(uiImage: AxisArt.rendered(option, tint: UIColor(axis.color), maturity: m))
+                .resizable()
+                .interpolation(.none)          // never let SwiftUI smooth the blocks away
+                .frame(width: d, height: d)
+                .shadow(color: axis.color.opacity(0.28), radius: 10, y: 5)
+            VStack(spacing: 1) {
+                Text(axis.name).font(.footnote.weight(.semibold))
+                Text(readout(m)).font(.caption2).foregroundStyle(.secondary)
             }
-            .offset(x: dx, y: dy)
+            .fixedSize()
+            .frame(height: 30)
         }
         .contentShape(Rectangle())
         .onTapGesture { picking = axis }
@@ -227,8 +244,10 @@ private struct AxisImagePicker: View {
                                     .resizable()
                                     .interpolation(.none)
                                     .aspectRatio(1, contentMode: .fit)
-                                    .overlay {
-                                        Circle().strokeBorder(chosen == option.id ? Color.accentColor : .clear, lineWidth: 3)
+                                    .padding(10)
+                                    .background {
+                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                            .fill(chosen == option.id ? Color.accentColor.opacity(0.14) : .clear)
                                     }
                                 Text(option.label).font(.caption).foregroundStyle(.secondary)
                             }
