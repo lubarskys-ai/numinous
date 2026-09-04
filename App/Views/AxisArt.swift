@@ -109,23 +109,147 @@ enum AxisArt {
 
     // MARK: - Real artwork
 
-    /// A bought or drawn image for this option, if one is bundled. Falls back to the
-    /// generated placeholder, so the seven can be replaced one at a time rather than all at
-    /// once — which is how they will actually arrive.
+    /// Where a picture the user imported for this axis lives. Their own choice sits in
+    /// Documents, not the bundle, so it survives an app update and can be removed again.
+    private static func customURL(_ name: String) -> URL? {
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        else { return nil }
+        return docs.appendingPathComponent("AxisArt", isDirectory: true)
+            .appendingPathComponent("\(name).png")
+    }
+
+    /// Loaded images, including the misses — without this, seven rows in Setup hit the disk
+    /// on every render looking for files that mostly aren't there.
+    private static var artCache: [String: UIImage?] = [:]
+
+    static func clearArtCache() { artCache.removeAll() }
+
+    /// The picture to draw: the user's own import first, then bundled artwork, then nil —
+    /// and per OPTION before per AXIS at each step, so a single imported file dresses an axis
+    /// whichever of its four pictures is selected.
     static func artwork(_ option: Option, axisID: String) -> UIImage? {
-        // Per OPTION first, then per AXIS. The per-axis name means seven files dress the whole
-        // app — you don't have to draw all twenty-eight to stop looking at placeholders.
-        for name in [option.id, axisID] {
+        let key = "\(option.id)|\(axisID)"
+        if let hit = artCache[key] { return hit }
+        var found: UIImage?
+        outer: for name in [option.id, axisID] {
+            if let url = customURL(name), FileManager.default.fileExists(atPath: url.path),
+               let image = UIImage(contentsOfFile: url.path) {
+                found = image; break outer
+            }
             if let url = Bundle.main.url(forResource: name, withExtension: "png", subdirectory: "AxisArt")
                 ?? Bundle.main.url(forResource: name, withExtension: "png"),
                let image = UIImage(contentsOfFile: url.path) {
-                return image
+                found = image; break outer
             }
         }
-        return nil
+        artCache[key] = found
+        return found
     }
 
-    // MARK: - Rendering
+    /// Artwork filed under THIS OPTION only — no axis fallback.
+    ///
+    /// The fallback is what lets one imported file dress a whole axis, which is right on the
+    /// axis page. It is wrong in the chooser: with it, all four of Mind's options rendered
+    /// the same imported brain and there was nothing to choose between.
+    static func optionArtwork(_ option: Option) -> UIImage? {
+        let key = "option-only|\(option.id)"
+        if let hit = artCache[key] { return hit }
+        var found: UIImage?
+        if let url = customURL(option.id), FileManager.default.fileExists(atPath: url.path) {
+            found = UIImage(contentsOfFile: url.path)
+        }
+        if found == nil,
+           let url = Bundle.main.url(forResource: option.id, withExtension: "png", subdirectory: "AxisArt")
+            ?? Bundle.main.url(forResource: option.id, withExtension: "png") {
+            found = UIImage(contentsOfFile: url.path)
+        }
+        artCache[key] = found
+        return found
+    }
+
+    static func hasCustomArtwork(axisID: String) -> Bool {
+        guard let url = customURL(axisID) else { return false }
+        return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    // MARK: - Importing
+
+    enum ImportError: LocalizedError {
+        case unreadable, tooSmall, couldNotSave
+        var errorDescription: String? {
+            switch self {
+            case .unreadable:    return "That file isn't an image Numinous can read."
+            case .tooSmall:      return "That image is too small — 256 pixels or more works best."
+            case .couldNotSave:  return "Couldn't save that picture."
+            }
+        }
+    }
+
+    /// Take a picture the user chose and make it usable here: keyed, square, and capped.
+    ///
+    /// The keying matters. These float with no container behind them, so a JPEG — which has
+    /// no alpha — arrives as a white box. Only NEAR-NEUTRAL pixels are cleared: keying on
+    /// lightness alone eats the artwork's own pale tints along with the background. An image
+    /// that already has transparency is left alone, because real alpha always beats a guess.
+    @discardableResult
+    static func importArtwork(_ image: UIImage, forAxis axisID: String) throws -> UIImage {
+        guard let prepared = prepare(image) else { throw ImportError.unreadable }
+        guard let url = customURL(axisID), let data = prepared.pngData() else {
+            throw ImportError.couldNotSave
+        }
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            throw ImportError.couldNotSave
+        }
+        clearArtCache()
+        return prepared
+    }
+
+    static func removeArtwork(forAxis axisID: String) {
+        if let url = customURL(axisID) { try? FileManager.default.removeItem(at: url) }
+        clearArtCache()
+    }
+
+    private static let importSide = 512
+
+    private static func prepare(_ image: UIImage) -> UIImage? {
+        guard let cg = image.cgImage else { return nil }
+        let n = importSide
+        var pixels = [UInt8](repeating: 0, count: n * n * 4)
+        guard let ctx = CGContext(data: &pixels, width: n, height: n, bitsPerComponent: 8,
+                                  bytesPerRow: n * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        ctx.interpolationQuality = .high
+        // Fit, don't fill: cropping someone's icon to a square would cut the subject.
+        let scale = min(CGFloat(n) / CGFloat(cg.width), CGFloat(n) / CGFloat(cg.height))
+        let w = CGFloat(cg.width) * scale, h = CGFloat(cg.height) * scale
+        ctx.draw(cg, in: CGRect(x: (CGFloat(n) - w) / 2, y: (CGFloat(n) - h) / 2, width: w, height: h))
+
+        // Was there any real transparency to begin with? If so, trust it.
+        var hadAlpha = false
+        for i in stride(from: 3, to: pixels.count, by: 4) where pixels[i] < 250 { hadAlpha = true; break }
+
+        if !hadAlpha {
+            for i in stride(from: 0, to: pixels.count, by: 4) {
+                let r = Int(pixels[i]), g = Int(pixels[i + 1]), b = Int(pixels[i + 2])
+                let hi = max(r, max(g, b)), lo = min(r, min(g, b))
+                guard hi - lo < 9, hi > 237 else { continue }      // near-neutral AND near-white
+                let a = max(0, min(255, Int((254.0 - Double(hi)) / 13.0 * 255.0)))
+                pixels[i] = UInt8(Double(r) * Double(a) / 255.0)   // premultiplied
+                pixels[i + 1] = UInt8(Double(g) * Double(a) / 255.0)
+                pixels[i + 2] = UInt8(Double(b) * Double(a) / 255.0)
+                pixels[i + 3] = UInt8(a)
+            }
+        }
+        guard let out = ctx.makeImage() else { return nil }
+        return UIImage(cgImage: out)
+    }
+
+    // MARK: - Rendering    // MARK: - Rendering
 
     private static let side: CGFloat = 240
     private static var sourceCache: [String: UIImage] = [:]

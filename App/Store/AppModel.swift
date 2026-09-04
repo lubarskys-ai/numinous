@@ -122,6 +122,11 @@ final class AppModel: ObservableObject {
         return min(1, Double(n) / Self.maturityFullPerAxis)
     }
 
+    /// Nudge every view that memoises against `revision`. Used when something outside the
+    /// note graph changes what the app draws — importing your own picture for an axis, for
+    /// instance, which no note knows about but every axis row is showing.
+    func bumpRevision() { revision &+= 1 }
+
     /// Axes that are actually parts of a LIFE.
     ///
     /// `concierge` is bookkeeping. It exists so imported contact tiers render as their own

@@ -1,5 +1,7 @@
 import SwiftUI
 import UIKit
+import PhotosUI
+import UniformTypeIdentifiers
 import NuminousCore
 
 /// One part of a life, on its own page, reached from its own name in Setup.
@@ -210,48 +212,156 @@ private struct AxisPicturePicker: View {
     let axis: Axis
 
     @State private var chosen: String = ""
+    @State private var showFiles = false
+    @State private var photo: PhotosPickerItem?
+    @State private var importError: String?
+    /// Bumped after an import so the grid and the row above it redraw from the new file.
+    @State private var version = 0
+
     private let columns = [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)]
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVGrid(columns: columns, spacing: 18) {
-                    ForEach(AxisArt.options(for: axis.id)) { option in
-                        Button {
-                            AxisArt.choose(option, for: axis.id)
-                            chosen = option.id
-                        } label: {
-                            VStack(spacing: 9) {
-                                Image(uiImage: AxisArt.artwork(option, axisID: axis.id)
-                                        ?? AxisArt.source(option, tint: UIColor(axis.color)))
-                                    .resizable()
-                                    .interpolation(.medium)
-                                    .aspectRatio(1, contentMode: .fit)
-                                    .padding(12)
-                                    .background {
-                                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                            .fill(chosen == option.id ? axis.color.opacity(0.16) : .clear)
-                                    }
-                                Text(option.label).font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
+                VStack(alignment: .leading, spacing: 26) {
+                    own
+                    builtIn
                 }
                 .padding(20)
-                Text("Shown whole. Yours comes into focus as this part of your life grows.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                    .padding(.horizontal, 20)
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("\(axis.name) picture")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .onAppear { chosen = AxisArt.chosen(for: axis.id).id }
+            .fileImporter(isPresented: $showFiles, allowedContentTypes: [.image]) { result in
+                switch result {
+                case .success(let url): importFile(url)
+                case .failure(let error): importError = error.localizedDescription
+                }
+            }
+            .onChange(of: photo) { item in
+                guard let item else { return }
+                Task {
+                    guard let data = try? await item.loadTransferable(type: Data.self),
+                          let image = UIImage(data: data) else {
+                        importError = AxisArt.ImportError.unreadable.errorDescription; return
+                    }
+                    apply(image)
+                }
+            }
+            .alert("Couldn't use that image", isPresented: Binding(
+                get: { importError != nil }, set: { if !$0 { importError = nil } }
+            )) {
+                Button("OK", role: .cancel) { importError = nil }
+            } message: { Text(importError ?? "") }
+        }
+    }
+
+    // MARK: - Your own
+
+    private var own: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("YOUR OWN")
+                .font(.caption2.weight(.semibold)).kerning(0.8).foregroundStyle(.secondary)
+            VStack(spacing: 0) {
+                Button { showFiles = true } label: {
+                    row("Choose a file", "folder")
+                }
+                Divider().padding(.leading, 46)
+                PhotosPicker(selection: $photo, matching: .images) {
+                    row("Choose a photo", "photo.on.rectangle")
+                }
+                if AxisArt.hasCustomArtwork(axisID: axis.id) {
+                    Divider().padding(.leading, 46)
+                    Button {
+                        AxisArt.removeArtwork(forAxis: axis.id)
+                        version += 1
+                    } label: {
+                        row("Use the built-in picture", "arrow.uturn.backward", tint: .secondary)
+                    }
+                }
+            }
+            .background(Color(.secondarySystemGroupedBackground),
+                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            Text("A PNG with a transparent background looks best — these float with nothing behind them. A plain white background is removed for you.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .id(version)
+    }
+
+    private func row(_ title: String, _ symbol: String, tint: Color = .accentColor) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol).frame(width: 22).foregroundStyle(tint)
+            Text(title).foregroundStyle(tint == .secondary ? Color.secondary : Color.primary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 13)
+        .contentShape(Rectangle())
+    }
+
+    // MARK: - Built in
+
+    private var builtIn: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("BUILT IN")
+                .font(.caption2.weight(.semibold)).kerning(0.8).foregroundStyle(.secondary)
+            LazyVGrid(columns: columns, spacing: 18) {
+                ForEach(AxisArt.options(for: axis.id)) { option in
+                    Button {
+                        AxisArt.choose(option, for: axis.id)
+                        chosen = option.id
+                    } label: {
+                        VStack(spacing: 9) {
+                            // Whole, not at current growth: early on every option is the same
+                            // smudge, and you cannot choose between pictures you can't see.
+                            Image(uiImage: AxisArt.optionArtwork(option)
+                                    ?? AxisArt.source(option, tint: UIColor(axis.color)))
+                                .resizable()
+                                .interpolation(.medium)
+                                .aspectRatio(1, contentMode: .fit)
+                                .padding(12)
+                                .background {
+                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                        .fill(chosen == option.id ? axis.color.opacity(0.16) : .clear)
+                                }
+                            Text(option.label).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .id(version)
+            if AxisArt.hasCustomArtwork(axisID: axis.id) {
+                Text("Your own picture is in use, so these are set aside until you go back to them.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: - Doing the import
+
+    private func importFile(_ url: URL) {
+        // A file picked from Files arrives security-scoped; without this the read fails.
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url), let image = UIImage(data: data) else {
+            importError = AxisArt.ImportError.unreadable.errorDescription
+            return
+        }
+        apply(image)
+    }
+
+    private func apply(_ image: UIImage) {
+        do {
+            try AxisArt.importArtwork(image, forAxis: axis.id)
+            version += 1
+            model.bumpRevision()
+        } catch {
+            importError = error.localizedDescription
         }
     }
 }
-
 
 /// How each part of a life moves. A still symbol is a still symbol, but a heart that beats is
 /// a heart — this is where the character lives.
