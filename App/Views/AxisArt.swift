@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ImageIO
 import NuminousCore
 
 /// The picture that stands for one axis, and the pixellation that resolves it as that
@@ -210,14 +211,123 @@ enum AxisArt {
 
     static func removeArtwork(forAxis axisID: String) {
         if let url = customURL(axisID) { try? FileManager.default.removeItem(at: url) }
+        if let dir = framesDir(axisID) { try? FileManager.default.removeItem(at: dir) }
+        animationCache.removeValue(forKey: axisID)
         clearArtCache()
     }
 
-    private static let importSide = 512
+    // MARK: - Animated artwork
 
-    private static func prepare(_ image: UIImage) -> UIImage? {
+    /// A picture that moves: prepared frames and how long the loop runs.
+    struct Animation {
+        let frames: [UIImage]
+        let duration: Double
+    }
+
+    private static func framesDir(_ axisID: String) -> URL? {
+        customURL(axisID)?.deletingLastPathComponent()
+            .appendingPathComponent("\(axisID).frames", isDirectory: true)
+    }
+
+    private static var animationCache: [String: Animation?] = [:]
+
+    /// The imported animation for an axis, if there is one. Decoded once and held — the
+    /// frames are read off disk, and doing that per render would be absurd.
+    static func animation(forAxis axisID: String) -> Animation? {
+        if let hit = animationCache[axisID] { return hit }
+        var found: Animation?
+        if let dir = framesDir(axisID),
+           let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) {
+            let pngs = names.filter { $0.hasSuffix(".png") }.sorted()
+            let frames = pngs.compactMap { UIImage(contentsOfFile: dir.appendingPathComponent($0).path) }
+            let seconds = (try? String(contentsOf: dir.appendingPathComponent("duration.txt"), encoding: .utf8))
+                .flatMap { Double($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 2.0
+            if frames.count > 1 { found = Animation(frames: frames, duration: max(0.2, seconds)) }
+        }
+        animationCache[axisID] = found
+        return found
+    }
+
+    /// Which frame is showing at this moment. Nil when the axis has no animation, so callers
+    /// fall through to the still picture without branching twice.
+    static func frame(forAxis axisID: String, at t: TimeInterval) -> UIImage? {
+        guard let anim = animation(forAxis: axisID) else { return nil }
+        let phase = t.truncatingRemainder(dividingBy: anim.duration) / anim.duration
+        let index = min(anim.frames.count - 1, max(0, Int(phase * Double(anim.frames.count))))
+        return anim.frames[index]
+    }
+
+    static func hasAnimation(forAxis axisID: String) -> Bool { animation(forAxis: axisID) != nil }
+
+    /// Import an animated GIF or APNG. Returns false when the file turns out to hold a single
+    /// frame, so the caller can fall back to importing it as a still rather than reporting a
+    /// failure for something that is simply a picture.
+    @discardableResult
+    static func importAnimation(data: Data, forAxis axisID: String) throws -> Bool {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            throw ImportError.unreadable
+        }
+        let count = CGImageSourceGetCount(source)
+        guard count > 1 else { return false }
+
+        // Total loop length, from whichever delay key the format uses.
+        var total = 0.0
+        for i in 0..<count { total += frameDelay(source, i) }
+        if total <= 0.05 { total = Double(count) / 25.0 }
+
+        // Even sample down to a manageable number of frames.
+        let wanted = min(count, maxFrames)
+        let indices = (0..<wanted).map { Int(Double($0) * Double(count) / Double(wanted)) }
+
+        guard let dir = framesDir(axisID) else { throw ImportError.couldNotSave }
+        try? FileManager.default.removeItem(at: dir)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            for (n, i) in indices.enumerated() {
+                guard let cg = CGImageSourceCreateImageAtIndex(source, i, nil),
+                      let prepared = prepare(UIImage(cgImage: cg), side: animationSide),
+                      let png = prepared.pngData() else { continue }
+                let name = String(format: "%03d.png", n)
+                try png.write(to: dir.appendingPathComponent(name), options: .atomic)
+            }
+            try String(total).write(to: dir.appendingPathComponent("duration.txt"),
+                                    atomically: true, encoding: .utf8)
+        } catch {
+            throw ImportError.couldNotSave
+        }
+
+        // A still of the first frame too, so anywhere that doesn't animate still has a picture.
+        if let cg = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+            try? importArtwork(UIImage(cgImage: cg), forAxis: axisID)
+        }
+        animationCache.removeValue(forKey: axisID)
+        clearArtCache()
+        return true
+    }
+
+    private static func frameDelay(_ source: CGImageSource, _ index: Int) -> Double {
+        guard let props = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any]
+        else { return 0 }
+        for key in [kCGImagePropertyGIFDictionary, kCGImagePropertyPNGDictionary] {
+            guard let d = props[key] as? [CFString: Any] else { continue }
+            for delayKey in [kCGImagePropertyGIFUnclampedDelayTime, kCGImagePropertyGIFDelayTime,
+                             kCGImagePropertyAPNGUnclampedDelayTime, kCGImagePropertyAPNGDelayTime] {
+                if let v = d[delayKey] as? Double, v > 0 { return v }
+            }
+        }
+        return 0
+    }
+
+    private static let importSide = 512
+    /// Animation frames are held in memory all at once, so they are smaller than a still.
+    private static let animationSide = 256
+    /// Enough to read as motion, few enough to keep the memory sane: 30 frames at 256 square
+    /// is about 8MB, where a 3.5s Lordicon GIF at 40fps would have been 140 frames of 512.
+    private static let maxFrames = 30
+
+    private static func prepare(_ image: UIImage, side: Int = importSide) -> UIImage? {
         guard let cg = image.cgImage else { return nil }
-        let n = importSide
+        let n = side
         var pixels = [UInt8](repeating: 0, count: n * n * 4)
         guard let ctx = CGContext(data: &pixels, width: n, height: n, bitsPerComponent: 8,
                                   bytesPerRow: n * 4, space: CGColorSpaceCreateDeviceRGB(),

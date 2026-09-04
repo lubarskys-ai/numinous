@@ -58,8 +58,12 @@ struct AxisDetailView: View {
         let m = maturity
         return VStack(spacing: 14) {
             TimelineView(.animation) { timeline in
-                let mv = AxisMotion.values(axis.id, timeline.date.timeIntervalSinceReferenceDate)
-                Image(uiImage: AxisArt.artwork(option, axisID: axis.id)
+                let t = timeline.date.timeIntervalSinceReferenceDate
+                let mv = AxisMotion.values(axis.id, t)
+                // An imported animation plays; otherwise the still picture, moved by the
+                // per-axis motion. Both go through the same resolve shader either way.
+                Image(uiImage: AxisArt.frame(forAxis: axis.id, at: t)
+                        ?? AxisArt.artwork(option, axisID: axis.id)
                         ?? AxisArt.source(option, tint: UIColor(axis.color)))
                     .resizable()
                     .interpolation(.medium)
@@ -234,7 +238,7 @@ private struct AxisPicturePicker: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .onAppear { chosen = AxisArt.chosen(for: axis.id).id }
-            .fileImporter(isPresented: $showFiles, allowedContentTypes: [.image]) { result in
+            .fileImporter(isPresented: $showFiles, allowedContentTypes: [.image, .gif, .png]) { result in
                 switch result {
                 case .success(let url): importFile(url)
                 case .failure(let error): importError = error.localizedDescription
@@ -243,11 +247,10 @@ private struct AxisPicturePicker: View {
             .onChange(of: photo) { item in
                 guard let item else { return }
                 Task {
-                    guard let data = try? await item.loadTransferable(type: Data.self),
-                          let image = UIImage(data: data) else {
+                    guard let data = try? await item.loadTransferable(type: Data.self) else {
                         importError = AxisArt.ImportError.unreadable.errorDescription; return
                     }
-                    apply(image)
+                    apply(data)
                 }
             }
             .alert("Couldn't use that image", isPresented: Binding(
@@ -284,7 +287,7 @@ private struct AxisPicturePicker: View {
             }
             .background(Color(.secondarySystemGroupedBackground),
                         in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            Text("A PNG with a transparent background looks best — these float with nothing behind them. A plain white background is removed for you.")
+            Text("Animated GIF and APNG play; a still PNG works too. A transparent background looks best — these float with nothing behind them — and a plain white one is removed for you.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .id(version)
@@ -345,21 +348,34 @@ private struct AxisPicturePicker: View {
         // A file picked from Files arrives security-scoped; without this the read fails.
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        guard let data = try? Data(contentsOf: url), let image = UIImage(data: data) else {
+        guard let data = try? Data(contentsOf: url) else {
             importError = AxisArt.ImportError.unreadable.errorDescription
             return
         }
-        apply(image)
+        apply(data)
     }
 
-    private func apply(_ image: UIImage) {
+    /// Animated first, still second. A GIF or APNG that turns out to hold one frame reports
+    /// false rather than throwing, so a single-frame file is imported as the picture it is
+    /// instead of failing for not being a movie.
+    private func apply(_ data: Data) {
         do {
+            if try AxisArt.importAnimation(data: data, forAxis: axis.id) {
+                finish(); return
+            }
+            guard let image = UIImage(data: data) else {
+                importError = AxisArt.ImportError.unreadable.errorDescription; return
+            }
             try AxisArt.importArtwork(image, forAxis: axis.id)
-            version += 1
-            model.bumpRevision()
+            finish()
         } catch {
             importError = error.localizedDescription
         }
+    }
+
+    private func finish() {
+        version += 1
+        model.bumpRevision()
     }
 }
 
