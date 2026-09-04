@@ -2864,7 +2864,7 @@ final class AppModel: ObservableObject {
         //      to Rome).
         // With no named region, bias to a destination already pinned on a linked note, else to
         // where you are now (at the normal local radius).
-        let region = await inferredRegion(noteID: noteID, candidates: candidates)
+        var region = await inferredRegion(noteID: noteID, candidates: candidates)
         var near: CLLocationCoordinate2D?
         var radius: CLLocationDistance = 60_000
         // Prefer a coordinate the note is ALREADY anchored to — a pin on the note, or on a
@@ -2877,6 +2877,12 @@ final class AppModel: ObservableObject {
            let saved = searchRegion(forFolder: n.folderName),
            let slat = saved.latitude, let slon = saved.longitude {
             near = CLLocationCoordinate2D(latitude: slat, longitude: slon)
+            // An area you set BY HAND is the region, not merely a coordinate to search around.
+            // It only steered the bias before, so the name never reached the queries — "Sky
+            // Bar" was searched instead of "Sky Bar Rome" — and, when nothing was found, the
+            // failure reported "searched near you" while it had in fact searched near Rome.
+            // Whatever you typed outranks anything inferred from a folder or a title.
+            region = (name: saved.name, center: near!)
         } else if let noteID, let anchor = noteAreaCoordinate(noteID) {
             // An anchor is only as precise as the place it came from: a note pinned to
             // "Canada" resolves to the country's CENTROID, and a 60km circle around that is
