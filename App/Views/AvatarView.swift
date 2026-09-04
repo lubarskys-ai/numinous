@@ -15,7 +15,7 @@ struct AvatarView: View {
     @State private var focusName: String?     // node whose connections are spotlighted
 
     var body: some View {
-        let balance = model.score.axisBalance(over: model.axes)
+        let balance = model.score.axisBalance(over: model.lifeAxes)
         // Cached in the model, rebuilt only when data changes — no per-render/per-zoom scan.
         let (graphNodes, graphLinks) = model.avatarGraph()
         // Resolve the axis→(color/growth/maturity) lookups into plain value dictionaries on
@@ -156,7 +156,7 @@ struct AvatarView: View {
     }
 
     private func dominantColor(_ b: AxisTotals) -> Color {
-        (model.axes.max { (b[$0.id] ?? 0) < (b[$1.id] ?? 0) })?.color ?? .accentColor
+        (model.lifeAxes.max { (b[$0.id] ?? 0) < (b[$1.id] ?? 0) })?.color ?? .accentColor
     }
 
     /// +/- buttons — a zoom that works with a single tap/click (no pinch needed).

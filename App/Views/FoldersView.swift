@@ -838,7 +838,7 @@ struct FolderAxisPicker: View {
         NavigationStack {
             List {
                 Section {
-                    ForEach(model.axes) { axis in
+                    ForEach(model.lifeAxes) { axis in
                         let on = (model.folder(named: path)?.growthAxes ?? []).contains(axis.id)
                         Button { model.toggleFolderAxis(axis.id, forFolder: path) } label: {
                             HStack(spacing: 12) {
@@ -967,7 +967,7 @@ struct AxisSettingsView: View {
                     // One pass for the whole list rather than one per row: axisMaturities()
                     // walks every link, and seven rows would otherwise walk it seven times.
                     let mats = model.axisMaturities()
-                    ForEach(model.axes) { axis in
+                    ForEach(model.lifeAxes) { axis in
                         AxisEditorRow(axis: axis, maturity: mats[axis.id] ?? 0)
                     }
                 } header: {
@@ -1111,7 +1111,7 @@ private struct AxisEditorRow: View {
             // opens that part of your life on its own page — which is the whole difference
             // between this and a field of seven: one small still view, nothing over it.
             NavigationLink { AxisDetailView(axis: axis) } label: {
-                Image(uiImage: AxisArt.artwork(AxisArt.chosen(for: axis.id))
+                Image(uiImage: AxisArt.artwork(AxisArt.chosen(for: axis.id), axisID: axis.id)
                         ?? AxisArt.source(AxisArt.chosen(for: axis.id), tint: UIColor(axis.color)))
                     .resizable()
                     .interpolation(.medium)

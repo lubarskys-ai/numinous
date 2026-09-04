@@ -122,6 +122,17 @@ final class AppModel: ObservableObject {
         return min(1, Double(n) / Self.maturityFullPerAxis)
     }
 
+    /// Axes that are actually parts of a LIFE.
+    ///
+    /// `concierge` is bookkeeping. It exists so imported contact tiers render as their own
+    /// cluster in the connectome — an axis-less note is drawn nowhere — not because anyone
+    /// grows along it. So it stays in `axes` for the graph and stays out of everything that
+    /// presents "parts of you", including the maturity average, which it was quietly
+    /// diluting the moment a contact import created it.
+    static let bookkeepingAxisIDs: Set<String> = ["concierge"]
+
+    var lifeAxes: [Axis] { axes.filter { !Self.bookkeepingAxisIDs.contains($0.id) } }
+
     /// Every axis's maturity in ONE pass over the links. `axisMaturity` scans them all
     /// for a single axis, so asking it seven times — which any per-axis view does on every
     /// render — walks the whole graph seven times.
@@ -166,8 +177,9 @@ final class AppModel: ObservableObject {
     /// Overall maturity — the average across axes, so the avatar as a whole forms
     /// slowly and only once growth is *broad* (drives staging + the companion).
     var maturity: Double {
-        guard !axes.isEmpty else { return 0 }
-        return axes.map { axisMaturity($0.id) }.reduce(0, +) / Double(axes.count)
+        let life = lifeAxes
+        guard !life.isEmpty else { return 0 }
+        return life.map { axisMaturity($0.id) }.reduce(0, +) / Double(life.count)
     }
 
     private let engine = ScoreEngine()

@@ -17,8 +17,8 @@ struct RootView: View {
     @ObservedObject private var quickCapture = QuickCapture.shared
 
     var body: some View {
-        let balance = model.score.axisBalance(over: model.axes)
-        let tint = (model.axes.max { (balance[$0.id] ?? 0) < (balance[$1.id] ?? 0) })?.color ?? .accentColor
+        let balance = model.score.axisBalance(over: model.lifeAxes)
+        let tint = (model.lifeAxes.max { (balance[$0.id] ?? 0) < (balance[$1.id] ?? 0) })?.color ?? .accentColor
 
         // You land on Home — the figure and one thing to do. Health is no longer a tab: it's
         // a line on Home that speaks only when it has something to import. Calendar keeps

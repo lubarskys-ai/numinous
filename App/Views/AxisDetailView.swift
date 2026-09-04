@@ -28,10 +28,10 @@ struct AxisDetailView: View {
         ScrollView {
             VStack(spacing: 0) {
                 hero
+                scrubber
                 standing(lastTouched: contributions.lastTouched)
                 built(contributions.top)
                 advice
-                scrubber
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 40)
@@ -57,7 +57,7 @@ struct AxisDetailView: View {
         return VStack(spacing: 14) {
             TimelineView(.animation) { timeline in
                 let mv = AxisMotion.values(axis.id, timeline.date.timeIntervalSinceReferenceDate)
-                Image(uiImage: AxisArt.artwork(option)
+                Image(uiImage: AxisArt.artwork(option, axisID: axis.id)
                         ?? AxisArt.source(option, tint: UIColor(axis.color)))
                     .resizable()
                     .interpolation(.medium)
@@ -177,16 +177,18 @@ struct AxisDetailView: View {
         .padding(.top, 26)
     }
 
+    /// Directly under the picture, deliberately: at the foot of the page you had to scroll
+    /// the icon out of sight to reach the control that changes it.
     private var scrubber: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Divider().padding(.vertical, 24)
-            Text("PROTOTYPE — PREVIEW GROWTH")
+        HStack(spacing: 10) {
+            Text("PREVIEW")
                 .font(.caption2.weight(.semibold)).kerning(0.6).foregroundStyle(.tertiary)
-            HStack {
-                Slider(value: Binding(get: { preview ?? 0 }, set: { preview = $0 }), in: 0...1)
-                Button("Real") { preview = nil }.font(.caption)
-            }
+            Slider(value: Binding(get: { preview ?? 0 }, set: { preview = $0 }), in: 0...1)
+            Button("Real") { preview = nil }
+                .font(.caption)
+                .disabled(preview == nil)
         }
+        .padding(.top, 18)
     }
 
     private var backdrop: some View {
@@ -220,7 +222,7 @@ private struct AxisPicturePicker: View {
                             chosen = option.id
                         } label: {
                             VStack(spacing: 9) {
-                                Image(uiImage: AxisArt.artwork(option)
+                                Image(uiImage: AxisArt.artwork(option, axisID: axis.id)
                                         ?? AxisArt.source(option, tint: UIColor(axis.color)))
                                     .resizable()
                                     .interpolation(.medium)

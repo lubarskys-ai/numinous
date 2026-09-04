@@ -112,11 +112,17 @@ enum AxisArt {
     /// A bought or drawn image for this option, if one is bundled. Falls back to the
     /// generated placeholder, so the seven can be replaced one at a time rather than all at
     /// once — which is how they will actually arrive.
-    static func artwork(_ option: Option) -> UIImage? {
-        guard let url = Bundle.main.url(forResource: option.id, withExtension: "png",
-                                        subdirectory: "AxisArt")
-                ?? Bundle.main.url(forResource: option.id, withExtension: "png") else { return nil }
-        return UIImage(contentsOfFile: url.path)
+    static func artwork(_ option: Option, axisID: String) -> UIImage? {
+        // Per OPTION first, then per AXIS. The per-axis name means seven files dress the whole
+        // app — you don't have to draw all twenty-eight to stop looking at placeholders.
+        for name in [option.id, axisID] {
+            if let url = Bundle.main.url(forResource: name, withExtension: "png", subdirectory: "AxisArt")
+                ?? Bundle.main.url(forResource: name, withExtension: "png"),
+               let image = UIImage(contentsOfFile: url.path) {
+                return image
+            }
+        }
+        return nil
     }
 
     // MARK: - Rendering

@@ -30,8 +30,8 @@ struct HomeView: View {
     @State private var ignoredUntil: [String: Date] = [:]
 
     var body: some View {
-        let balance = model.score.axisBalance(over: model.axes)
-        let tint = (model.axes.max { (balance[$0.id] ?? 0) < (balance[$1.id] ?? 0) })?.color ?? .accentColor
+        let balance = model.score.axisBalance(over: model.lifeAxes)
+        let tint = (model.lifeAxes.max { (balance[$0.id] ?? 0) < (balance[$1.id] ?? 0) })?.color ?? .accentColor
         let shown = notices          // computed once; it used to be evaluated twice per render
 
         NavigationStack(path: $path) {
@@ -212,9 +212,9 @@ struct HomeView: View {
     /// deeper signal than "quiet": recency says what you skipped, share says what you've never
     /// really fed.
     private var thinnestAxis: Axis? {
-        let balance = model.score.axisBalance(over: model.axes)
+        let balance = model.score.axisBalance(over: model.lifeAxes)
         guard !balance.isEmpty else { return nil }
-        let ranked = model.axes.sorted { (balance[$0.id] ?? 0) < (balance[$1.id] ?? 0) }
+        let ranked = model.lifeAxes.sorted { (balance[$0.id] ?? 0) < (balance[$1.id] ?? 0) }
         let thinnest = Array(ranked.prefix(3))
         let quiet = Set(digest?.quietAxisIDs ?? [])
         return thinnest.first(where: { quiet.contains($0.id) }) ?? thinnest.first
