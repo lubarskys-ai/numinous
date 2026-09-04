@@ -250,12 +250,6 @@ private struct AxesField: View {
             }
         }
         .frame(width: canvas.width, height: canvas.height)
-        // Flatten the field to ONE texture before the zoom touches it. Each form carries a
-        // layerEffect, which is an offscreen pass of its own; scaling seven of those live
-        // meant re-rasterising seven effects on every frame of a pinch. Rasterised once, a
-        // pinch scales a single already-drawn texture — and since the breathing pauses during
-        // a gesture, that texture doesn't change while you are moving it.
-        .drawingGroup()
         .scaleEffect(fit * zoom, anchor: .center)
         .frame(width: viewport.width, height: viewport.height)
         .offset(x: offset.width + drag.width, y: offset.height + drag.height)
@@ -300,12 +294,17 @@ private struct FloatingForm: View {
             .frame(width: size, height: size)
             .resolving(maturity: maturity, side: size,
                        seed: Double(abs(axis.id.hashValue % 997)))
+            // Cache the shader's result as a texture. A layerEffect is an offscreen pass, and
+            // scaling seven live ones was what made the zoom stutter; scaling seven textures
+            // costs nothing. It sits INSIDE the gestures, so it flattens pixels, not touches.
+            .drawingGroup()
             .scaleEffect(x: mv.sx, y: mv.sy)
             .rotationEffect(.degrees(mv.rot))
             .offset(y: mv.dy)
             .contentShape(Rectangle())
-            .position(x: base.x + nudge.width + live.width,
-                      y: base.y + nudge.height + live.height)
+            // Gestures BEFORE .position. A positioned view fills its parent, so a tap handler
+            // added after it has the whole field as its hit area — and with seven stacked,
+            // the last one drawn swallowed every tap, which is why nothing could be selected.
             .onTapGesture { onTap() }
             .gesture(
                 DragGesture(minimumDistance: 6)
@@ -315,6 +314,8 @@ private struct FloatingForm: View {
                         nudge.height += v.translation.height
                     }
             )
+            .position(x: base.x + nudge.width + live.width,
+                      y: base.y + nudge.height + live.height)
     }
 }
 
@@ -339,14 +340,16 @@ private struct AxisImagePicker: View {
                             chosen = option.id
                         } label: {
                             VStack(spacing: 9) {
+                                // Shown WHOLE, not at current growth. Early on every option
+                                // is the same four-block smudge, and you cannot choose between
+                                // pictures you cannot see. You are picking the artwork, not
+                                // the state it happens to be in today.
                                 Image(uiImage: AxisArt.artwork(option)
                                         ?? AxisArt.source(option, tint: UIColor(axis.color)))
                                     .resizable()
                                     .interpolation(.medium)
                                     .aspectRatio(1, contentMode: .fit)
                                     .frame(width: 120, height: 120)
-                                    .resolving(maturity: maturity, side: 120,
-                                               seed: Double(abs(option.id.hashValue % 997)))
                                     .padding(10)
                                     .background {
                                         RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -359,7 +362,7 @@ private struct AxisImagePicker: View {
                     }
                 }
                 .padding(20)
-                Text("Shown as they look right now, at this part's current growth.")
+                Text("Shown whole. Yours comes into focus as this part of your life grows.")
                     .font(.footnote).foregroundStyle(.secondary)
                     .padding(.horizontal, 18)
             }
