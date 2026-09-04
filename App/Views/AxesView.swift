@@ -62,7 +62,7 @@ struct AxesView: View {
             // TEMPORARY build marker. Several rounds of changes have looked identical on the
             // device, and the likeliest cause is Xcode building a project file XcodeGen
             // rewrote underneath it. This says, unambiguously, which build is running.
-            .navigationTitle("You · build 9")
+            .navigationTitle("You · build 10")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import NuminousCore
 import UniformTypeIdentifiers
 
@@ -963,11 +964,16 @@ struct AxisSettingsView: View {
                 }
 
                 Section {
-                    ForEach(model.axes) { axis in AxisEditorRow(axis: axis) }
+                    // One pass for the whole list rather than one per row: axisMaturities()
+                    // walks every link, and seven rows would otherwise walk it seven times.
+                    let mats = model.axisMaturities()
+                    ForEach(model.axes) { axis in
+                        AxisEditorRow(axis: axis, maturity: mats[axis.id] ?? 0)
+                    }
                 } header: {
                     Text("Axes")
                 } footer: {
-                    Text("Rename or recolor the parts of life your avatar grows along. Your notes and growth stay exactly as they are.")
+                    Text("Rename or recolor the parts of life you grow along, and choose what each one looks like. Your notes and growth stay exactly as they are.")
                 }
 
                 Section {
@@ -1096,16 +1102,35 @@ struct AxisSettingsView: View {
 private struct AxisEditorRow: View {
     @EnvironmentObject var model: AppModel
     let axis: Axis
+    let maturity: Double
     @State private var name = ""
 
     var body: some View {
         HStack(spacing: 12) {
+            // The axis's own picture, at its own growth, next to its own name. Tapping it
+            // opens that part of your life on its own page — which is the whole difference
+            // between this and a field of seven: one small still view, nothing over it.
+            NavigationLink { AxisDetailView(axis: axis) } label: {
+                Image(uiImage: AxisArt.artwork(AxisArt.chosen(for: axis.id))
+                        ?? AxisArt.source(AxisArt.chosen(for: axis.id), tint: UIColor(axis.color)))
+                    .resizable()
+                    .interpolation(.medium)
+                    .frame(width: 38, height: 38)
+                    .resolving(maturity: maturity, side: 38,
+                               seed: Double(abs(axis.id.hashValue % 997)))
+            }
+            .buttonStyle(.plain)
+            .frame(width: 38, height: 38)
+
             ColorPicker("", selection: Binding(
                 get: { model.axis(id: axis.id)?.color ?? axis.color },
                 set: { if let hex = $0.toHex() { model.setAxisColor(axis.id, hex: hex) } }
             ))
             .labelsHidden()
             TextField("Name", text: $name).textInputAutocapitalization(.words)
+            Text(AxisState.words(for: maturity))
+                .font(.caption2).foregroundStyle(.secondary)
+                .lineLimit(1)
         }
         .onAppear { name = axis.name }
         .onChange(of: name) { newValue in
