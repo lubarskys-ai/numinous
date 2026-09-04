@@ -550,11 +550,30 @@ struct ComposeView: View {
         }
     }
 
+    /// A text field with a clear button, because emptying one of these by backspace is a
+    /// dozen taps on a name you are replacing wholesale anyway. `.never` would hide it while
+    /// typing, which is exactly when you want it.
+    private func clearableField(_ prompt: String, text: Binding<String>) -> some View {
+        HStack(spacing: 6) {
+            TextField(prompt, text: text)
+            if !text.wrappedValue.isEmpty {
+                Button {
+                    text.wrappedValue = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear \(prompt)")
+            }
+        }
+    }
+
     private func editSheet(_ s: LinkSuggestion) -> some View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Name", text: $editName).autocorrectionDisabled()
+                    clearableField("Name", text: $editName).autocorrectionDisabled()
                     // Type to link to a note you already have (fills name + folder).
                     ForEach(noteNameMatches(editName), id: \.id) { n in
                         Button {
@@ -574,7 +593,7 @@ struct ComposeView: View {
                 } header: { Text("Note") } footer: { Text("Pick an existing note, or type a new name.") }
 
                 Section {
-                    TextField("folder path", text: $editFolder)
+                    clearableField("folder path", text: $editFolder)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
