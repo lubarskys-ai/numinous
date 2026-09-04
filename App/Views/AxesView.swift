@@ -59,7 +59,10 @@ struct AxesView: View {
                           viewport: geo.size) { picking = $0 }
             }
             .background(backdrop)
-            .navigationTitle("You")
+            // TEMPORARY build marker. Several rounds of changes have looked identical on the
+            // device, and the likeliest cause is Xcode building a project file XcodeGen
+            // rewrote underneath it. This says, unambiguously, which build is running.
+            .navigationTitle("You · build 8")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
