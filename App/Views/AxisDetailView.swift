@@ -345,8 +345,10 @@ private struct AxisPicturePicker: View {
                 }
             }
             .id(version)
-            if AxisArt.hasCustomArtwork(axisID: axis.id) {
-                Text("Your own picture is in use, so these are set aside until you go back to them.")
+            if AxisArt.hasAxisArtwork(axisID: axis.id) {
+                Text(AxisArt.hasCustomArtwork(axisID: axis.id)
+                     ? "Your own picture is in use, so these are set aside until you go back to them."
+                     : "\(axis.name) has its own picture, so these are set aside.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

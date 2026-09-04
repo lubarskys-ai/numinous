@@ -168,9 +168,21 @@ enum AxisArt {
         return found
     }
 
+    /// Has the user imported something for this axis? Only this can be removed.
     static func hasCustomArtwork(axisID: String) -> Bool {
         guard let url = customURL(axisID) else { return false }
         return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    /// Is there axis-level artwork at all — imported OR shipped? When there is, the four
+    /// per-option pictures are moot, because the axis-level file wins whichever is selected.
+    /// Saying so is the difference between "these are set aside" and a chooser that appears
+    /// to do nothing.
+    static func hasAxisArtwork(axisID: String) -> Bool {
+        if hasCustomArtwork(axisID: axisID) { return true }
+        if animation(forAxis: axisID) != nil { return true }
+        return Bundle.main.url(forResource: axisID, withExtension: "png", subdirectory: "AxisArt")
+            ?? Bundle.main.url(forResource: axisID, withExtension: "png") != nil
     }
 
     // MARK: - Importing
@@ -211,9 +223,19 @@ enum AxisArt {
 
     static func removeArtwork(forAxis axisID: String) {
         if let url = customURL(axisID) { try? FileManager.default.removeItem(at: url) }
-        if let dir = framesDir(axisID) { try? FileManager.default.removeItem(at: dir) }
+        removeFrames(axisID)
         animationCache.removeValue(forKey: axisID)
         clearArtCache()
+    }
+
+    private static func removeFrames(_ axisID: String) {
+        guard let dir = framesDir(axisID) else { return }
+        for i in 0..<200 {
+            let url = dir.appendingPathComponent("\(frameName(axisID, i)).png")
+            guard FileManager.default.fileExists(atPath: url.path) else { break }
+            try? FileManager.default.removeItem(at: url)
+        }
+        try? FileManager.default.removeItem(at: dir.appendingPathComponent("\(axisID).duration.txt"))
     }
 
     // MARK: - Animated artwork
@@ -224,9 +246,14 @@ enum AxisArt {
         let duration: Double
     }
 
+    /// Where imported frames live. Flat files, not a folder: a directory inside the app
+    /// bundle can be flattened by the build, which would collide 000.png across seven axes.
     private static func framesDir(_ axisID: String) -> URL? {
         customURL(axisID)?.deletingLastPathComponent()
-            .appendingPathComponent("\(axisID).frames", isDirectory: true)
+    }
+
+    private static func frameName(_ axisID: String, _ index: Int) -> String {
+        String(format: "%@.frame%03d", axisID, index)
     }
 
     private static var animationCache: [String: Animation?] = [:]
@@ -236,16 +263,52 @@ enum AxisArt {
     static func animation(forAxis axisID: String) -> Animation? {
         if let hit = animationCache[axisID] { return hit }
         var found: Animation?
-        if let dir = framesDir(axisID),
-           let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) {
-            let pngs = names.filter { $0.hasSuffix(".png") }.sorted()
-            let frames = pngs.compactMap { UIImage(contentsOfFile: dir.appendingPathComponent($0).path) }
-            let seconds = (try? String(contentsOf: dir.appendingPathComponent("duration.txt"), encoding: .utf8))
-                .flatMap { Double($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 2.0
-            if frames.count > 1 { found = Animation(frames: frames, duration: max(0.2, seconds)) }
+
+        // Imported first, bundled second — the same order as stills, so your own animation
+        // replaces a shipped one rather than fighting it.
+        var frames: [UIImage] = []
+        var index = 0
+        while true {
+            let name = frameName(axisID, index)
+            var image: UIImage?
+            if let dir = framesDir(axisID) {
+                let url = dir.appendingPathComponent("\(name).png")
+                if FileManager.default.fileExists(atPath: url.path) {
+                    image = UIImage(contentsOfFile: url.path)
+                }
+            }
+            if image == nil, let url = Bundle.main.url(forResource: name, withExtension: "png",
+                                                       subdirectory: "AxisArt")
+                ?? Bundle.main.url(forResource: name, withExtension: "png") {
+                image = UIImage(contentsOfFile: url.path)
+            }
+            guard let image else { break }
+            frames.append(image)
+            index += 1
+            if index > 200 { break }              // a runaway loop would be worse than a short one
+        }
+
+        if frames.count > 1 {
+            found = Animation(frames: frames, duration: max(0.2, duration(forAxis: axisID)))
         }
         animationCache[axisID] = found
         return found
+    }
+
+    private static func duration(forAxis axisID: String) -> Double {
+        let file = "\(axisID).duration"
+        if let dir = framesDir(axisID),
+           let text = try? String(contentsOf: dir.appendingPathComponent("\(file).txt"), encoding: .utf8),
+           let seconds = Double(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return seconds
+        }
+        if let url = Bundle.main.url(forResource: file, withExtension: "txt", subdirectory: "AxisArt")
+            ?? Bundle.main.url(forResource: file, withExtension: "txt"),
+           let text = try? String(contentsOf: url, encoding: .utf8),
+           let seconds = Double(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return seconds
+        }
+        return 2.0
     }
 
     /// Which frame is showing at this moment. Nil when the axis has no animation, so callers
@@ -280,17 +343,17 @@ enum AxisArt {
         let indices = (0..<wanted).map { Int(Double($0) * Double(count) / Double(wanted)) }
 
         guard let dir = framesDir(axisID) else { throw ImportError.couldNotSave }
-        try? FileManager.default.removeItem(at: dir)
+        removeFrames(axisID)
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             for (n, i) in indices.enumerated() {
                 guard let cg = CGImageSourceCreateImageAtIndex(source, i, nil),
                       let prepared = prepare(UIImage(cgImage: cg), side: animationSide),
                       let png = prepared.pngData() else { continue }
-                let name = String(format: "%03d.png", n)
-                try png.write(to: dir.appendingPathComponent(name), options: .atomic)
+                try png.write(to: dir.appendingPathComponent("\(frameName(axisID, n)).png"),
+                              options: .atomic)
             }
-            try String(total).write(to: dir.appendingPathComponent("duration.txt"),
+            try String(total).write(to: dir.appendingPathComponent("\(axisID).duration.txt"),
                                     atomically: true, encoding: .utf8)
         } catch {
             throw ImportError.couldNotSave
