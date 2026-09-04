@@ -62,7 +62,7 @@ struct AxesView: View {
             // TEMPORARY build marker. Several rounds of changes have looked identical on the
             // device, and the likeliest cause is Xcode building a project file XcodeGen
             // rewrote underneath it. This says, unambiguously, which build is running.
-            .navigationTitle("You · build 8")
+            .navigationTitle("You · build 9")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -197,11 +197,21 @@ struct AxisFrame: Identifiable {
 
 /// The pannable, zoomable field.
 ///
-/// This is a separate view for the same reason FloatingForm is: while pan and pinch lived on
-/// the parent, every frame of every gesture invalidated the parent's body, which walked the
-/// whole graph for maturities and re-derived all seven images. The gesture was paying for a
-/// full recomputation of the screen on every touch event. Here it owns its own state and the
-/// frames arrive as finished values, so a pan moves pixels and nothing else.
+/// Two things have to be true at once, and getting one broke the other twice.
+///
+/// SMOOTH: the whole field is flattened to a single texture before the scale and offset are
+/// applied. Each form carries a layerEffect — an offscreen pass of its own — and scaling
+/// seven live ones was the stutter. Flattened, a pinch transforms something already drawn,
+/// and because the breathing pauses during a gesture that texture doesn't change.
+///
+/// TAPPABLE: nothing interactive can live INSIDE that flattened layer, or the flatten eats
+/// the touches. So the forms are purely visual and hit-testing happens above the flatten:
+/// one tap gesture on the field resolves which form was hit from the tap's own location.
+///
+/// The cost is that a form can no longer be dragged to a new spot. Dragging changes the
+/// field's contents, which forces a re-raster on every touch event — the exact thing that
+/// made dragging the jerkiest thing on screen in the first place. Smoothness has been the
+/// standing complaint; a rearrangeable field has not.
 private struct AxesField: View {
     let frames: [AxisFrame]
     let fit: CGFloat
@@ -218,41 +228,36 @@ private struct AxesField: View {
     private var gesturing: Bool { pinch != 1 || drag != .zero }
 
     var body: some View {
-        ZStack {
-            // The canvas takes the pan; each form takes its own drag, so pushing one around
-            // never slides the whole world with it.
-            Color.clear
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 8)
-                        .updating($drag) { v, state, _ in state = v.translation }
-                        .onEnded { v in
-                            offset.width += v.translation.width
-                            offset.height += v.translation.height
-                        }
-                )
-
-            // Pause the breathing WHILE a gesture is live. Measured at ~14% CPU during a
-            // pinch, so this was never CPU-bound: the cost is the renderer resampling seven
-            // images every frame against a scale that is also changing every frame. Paused,
-            // the content is identical frame to frame and a pinch becomes a transform applied
-            // to something already drawn. Nobody is watching a heart beat while they zoom.
-            TimelineView(.animation(minimumInterval: nil, paused: gesturing)) { timeline in
-                let t = timeline.date.timeIntervalSinceReferenceDate
-                // The ZStack is load-bearing. A bare ForEach as TimelineView's content is not
-                // stacked — the forms accumulate down the screen instead of sitting where
-                // .position puts them.
-                ZStack {
-                    ForEach(Array(frames.enumerated()), id: \.element.id) { index, f in
-                        FloatingForm(axis: f.axis, image: f.image, maturity: f.maturity,
-                                     size: f.size,
-                                     base: AxesView.anchors[index % AxesView.anchors.count],
-                                     t: t) { onPick(f.axis) }
-                    }
+        TimelineView(.animation(minimumInterval: nil, paused: gesturing)) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate
+            // The ZStack is load-bearing. A bare ForEach as TimelineView's content is not
+            // stacked — the forms accumulate down the screen instead of sitting where
+            // .position puts them.
+            ZStack {
+                ForEach(Array(frames.enumerated()), id: \.element.id) { index, f in
+                    FloatingForm(axis: f.axis, image: f.image, maturity: f.maturity,
+                                 size: f.size,
+                                 base: AxesView.anchors[index % AxesView.anchors.count],
+                                 t: t)
                 }
             }
         }
         .frame(width: canvas.width, height: canvas.height)
+        .drawingGroup()
+        // Everything below here sits ABOVE the flattened layer, so it still receives touches.
+        .contentShape(Rectangle())
+        .gesture(
+            SpatialTapGesture(coordinateSpace: .local)
+                .onEnded { value in pick(at: value.location) }
+        )
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 8)
+                .updating($drag) { v, state, _ in state = v.translation }
+                .onEnded { v in
+                    offset.width += v.translation.width
+                    offset.height += v.translation.height
+                }
+        )
         .scaleEffect(fit * zoom, anchor: .center)
         .frame(width: viewport.width, height: viewport.height)
         .offset(x: offset.width + drag.width, y: offset.height + drag.height)
@@ -265,15 +270,24 @@ private struct AxesField: View {
                 }
         )
     }
+
+    /// Which form did that tap land on? Nearest anchor within its own radius, so the gaps
+    /// between forms stay inert rather than picking whichever is closest across the screen.
+    private func pick(at point: CGPoint) {
+        var best: (axis: Axis, distance: CGFloat)?
+        for (index, f) in frames.enumerated() {
+            let a = AxesView.anchors[index % AxesView.anchors.count]
+            let d = hypot(point.x - a.x, point.y - a.y)
+            guard d <= f.size * 0.62 else { continue }
+            if best == nil || d < best!.distance { best = (f.axis, d) }
+        }
+        if let hit = best { onPick(hit.axis) }
+    }
 }
 
-/// One floating form, owning its own drag.
-///
-/// This is a separate view for a reason that is entirely about smoothness: while the drag
-/// lived on the parent, every touch event during a drag invalidated the parent's body, which
-/// re-ran axisMaturities() over the whole graph and re-derived all seven images. Dragging was
-/// the jerkiest thing on the screen because it was doing the most work. Here a drag touches
-/// nothing but this one view.
+
+/// One floating form. Purely visual — every gesture lives on the field, above the flattened
+/// layer, because anything interactive placed inside a `drawingGroup` stops receiving touches.
 private struct FloatingForm: View {
     let axis: Axis
     let image: UIImage
@@ -281,44 +295,21 @@ private struct FloatingForm: View {
     let size: CGFloat
     let base: CGPoint
     let t: TimeInterval
-    let onTap: () -> Void
-
-    /// Where the user has pushed it. It stays where you put it.
-    @State private var nudge: CGSize = .zero
-    @GestureState private var live: CGSize = .zero
 
     var body: some View {
         let mv = AxesView.motion(axis.id, t)
         Image(uiImage: image)
             .resizable()
-            // Smooth: the picture underneath is full fidelity now, and the blocks are cut by
-            // the shader at exactly the right size. Nearest-neighbour here would only fight it.
+            // Smooth: the picture underneath is full fidelity, and the blocks are cut by the
+            // shader at exactly the right size. Nearest-neighbour here would only fight it.
             .interpolation(.medium)
             .frame(width: size, height: size)
             .resolving(maturity: maturity, side: size,
                        seed: Double(abs(axis.id.hashValue % 997)))
-            // Cache the shader's result as a texture. A layerEffect is an offscreen pass, and
-            // scaling seven live ones was what made the zoom stutter; scaling seven textures
-            // costs nothing. It sits INSIDE the gestures, so it flattens pixels, not touches.
-            .drawingGroup()
             .scaleEffect(x: mv.sx, y: mv.sy)
             .rotationEffect(.degrees(mv.rot))
             .offset(y: mv.dy)
-            .contentShape(Rectangle())
-            // Gestures BEFORE .position. A positioned view fills its parent, so a tap handler
-            // added after it has the whole field as its hit area — and with seven stacked,
-            // the last one drawn swallowed every tap, which is why nothing could be selected.
-            .onTapGesture { onTap() }
-            .gesture(
-                DragGesture(minimumDistance: 6)
-                    .updating($live) { v, state, _ in state = v.translation }
-                    .onEnded { v in
-                        nudge.width += v.translation.width
-                        nudge.height += v.translation.height
-                    }
-            )
-            .position(x: base.x + nudge.width + live.width,
-                      y: base.y + nudge.height + live.height)
+            .position(x: base.x, y: base.y)
     }
 }
 
