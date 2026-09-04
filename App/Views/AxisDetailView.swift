@@ -219,8 +219,13 @@ private struct AxisPicturePicker: View {
     @State private var showFiles = false
     @State private var photo: PhotosPickerItem?
     @State private var importError: String?
+    /// A still on its way in, waiting to be framed. Animations skip this — you can't
+    /// meaningfully crop thirty frames by hand, and an icon export is already square.
+    @State private var editing: PendingImage?
     /// Bumped after an import so the grid and the row above it redraw from the new file.
     @State private var version = 0
+
+    private struct PendingImage: Identifiable { let id = UUID(); let image: UIImage }
 
     private let columns = [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)]
 
@@ -251,6 +256,11 @@ private struct AxisPicturePicker: View {
                         importError = AxisArt.ImportError.unreadable.errorDescription; return
                     }
                     apply(data)
+                }
+            }
+            .sheet(item: $editing) { pending in
+                AxisImageEditor(image: pending.image, tint: axis.color) { framed in
+                    save(framed)
                 }
             }
             .alert("Couldn't use that image", isPresented: Binding(
@@ -360,12 +370,24 @@ private struct AxisPicturePicker: View {
     /// instead of failing for not being a movie.
     private func apply(_ data: Data) {
         do {
+            // Animated first. A GIF or APNG that turns out to hold one frame reports false
+            // rather than throwing, so a single-frame file carries on as a still.
             if try AxisArt.importAnimation(data: data, forAxis: axis.id) {
                 finish(); return
             }
-            guard let image = UIImage(data: data) else {
-                importError = AxisArt.ImportError.unreadable.errorDescription; return
-            }
+        } catch {
+            importError = error.localizedDescription; return
+        }
+        guard let image = UIImage(data: data) else {
+            importError = AxisArt.ImportError.unreadable.errorDescription; return
+        }
+        // A still gets framed first: a photo is rarely square, upright, or centred on its
+        // subject, and none of that can be fixed once it is a 40pt picture in a list.
+        editing = PendingImage(image: image)
+    }
+
+    private func save(_ image: UIImage) {
+        do {
             try AxisArt.importArtwork(image, forAxis: axis.id)
             finish()
         } catch {
