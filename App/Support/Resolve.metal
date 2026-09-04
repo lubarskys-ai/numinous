@@ -45,7 +45,10 @@ half4 resolve(float2 position, SwiftUI::Layer layer, float block, float missing,
     // squares instead of a soft mass — the CPU version got this for free by downscaling,
     // which is a box filter by another name. Sixteen taps is cheap and restores the partial
     // coverage that makes an early shape read as something rather than nothing.
-    const int N = 4;
+    // Tap count follows the block: a big cell needs several samples to know what is in it,
+    // a small one does not, and a fixed sixteen everywhere is most of this shader's cost on
+    // a screen holding seven of them.
+    int N = clamp(int(block / 4.0), 2, 4);
     half4 acc = half4(0.0h);
     for (int i = 0; i < N; ++i) {
         for (int j = 0; j < N; ++j) {

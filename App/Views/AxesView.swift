@@ -250,6 +250,12 @@ private struct AxesField: View {
             }
         }
         .frame(width: canvas.width, height: canvas.height)
+        // Flatten the field to ONE texture before the zoom touches it. Each form carries a
+        // layerEffect, which is an offscreen pass of its own; scaling seven of those live
+        // meant re-rasterising seven effects on every frame of a pinch. Rasterised once, a
+        // pinch scales a single already-drawn texture — and since the breathing pauses during
+        // a gesture, that texture doesn't change while you are moving it.
+        .drawingGroup()
         .scaleEffect(fit * zoom, anchor: .center)
         .frame(width: viewport.width, height: viewport.height)
         .offset(x: offset.width + drag.width, y: offset.height + drag.height)
