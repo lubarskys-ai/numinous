@@ -153,11 +153,15 @@ enum AxisArt {
         return image
     }
 
-    /// How coarse the grid is at a given maturity. Exponential, because the interesting part
-    /// of the arc is early: going 4→8 blocks is a visible event, 96→104 is not.
+    /// How coarse the grid is at a given maturity.
+    ///
+    /// Gamma-curved and slow. The first version reached a legible picture around a third of
+    /// the way up, so most of a life's growth bought no visible change and things read as
+    /// finished long before they were. Squaring the input holds the coarse end open: half
+    /// grown is still unmistakably blocks, and only the last stretch resolves.
     static func blocks(for maturity: Double) -> Int {
         let m = min(1, max(0, maturity))
-        return Int(round(pow(2.0, 2.0 + m * 5.0)))     // 4 blocks at 0 → 128 at 1
+        return Int(round(3.0 * pow(42.0, pow(m, 2.1))))  // 3 blocks at 0, ~8 at ½, 126 at 1
     }
 
     /// The picture as it stands at this maturity: blocky when young, whole when grown.

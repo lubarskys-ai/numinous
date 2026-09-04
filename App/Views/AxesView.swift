@@ -2,16 +2,20 @@ import SwiftUI
 import UIKit
 import NuminousCore
 
-/// Seven parts of a life, drifting, each coming into focus on its own.
+/// Seven parts of a life, each alive in its own way and each coming into focus on its own.
 ///
-/// PROTOTYPE. It renders `AppModel.axisMaturities()`, which the app already computes —
-/// every region of the 3D avatar has always faded in on its own axis maturity. The only
-/// reason you have never seen these seven numbers is that `maturity` averages them into one
-/// before anything displays them. This doesn't measure anything new; it stops averaging.
+/// PROTOTYPE. It renders `AppModel.axisMaturities()`, which the app already computes — every
+/// region of the 3D avatar has always faded in on its own axis maturity. The only reason you
+/// have never seen these seven numbers is that `maturity` averages them into one before
+/// anything displays them. This doesn't measure anything new; it stops averaging.
 ///
-/// Pan, pinch and node-dragging deliberately mirror `ConstellationView` — same clamps, same
-/// simultaneous gestures — because this is the same gesture in the user's hand as the graph,
-/// and two different feels for "move the world around" would be one too many.
+/// Nothing drifts around the screen any more. Sliding a pixellated image across the display
+/// resamples its blocks every frame, and no amount of slowing that down stopped it reading as
+/// jitter. The life is in the subjects instead — a heart beats, an arm flexes — which is both
+/// steadier and more alive than the whole field wandering.
+///
+/// Pan and pinch mirror `ConstellationView` exactly, because "move the world around" is a
+/// gesture this app already has.
 struct AxesView: View {
     @EnvironmentObject var model: AppModel
 
@@ -28,7 +32,7 @@ struct AxesView: View {
     @State private var offset: CGSize = .zero
     @GestureState private var drag: CGSize = .zero
 
-    /// Where the user has pushed a disc, in design space. They stay where you put them.
+    /// Where the user has pushed a form. They stay where you put them.
     @State private var nudges: [String: CGSize] = [:]
     @GestureState private var dragging: (id: String, translation: CGSize)? = nil
 
@@ -43,13 +47,22 @@ struct AxesView: View {
     var body: some View {
         NavigationStack {
             GeometryReader { geo in
-                // Once per render, not once per disc per frame.
+                // Both computed ONCE per render. Reading maturity per form per frame meant
+                // seven whole-graph scans thirty times a second, and re-deriving the images on
+                // top of that; the animation only needs the transforms.
                 let mats = preview == nil ? model.axisMaturities() : [:]
+                let frames: [(axis: Axis, image: UIImage, size: CGFloat)] = model.axes.map { axis in
+                    let m = preview ?? (mats[axis.id] ?? 0)
+                    return (axis,
+                            AxisArt.rendered(AxisArt.chosen(for: axis.id),
+                                             tint: UIColor(axis.color), maturity: m),
+                            diameter(m))
+                }
                 let fit = min(geo.size.width / dw, geo.size.height / dh)
 
                 ZStack {
-                    // The canvas itself takes the pan; discs take their own drags, so pushing
-                    // one around never slides the whole world with it.
+                    // The canvas takes the pan; each form takes its own drag, so pushing one
+                    // around never slides the whole world with it.
                     Color.clear
                         .contentShape(Rectangle())
                         .gesture(
@@ -61,19 +74,15 @@ struct AxesView: View {
                                 }
                         )
 
-                    // ONE timeline for the whole field, not one per disc: seven independent
-                    // animation clocks were seven separate invalidation storms.
-                    TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { timeline in
+                    TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
                         let t = timeline.date.timeIntervalSinceReferenceDate
                         // The ZStack is load-bearing. A bare ForEach as TimelineView's content
                         // is not stacked — the forms accumulate down the screen instead of
-                        // sitting where .position puts them, which is why the field kept
-                        // running off the bottom no matter how the coordinates were tuned.
+                        // sitting where .position puts them.
                         ZStack {
-                            ForEach(Array(model.axes.enumerated()), id: \.element.id) { index, axis in
-                                let m = preview ?? (mats[axis.id] ?? 0)
-                                form(axis, maturity: m)
-                                    .position(place(index, axis: axis, t: t))
+                            ForEach(Array(frames.enumerated()), id: \.element.axis.id) { index, f in
+                                form(f.axis, image: f.image, size: f.size, t: t)
+                                    .position(place(index, axis: f.axis))
                             }
                         }
                     }
@@ -113,7 +122,7 @@ struct AxesView: View {
         preview ?? (model.axisMaturities()[axis.id] ?? 0)
     }
 
-    /// A soft wash of every axis at once, so the space the discs float in belongs to them.
+    /// A soft wash of every axis at once, so the space the forms float in belongs to them.
     private var backdrop: some View {
         ZStack {
             Color(.systemBackground)
@@ -127,80 +136,100 @@ struct AxesView: View {
         .ignoresSafeArea()
     }
 
-    // MARK: - Placement and drift
+    // MARK: - The forms
 
-    /// Hand-placed scatter in unit coordinates, not a grid — the point of the screen is that
-    /// these are seven separate things, and a grid says "rows of the same thing". Kept clear
-    /// of the very top and bottom so a form's label never lands under the tab bar.
+    /// Hand-placed scatter, not a grid — the point of the screen is that these are seven
+    /// separate things, and a grid says "rows of the same thing".
     private static let anchors: [CGPoint] = [
-        CGPoint(x: 96,  y: 62),
-        CGPoint(x: 248, y: 140),
-        CGPoint(x: 82,  y: 220),
-        CGPoint(x: 250, y: 300),
-        CGPoint(x: 92,  y: 378),
-        CGPoint(x: 250, y: 444),
-        CGPoint(x: 108, y: 496),
+        CGPoint(x: 98,  y: 74),
+        CGPoint(x: 246, y: 150),
+        CGPoint(x: 82,  y: 232),
+        CGPoint(x: 252, y: 306),
+        CGPoint(x: 96,  y: 386),
+        CGPoint(x: 250, y: 452),
+        CGPoint(x: 116, y: 516),
     ]
 
-    private func place(_ index: Int, axis: Axis, t: TimeInterval) -> CGPoint {
+    private func place(_ index: Int, axis: Axis) -> CGPoint {
         let base = Self.anchors[index % Self.anchors.count]
         let nudge = nudges[axis.id] ?? .zero
         let live = dragging?.id == axis.id ? (dragging?.translation ?? .zero) : .zero
-        // A slow breath, not a jitter: ~5pt over the better part of half a minute, each on
-        // its own period so the field never pulses in unison.
-        let phase = Double(index) * 1.9
-        let dx = CGFloat(sin(t / 19.0 + phase) * 5)
-        let dy = CGFloat(cos(t / 26.0 + phase * 1.4) * 6)
-        // Snapped to whole points. Pixel blocks moved across fractions of a point resample
-        // every frame, and that shimmer is what read as shaky.
-        return CGPoint(x: (base.x + nudge.width + live.width + dx).rounded(),
-                       y: (base.y + nudge.height + live.height + dy).rounded())
+        return CGPoint(x: base.x + nudge.width + live.width,
+                       y: base.y + nudge.height + live.height)
     }
 
-    /// Size carries growth too, quietly: a part you have barely touched is a small far-off
-    /// thing, a grown one is close and present. Pixellation still does the real work.
-    private func diameter(_ m: Double) -> CGFloat { 88 + 38 * CGFloat(min(1, max(0, m))) }
+    /// No labels, so the forms can be bigger. A part of your life you have to read the name of
+    /// isn't being shown to you, it's being reported to you — and the shape says which anyway.
+    private func diameter(_ m: Double) -> CGFloat { 100 + 46 * CGFloat(min(1, max(0, m))) }
 
-    private func form(_ axis: Axis, maturity m: Double) -> some View {
-        let option = AxisArt.chosen(for: axis.id)
-        let d = diameter(m)
-        return VStack(spacing: 6) {
-            Image(uiImage: AxisArt.rendered(option, tint: UIColor(axis.color), maturity: m))
-                .resizable()
-                .interpolation(.none)          // never let SwiftUI smooth the blocks away
-                .frame(width: d, height: d)
-                .shadow(color: axis.color.opacity(0.28), radius: 10, y: 5)
-            VStack(spacing: 1) {
-                Text(axis.name).font(.footnote.weight(.semibold))
-                Text(readout(m)).font(.caption2).foregroundStyle(.secondary)
-            }
-            .fixedSize()
-            .frame(height: 30)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture { picking = axis }
-        .gesture(
-            DragGesture(minimumDistance: 6)
-                .updating($dragging) { v, state, _ in state = (axis.id, v.translation) }
-                .onEnded { v in
-                    var n = nudges[axis.id] ?? .zero
-                    n.width += v.translation.width
-                    n.height += v.translation.height
-                    nudges[axis.id] = n
-                }
-        )
+    private func form(_ axis: Axis, image: UIImage, size: CGFloat, t: TimeInterval) -> some View {
+        let mv = Self.motion(axis.id, t)
+        return Image(uiImage: image)
+            .resizable()
+            .interpolation(.none)          // never let SwiftUI smooth the blocks away
+            .frame(width: size, height: size)
+            .scaleEffect(x: mv.sx, y: mv.sy)
+            .rotationEffect(.degrees(mv.rot))
+            .offset(y: mv.dy)
+            .shadow(color: axis.color.opacity(0.28), radius: 10, y: 5)
+            .contentShape(Rectangle())
+            .onTapGesture { picking = axis }
+            .gesture(
+                DragGesture(minimumDistance: 6)
+                    .updating($dragging) { v, state, _ in state = (axis.id, v.translation) }
+                    .onEnded { v in
+                        var n = nudges[axis.id] ?? .zero
+                        n.width += v.translation.width
+                        n.height += v.translation.height
+                        nudges[axis.id] = n
+                    }
+            )
     }
 
-    /// Words, not a percentage. A number invites you to farm it, which is the one thing this
-    /// app is not for.
-    private func readout(_ m: Double) -> String {
-        switch m {
-        case ..<0.02:  return "Nothing here yet"
-        case ..<0.15:  return "Barely there"
-        case ..<0.35:  return "Taking shape"
-        case ..<0.60:  return "Coming through"
-        case ..<0.85:  return "Nearly whole"
-        default:       return "Whole"
+    // MARK: - Motion
+
+    private struct Motion {
+        var sx: CGFloat = 1
+        var sy: CGFloat = 1
+        var rot: Double = 0
+        var dy: CGFloat = 0
+    }
+
+    /// Each part moves the way that part of a life moves. This is where the character lives
+    /// now: a still symbol is a still symbol, but a heart that beats is a heart.
+    private static func motion(_ axisID: String, _ t: TimeInterval) -> Motion {
+        switch axisID {
+        case "heart":
+            // Lub-dub, then rest. Two Gaussian pulses in a 1.5s cycle — a plain sine reads as
+            // throbbing, not as a heartbeat, because the rest between beats is the whole tell.
+            let p = t.truncatingRemainder(dividingBy: 1.5) / 1.5
+            let lub = exp(-pow((p - 0.05) / 0.045, 2))
+            let dub = exp(-pow((p - 0.19) / 0.055, 2)) * 0.62
+            let k = CGFloat(lub + dub)
+            return Motion(sx: 1 + 0.11 * k, sy: 1 + 0.11 * k)
+        case "body":
+            // A flex: one sharp squeeze every couple of seconds, not a constant wobble. sin^6
+            // holds it at rest for most of the cycle, which is what makes it read as an effort.
+            let p = t.truncatingRemainder(dividingBy: 2.2) / 2.2
+            let e = CGFloat(pow(sin(p * .pi), 6))
+            return Motion(sx: 1 + 0.06 * e, sy: 1 - 0.05 * e, rot: Double(-5 * e))
+        case "mind":
+            let k = CGFloat(sin(t / 1.7))
+            return Motion(sx: 1 + 0.02 * k, sy: 1 + 0.02 * k, rot: sin(t / 3.4) * 1.5)
+        case "gut":
+            return Motion(rot: sin(t / 1.9) * 3.5)
+        case "meaning":
+            // Slow and geological — mountains shouldn't fidget.
+            return Motion(sy: 1 + 0.015 * CGFloat(sin(t / 3.2)), dy: CGFloat(sin(t / 3.2)) * 3)
+        case "influences":
+            // A bob, as if spoken.
+            let p = t.truncatingRemainder(dividingBy: 2.0) / 2.0
+            return Motion(dy: -CGFloat(abs(sin(p * .pi))) * 5)
+        case "spirit":
+            let k = CGFloat(sin(t / 1.25))
+            return Motion(sx: 1 + 0.06 * k, sy: 1 + 0.06 * k, rot: sin(t / 3.1) * 9)
+        default:
+            return Motion(sy: 1 + 0.02 * CGFloat(sin(t / 2.0)))
         }
     }
 
