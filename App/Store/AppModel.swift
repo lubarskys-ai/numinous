@@ -134,6 +134,35 @@ final class AppModel: ObservableObject {
         return counts.mapValues { min(1, Double($0) / Self.maturityFullPerAxis) }
     }
 
+    /// What has actually built one axis, and when it was last touched.
+    ///
+    /// Both come out of a single pass over the links: the notes that keep turning up in
+    /// connections touching this axis, ranked, and the most recent date among them. "How long
+    /// since anything touched this" is the question the growth number can't answer — an axis
+    /// can be a third grown and stone dead for four months, and only the date says so.
+    func axisContributions(_ axisID: String, limit: Int = 5)
+        -> (top: [(id: UUID, title: String, links: Int)], lastTouched: Date?) {
+        var counts: [UUID: (title: String, n: Int)] = [:]
+        for l in score.links where l.isCounted {
+            if l.axisA == axisID { counts[l.a, default: (l.titleA, 0)].n += 1 }
+            if l.axisB == axisID { counts[l.b, default: (l.titleB, 0)].n += 1 }
+        }
+        var latest: Date?
+        for id in counts.keys {
+            guard let d = note(id: id)?.date else { continue }
+            if latest == nil || d > latest! { latest = d }
+        }
+        // Spelled out rather than chained: the inferred tuple type made the one-liner version
+        // too much for the type checker to solve in reasonable time.
+        var ranked: [(id: UUID, title: String, links: Int)] = []
+        ranked.reserveCapacity(counts.count)
+        for (id, v) in counts { ranked.append((id: id, title: v.title, links: v.n)) }
+        ranked.sort { a, b in
+            a.links == b.links ? a.title < b.title : a.links > b.links
+        }
+        return (Array(ranked.prefix(limit)), latest)
+    }
+
     /// Overall maturity — the average across axes, so the avatar as a whole forms
     /// slowly and only once growth is *broad* (drives staging + the companion).
     var maturity: Double {

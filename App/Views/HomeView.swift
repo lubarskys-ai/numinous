@@ -224,39 +224,8 @@ struct HomeView: View {
     /// the note is what you write afterwards, not the point. Rotates by the day so the same
     /// sentence isn't sitting there all month.
     private func suggestion(for axis: Axis) -> String {
-        let options = Self.axisSuggestions[axis.id] ?? Self.genericSuggestions
-        let day = Calendar.current.ordinality(of: .day, in: .year, for: Date()) ?? 0
-        return options[day % options.count]
+        AxisAdvice.suggestion(for: axis.id)
     }
-
-    private static let genericSuggestions = [
-        "Give it an hour this week and note what came of it.",
-        "One small thing here would move it more than you'd think."
-    ]
-
-    private static let axisSuggestions: [String: [String]] = [
-        "body": ["A walk somewhere you haven't been would do it.",
-                 "The workout you already did counts — it just isn't written down.",
-                 "Something that leaves you out of breath, once this week."],
-        "gut": ["Cook something you've never made.",
-                "Note the meal that was actually worth it.",
-                "Eat somewhere new rather than somewhere good."],
-        "mind": ["The book you keep meaning to open.",
-                 "Twenty pages of something hard.",
-                 "Write down what stuck from the last thing you read."],
-        "meaning": ["One night away somewhere you've never been.",
-                    "The project you keep postponing — an hour of it.",
-                    "Somewhere new, even if it's close."],
-        "heart": ["Call the person you've drifted from.",
-                  "See someone in person rather than texting them.",
-                  "Write down who you saw this week, and what you talked about."],
-        "spirit": ["Ten minutes outside with no phone.",
-                   "Sit with something for a while before writing about it.",
-                   "Notice one thing today you'd normally walk past."],
-        "influences": ["The person whose thinking changed yours — note why.",
-                       "Where did that idea actually come from?",
-                       "Follow one thing back to its source."]
-    ]
 
     /// Health, without a tab. Two states worth a line and no others:
     ///
