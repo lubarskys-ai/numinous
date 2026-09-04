@@ -74,7 +74,7 @@ struct AxesView: View {
                                 }
                         )
 
-                    TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+                    TimelineView(.animation) { timeline in
                         let t = timeline.date.timeIntervalSinceReferenceDate
                         // The ZStack is load-bearing. A bare ForEach as TimelineView's content
                         // is not stacked — the forms accumulate down the screen instead of
@@ -166,12 +166,19 @@ struct AxesView: View {
         let mv = Self.motion(axis.id, t)
         return Image(uiImage: image)
             .resizable()
-            .interpolation(.none)          // never let SwiftUI smooth the blocks away
+            // SMOOTH interpolation, deliberately. The blocks are baked into the bitmap, so
+            // they stay blocks; what this changes is the RESAMPLING. With .none every block
+            // edge snaps to a whole pixel, and under a moving transform each edge crosses its
+            // boundary on its own frame — the blocks pop and crawl a pixel at a time. That
+            // was the jerkiness, not the frame rate (the app sits at ~12% CPU here). Smoothing
+            // the edges costs almost nothing to look at when a block is a dozen points across,
+            // and it is the difference between fluid motion and a shimmering grid.
+            .interpolation(.high)
             .frame(width: size, height: size)
             .scaleEffect(x: mv.sx, y: mv.sy)
             .rotationEffect(.degrees(mv.rot))
             .offset(y: mv.dy)
-            .shadow(color: axis.color.opacity(0.28), radius: 10, y: 5)
+            .drawingGroup()
             .contentShape(Rectangle())
             .onTapGesture { picking = axis }
             .gesture(
