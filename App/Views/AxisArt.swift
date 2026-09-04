@@ -14,46 +14,77 @@ import NuminousCore
 /// is the wrong one: blurred reads as "loading" or "broken", blocks read as deliberate.
 enum AxisArt {
 
-    /// One choosable picture for an axis.
-    struct Option: Identifiable, Hashable {
-        let id: String          // stable, stored in UserDefaults — art can be swapped under it
+    /// One element of a picture: a symbol, how big, and where it sits.
+    struct Layer: Hashable {
         let symbol: String
-        let label: String
+        let scale: CGFloat      // fraction of the canvas
+        let x: CGFloat          // unit position of its centre
+        let y: CGFloat
     }
 
-    /// Four options per axis. Deliberately concrete: an axis you can *picture* is one you
-    /// can feel the state of at a glance, which a coloured bar never manages.
+    /// One choosable picture for an axis. Two or three elements, not one glyph — a subject
+    /// with something around it reads as a scene, and a lone centred symbol reads as an icon
+    /// no matter how it is drawn.
+    struct Option: Identifiable, Hashable {
+        let id: String          // stable, stored in UserDefaults — art can be swapped under it
+        let label: String
+        let layers: [Layer]
+    }
+
+    private static func scene(_ id: String, _ label: String,
+                              _ subject: String, _ accent: String,
+                              _ accent2: String? = nil) -> Option {
+        var layers = [Layer(symbol: subject, scale: 0.62, x: 0.44, y: 0.56),
+                      Layer(symbol: accent,  scale: 0.24, x: 0.80, y: 0.22)]
+        if let accent2 { layers.append(Layer(symbol: accent2, scale: 0.17, x: 0.16, y: 0.84)) }
+        return Option(id: id, label: label, layers: layers)
+    }
+
+    /// Four options per axis. Deliberately concrete: an axis you can *picture* is one you can
+    /// feel the state of at a glance, which a coloured bar never manages.
     static func options(for axisID: String) -> [Option] {
         switch axisID {
         case "body":
-            return [opt("body.walk", "figure.walk", "Walking"), opt("body.run", "figure.run", "Running"),
-                    opt("body.bike", "bicycle", "Cycling"), opt("body.swim", "drop.fill", "Swimming")]
+            return [scene("body.walk", "Walking", "figure.walk", "sun.max.fill", "leaf.fill"),
+                    scene("body.run",  "Running", "figure.run", "flame.fill"),
+                    scene("body.bike", "Cycling", "bicycle", "sun.max.fill"),
+                    scene("body.swim", "Swimming", "figure.pool.swim", "drop.fill")]
         case "gut":
-            return [opt("gut.table", "fork.knife", "The table"), opt("gut.leaf", "leaf.fill", "Growing"),
-                    opt("gut.cup", "cup.and.saucer.fill", "Slow mornings"), opt("gut.flame", "flame.fill", "Cooking")]
+            return [scene("gut.table", "The table", "fork.knife", "leaf.fill", "drop.fill"),
+                    scene("gut.leaf",  "Growing", "leaf.fill", "sun.max.fill"),
+                    scene("gut.cup",   "Slow mornings", "cup.and.saucer.fill", "sun.max.fill"),
+                    scene("gut.flame", "Cooking", "flame.fill", "fork.knife")]
         case "mind":
-            return [opt("mind.brain", "brain.head.profile", "Thinking"), opt("mind.book", "book.fill", "Reading"),
-                    opt("mind.idea", "lightbulb.fill", "Ideas"), opt("mind.write", "pencil", "Writing")]
+            return [scene("mind.brain", "Thinking", "brain.head.profile", "lightbulb.fill"),
+                    scene("mind.book",  "Reading", "book.fill", "lightbulb.fill", "sparkles"),
+                    scene("mind.idea",  "Ideas", "lightbulb.fill", "sparkles"),
+                    scene("mind.write", "Writing", "pencil", "book.fill")]
         case "meaning":
-            return [opt("meaning.peaks", "mountain.2.fill", "Higher ground"), opt("meaning.globe", "globe.americas.fill", "The world"),
-                    opt("meaning.sun", "sunrise.fill", "First light"), opt("meaning.map", "map.fill", "The long way")]
+            return [scene("meaning.peaks", "Higher ground", "mountain.2.fill", "sun.max.fill", "cloud.fill"),
+                    scene("meaning.globe", "The world", "globe.americas.fill", "sparkles"),
+                    scene("meaning.sun",   "First light", "sunrise.fill", "cloud.fill"),
+                    scene("meaning.map",   "The long way", "map.fill", "mappin")]
         case "influences":
-            return [opt("infl.quote", "quote.bubble.fill", "Voices"), opt("infl.books", "books.vertical.fill", "The shelf"),
-                    opt("infl.mic", "mic.fill", "Listening"), opt("infl.people", "person.2.fill", "Company")]
+            return [scene("infl.quote", "Voices", "quote.bubble.fill", "person.fill"),
+                    scene("infl.books", "The shelf", "books.vertical.fill", "lightbulb.fill"),
+                    scene("infl.mic",   "Listening", "mic.fill", "waveform"),
+                    scene("infl.people", "Company", "person.2.fill", "quote.bubble.fill")]
         case "heart":
-            return [opt("heart.heart", "heart.fill", "Love"), opt("heart.hands", "hands.sparkles.fill", "Care"),
-                    opt("heart.letter", "envelope.fill", "Keeping in touch"), opt("heart.people", "person.2.fill", "The people")]
+            return [scene("heart.heart",  "Love", "heart.fill", "sparkles", "heart.fill"),
+                    scene("heart.hands",  "Care", "hands.sparkles.fill", "heart.fill"),
+                    scene("heart.letter", "Keeping in touch", "envelope.fill", "heart.fill"),
+                    scene("heart.people", "The people", "person.2.fill", "heart.fill")]
         case "spirit":
-            return [opt("spirit.spark", "sparkles", "Wonder"), opt("spirit.moon", "moon.stars.fill", "Stillness"),
-                    opt("spirit.flame", "flame.fill", "Devotion"), opt("spirit.sun", "sun.max.fill", "Light")]
+            return [scene("spirit.spark", "Wonder", "sparkles", "moon.stars.fill"),
+                    scene("spirit.moon",  "Stillness", "moon.stars.fill", "sparkles"),
+                    scene("spirit.flame", "Devotion", "flame.fill", "sparkles"),
+                    scene("spirit.sun",   "Light", "sun.max.fill", "cloud.fill")]
         default:
-            return [opt("gen.circle", "circle.fill", "Plain"), opt("gen.spark", "sparkles", "Spark"),
-                    opt("gen.leaf", "leaf.fill", "Leaf"), opt("gen.star", "star.fill", "Star")]
+            return [scene("gen.circle", "Plain", "circle.fill", "sparkles"),
+                    scene("gen.spark", "Spark", "sparkles", "circle.fill"),
+                    scene("gen.leaf", "Leaf", "leaf.fill", "sun.max.fill"),
+                    scene("gen.star", "Star", "star.fill", "sparkles")]
         }
-    }
-
-    private static func opt(_ id: String, _ symbol: String, _ label: String) -> Option {
-        Option(id: id, symbol: symbol, label: label)
     }
 
     // MARK: - Chosen option (per axis)
@@ -82,43 +113,48 @@ enum AxisArt {
 
     /// The full-fidelity picture for an option, in that axis's colour.
     ///
-    /// NO CONTAINER. The form is drawn on transparency and floats on its own — a shape in a
-    /// filled circle is an app icon by construction, however the inside is composed, and no
-    /// amount of work on the inside changes that.
+    /// NO CONTAINER. The scene is drawn on transparency and floats on its own — a shape in a
+    /// filled circle is an app icon by construction, however the inside is composed.
     ///
-    /// The form is a gradient masked by the shape, plus grain, so it has depth without a
-    /// badge around it. Because it sits on transparency, pixellation eats the silhouette too:
-    /// a young axis is a scatter of loose blocks that gathers into a recognisable thing.
+    /// One gradient masked by ALL the layers at once, so a scene reads as one object cut from
+    /// one piece of colour rather than as a collage of separate glyphs.
     ///
-    /// Still placeholder art. A symbol is a symbol; the real version wants illustration, and
-    /// what this can settle is the mechanic, not the final look.
+    /// Still placeholder art. What this can settle is the mechanic and the composition.
     static func source(_ option: Option, tint: UIColor) -> UIImage {
         let cacheKey = "\(option.id)|\(tint.hashValue)"
         if let hit = sourceCache[cacheKey] { return hit }
 
         var seed = UInt64(abs(option.id.hashValue) % 100_000) &+ 7
-        func rnd() -> CGFloat {                     // deterministic per option
+        func rnd() -> CGFloat {
             seed = seed &* 6364136223846793005 &+ 1442695040888963407
             return CGFloat((seed >> 33) % 1000) / 1000
         }
 
         var h: CGFloat = 0, sat: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         tint.getHue(&h, saturation: &sat, brightness: &b, alpha: &a)
-        func shade(_ dh: CGFloat, _ ds: CGFloat, _ db: CGFloat, _ alpha: CGFloat = 1) -> UIColor {
+        func shade(_ dh: CGFloat, _ ds: CGFloat, _ db: CGFloat) -> UIColor {
             UIColor(hue: (h + dh).truncatingRemainder(dividingBy: 1),
                     saturation: min(1, max(0, sat + ds)),
-                    brightness: min(1, max(0, b + db)), alpha: alpha)
+                    brightness: min(1, max(0, b + db)), alpha: 1)
         }
 
         let size = CGSize(width: side, height: side)
-        let config = UIImage.SymbolConfiguration(pointSize: side * 0.95, weight: .regular)
-        let glyph = (UIImage(systemName: option.symbol, withConfiguration: config)
-                     ?? UIImage(systemName: "circle.fill", withConfiguration: config))?
-            .withTintColor(.white, renderingMode: .alwaysOriginal)
+
+        // Every layer on one transparent sheet — this becomes the mask.
+        let mask = UIGraphicsImageRenderer(size: size).image { _ in
+            for layer in option.layers {
+                let config = UIImage.SymbolConfiguration(pointSize: side * layer.scale, weight: .regular)
+                guard let glyph = (UIImage(systemName: layer.symbol, withConfiguration: config)
+                                   ?? UIImage(systemName: "circle.fill", withConfiguration: config))?
+                    .withTintColor(.white, renderingMode: .alwaysOriginal) else { continue }
+                glyph.draw(in: CGRect(x: side * layer.x - glyph.size.width / 2,
+                                      y: side * layer.y - glyph.size.height / 2,
+                                      width: glyph.size.width, height: glyph.size.height))
+            }
+        }
 
         let image = UIGraphicsImageRenderer(size: size).image { ctx in
             let c = ctx.cgContext
-            // Paint the colour across the whole square…
             if let g = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
                                   colors: [shade(0.04, -0.16, 0.26).cgColor,
                                            shade(-0.02, 0.14, -0.16).cgColor] as CFArray,
@@ -129,25 +165,15 @@ enum AxisArt {
                                      end: CGPoint(x: side/2 + cos(angle)*side/2, y: side/2 + sin(angle)*side/2),
                                      options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
             }
-            // …grain, so it is not a flawless digital gradient and the blocks have something
-            // to bite on early in the arc…
             for _ in 0..<500 {
                 let v = rnd()
                 c.setFillColor(UIColor(white: v > 0.5 ? 1 : 0, alpha: 0.06).cgColor)
                 c.fill(CGRect(x: rnd() * side, y: rnd() * side, width: 3, height: 3))
             }
-            // …then keep only what falls inside the form. The mask has to cover the WHOLE
-            // canvas: destinationIn only clears the rect it is drawn into, so masking with the
-            // glyph's own (smaller) rect left the gradient standing either side of it as two
-            // bars. Centre the glyph on a full-size transparent layer and mask with that.
-            if let glyph {
-                let mask = UIGraphicsImageRenderer(size: size).image { _ in
-                    glyph.draw(in: CGRect(x: (side - glyph.size.width) / 2,
-                                          y: (side - glyph.size.height) / 2,
-                                          width: glyph.size.width, height: glyph.size.height))
-                }
-                mask.draw(in: CGRect(origin: .zero, size: size), blendMode: .destinationIn, alpha: 1)
-            }
+            // The mask must cover the WHOLE canvas: destinationIn only clears the rect it is
+            // drawn into, so masking with a glyph's own smaller rect leaves bars of raw
+            // gradient standing beside it.
+            mask.draw(in: CGRect(origin: .zero, size: size), blendMode: .destinationIn, alpha: 1)
         }
         sourceCache[cacheKey] = image
         return image
@@ -161,25 +187,53 @@ enum AxisArt {
     /// grown is still unmistakably blocks, and only the last stretch resolves.
     static func blocks(for maturity: Double) -> Int {
         let m = min(1, max(0, maturity))
-        return Int(round(3.0 * pow(42.0, pow(m, 2.1))))  // 3 blocks at 0, ~8 at ½, 126 at 1
+        return Int(round(4.0 * pow(34.0, pow(m, 1.8))))  // 4 blocks at 0, ~11 at ½, 136 at 1
     }
 
-    /// The picture as it stands at this maturity: blocky when young, whole when grown.
+    /// The picture as it stands at this maturity: a sparse scatter of blocks when young,
+    /// whole when grown.
+    ///
+    /// Coarseness alone was not enough. A simple shape survives being reduced to a handful of
+    /// blocks — a heart at five blocks across is still unmistakably a heart — so a young Heart
+    /// looked finished while a young Mind looked like nothing. Blocks are therefore also
+    /// DROPPED at random, in proportion to how far there is to go, so what you see early is
+    /// genuinely incomplete rather than merely chunky. The scatter is deterministic per
+    /// picture, so it does not crawl between frames.
     static func rendered(_ option: Option, tint: UIColor, maturity: Double) -> UIImage {
+        let m = min(1, max(0, maturity))
         let src = source(option, tint: tint)
-        let n = blocks(for: maturity)
-        guard n < Int(side) else { return src }         // fully grown — no grid at all
-        let cacheKey = "\(option.id)|\(tint.hashValue)|\(n)"
+        let n = blocks(for: m)
+        // Cache on a quantised maturity, not just the block count: the dissolve keeps
+        // changing after the grid has stopped getting finer.
+        let q = Int((m * 40).rounded())
+        let cacheKey = "\(option.id)|\(tint.hashValue)|\(n)|\(q)"
         if let hit = blockCache[cacheKey] { return hit }
 
-        // Down to an n×n grid…
         let small = UIGraphicsImageRenderer(size: CGSize(width: n, height: n)).image { _ in
             src.draw(in: CGRect(x: 0, y: 0, width: n, height: n))
         }
-        // …and back up with interpolation OFF, which is what makes them blocks and not blur.
+        let cell = side / CGFloat(n)
+        // Gentle. Coarseness already does most of the early work — at four blocks across, a
+        // heart is a blob — and stacking a heavy dissolve on top of that erased the picture
+        // entirely rather than leaving it unfinished.
+        let missing = pow(1 - m, 2.0) * 0.34
+        var seed = UInt64(abs(option.id.hashValue) % 100_000) &+ UInt64(q) &+ 11
+        func rnd() -> Double {
+            seed = seed &* 6364136223846793005 &+ 1442695040888963407
+            return Double((seed >> 33) % 1000) / 1000
+        }
+
         let out = UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { ctx in
             ctx.cgContext.interpolationQuality = .none
             small.draw(in: CGRect(x: 0, y: 0, width: side, height: side))
+            guard missing > 0.001 else { return }
+            ctx.cgContext.setBlendMode(.clear)
+            for row in 0..<n {
+                for col in 0..<n where rnd() < missing {
+                    ctx.cgContext.fill(CGRect(x: CGFloat(col) * cell, y: CGFloat(row) * cell,
+                                              width: cell, height: cell))
+                }
+            }
         }
         blockCache[cacheKey] = out
         return out

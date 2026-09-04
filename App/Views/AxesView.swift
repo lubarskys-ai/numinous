@@ -32,10 +32,6 @@ struct AxesView: View {
     @State private var offset: CGSize = .zero
     @GestureState private var drag: CGSize = .zero
 
-    /// Where the user has pushed a form. They stay where you put them.
-    @State private var nudges: [String: CGSize] = [:]
-    @GestureState private var dragging: (id: String, translation: CGSize)? = nil
-
     @State private var picking: Axis?
     /// Prototype-only: `maturityFullPerAxis` is 480 links per axis, so a real vault sits near
     /// zero for a long time and the arc would be unjudgeable without this.
@@ -81,8 +77,9 @@ struct AxesView: View {
                         // sitting where .position puts them.
                         ZStack {
                             ForEach(Array(frames.enumerated()), id: \.element.axis.id) { index, f in
-                                form(f.axis, image: f.image, size: f.size, t: t)
-                                    .position(place(index, axis: f.axis))
+                                FloatingForm(axis: f.axis, image: f.image, size: f.size,
+                                             base: Self.anchors[index % Self.anchors.count],
+                                             t: t) { picking = f.axis }
                             }
                         }
                     }
@@ -150,52 +147,13 @@ struct AxesView: View {
         CGPoint(x: 116, y: 516),
     ]
 
-    private func place(_ index: Int, axis: Axis) -> CGPoint {
-        let base = Self.anchors[index % Self.anchors.count]
-        let nudge = nudges[axis.id] ?? .zero
-        let live = dragging?.id == axis.id ? (dragging?.translation ?? .zero) : .zero
-        return CGPoint(x: base.x + nudge.width + live.width,
-                       y: base.y + nudge.height + live.height)
-    }
-
-    /// No labels, so the forms can be bigger. A part of your life you have to read the name of
-    /// isn't being shown to you, it's being reported to you — and the shape says which anyway.
+    /// No labels, so the forms can be bigger. A part of your life you have to read the name
+    /// of isn't being shown to you, it's being reported to you — and the shape says which.
     private func diameter(_ m: Double) -> CGFloat { 100 + 46 * CGFloat(min(1, max(0, m))) }
-
-    private func form(_ axis: Axis, image: UIImage, size: CGFloat, t: TimeInterval) -> some View {
-        let mv = Self.motion(axis.id, t)
-        return Image(uiImage: image)
-            .resizable()
-            // SMOOTH interpolation, deliberately. The blocks are baked into the bitmap, so
-            // they stay blocks; what this changes is the RESAMPLING. With .none every block
-            // edge snaps to a whole pixel, and under a moving transform each edge crosses its
-            // boundary on its own frame — the blocks pop and crawl a pixel at a time. That
-            // was the jerkiness, not the frame rate (the app sits at ~12% CPU here). Smoothing
-            // the edges costs almost nothing to look at when a block is a dozen points across,
-            // and it is the difference between fluid motion and a shimmering grid.
-            .interpolation(.high)
-            .frame(width: size, height: size)
-            .scaleEffect(x: mv.sx, y: mv.sy)
-            .rotationEffect(.degrees(mv.rot))
-            .offset(y: mv.dy)
-            .drawingGroup()
-            .contentShape(Rectangle())
-            .onTapGesture { picking = axis }
-            .gesture(
-                DragGesture(minimumDistance: 6)
-                    .updating($dragging) { v, state, _ in state = (axis.id, v.translation) }
-                    .onEnded { v in
-                        var n = nudges[axis.id] ?? .zero
-                        n.width += v.translation.width
-                        n.height += v.translation.height
-                        nudges[axis.id] = n
-                    }
-            )
-    }
 
     // MARK: - Motion
 
-    private struct Motion {
+    struct Motion {
         var sx: CGFloat = 1
         var sy: CGFloat = 1
         var rot: Double = 0
@@ -204,7 +162,7 @@ struct AxesView: View {
 
     /// Each part moves the way that part of a life moves. This is where the character lives
     /// now: a still symbol is a still symbol, but a heart that beats is a heart.
-    private static func motion(_ axisID: String, _ t: TimeInterval) -> Motion {
+    static func motion(_ axisID: String, _ t: TimeInterval) -> Motion {
         switch axisID {
         case "heart":
             // Lub-dub, then rest. Two Gaussian pulses in a 1.5s cycle — a plain sine reads as
@@ -252,6 +210,53 @@ struct AxesView: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 10)
         .background(.regularMaterial)
+    }
+}
+
+/// One floating form, owning its own drag.
+///
+/// This is a separate view for a reason that is entirely about smoothness: while the drag
+/// lived on the parent, every touch event during a drag invalidated the parent's body, which
+/// re-ran axisMaturities() over the whole graph and re-derived all seven images. Dragging was
+/// the jerkiest thing on the screen because it was doing the most work. Here a drag touches
+/// nothing but this one view.
+private struct FloatingForm: View {
+    let axis: Axis
+    let image: UIImage
+    let size: CGFloat
+    let base: CGPoint
+    let t: TimeInterval
+    let onTap: () -> Void
+
+    /// Where the user has pushed it. It stays where you put it.
+    @State private var nudge: CGSize = .zero
+    @GestureState private var live: CGSize = .zero
+
+    var body: some View {
+        let mv = AxesView.motion(axis.id, t)
+        Image(uiImage: image)
+            .resizable()
+            // SMOOTH interpolation, deliberately. The blocks are baked into the bitmap, so
+            // they stay blocks; what this changes is the RESAMPLING. With .none every block
+            // edge snaps to a whole pixel, and under a moving transform each edge crosses its
+            // boundary on its own frame — the blocks pop and crawl a pixel at a time.
+            .interpolation(.high)
+            .frame(width: size, height: size)
+            .scaleEffect(x: mv.sx, y: mv.sy)
+            .rotationEffect(.degrees(mv.rot))
+            .offset(y: mv.dy)
+            .contentShape(Rectangle())
+            .position(x: base.x + nudge.width + live.width,
+                      y: base.y + nudge.height + live.height)
+            .onTapGesture { onTap() }
+            .gesture(
+                DragGesture(minimumDistance: 6)
+                    .updating($live) { v, state, _ in state = v.translation }
+                    .onEnded { v in
+                        nudge.width += v.translation.width
+                        nudge.height += v.translation.height
+                    }
+            )
     }
 }
 
