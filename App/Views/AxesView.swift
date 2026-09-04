@@ -42,10 +42,15 @@ struct AxesView: View {
         NavigationStack {
             GeometryReader { geo in
                 let frames: [AxisFrame] = model.axes.map { axis in
+                    let option = AxisArt.chosen(for: axis.id)
                     let m = preview ?? (mats[axis.id] ?? 0)
+                    // Full fidelity, always. The blocks and the dissolve are a shader now, so
+                    // nothing is pre-rendered per maturity and the source can be a bought icon
+                    // (or eventually a running animation) rather than only what we can draw.
                     return AxisFrame(axis: axis,
-                                     image: AxisArt.rendered(AxisArt.chosen(for: axis.id),
-                                                             tint: UIColor(axis.color), maturity: m),
+                                     image: AxisArt.artwork(option)
+                                         ?? AxisArt.source(option, tint: UIColor(axis.color)),
+                                     maturity: m,
                                      size: diameter(m))
                 }
                 AxesField(frames: frames,
@@ -182,6 +187,7 @@ struct AxesView: View {
 struct AxisFrame: Identifiable {
     let axis: Axis
     let image: UIImage
+    let maturity: Double
     let size: CGFloat
     var id: String { axis.id }
 }
@@ -235,7 +241,8 @@ private struct AxesField: View {
                 // .position puts them.
                 ZStack {
                     ForEach(Array(frames.enumerated()), id: \.element.id) { index, f in
-                        FloatingForm(axis: f.axis, image: f.image, size: f.size,
+                        FloatingForm(axis: f.axis, image: f.image, maturity: f.maturity,
+                                     size: f.size,
                                      base: AxesView.anchors[index % AxesView.anchors.count],
                                      t: t) { onPick(f.axis) }
                     }
@@ -267,6 +274,7 @@ private struct AxesField: View {
 private struct FloatingForm: View {
     let axis: Axis
     let image: UIImage
+    let maturity: Double
     let size: CGFloat
     let base: CGPoint
     let t: TimeInterval
@@ -280,12 +288,12 @@ private struct FloatingForm: View {
         let mv = AxesView.motion(axis.id, t)
         Image(uiImage: image)
             .resizable()
-            // SMOOTH interpolation, deliberately. The blocks are baked into the bitmap, so
-            // they stay blocks; what this changes is the RESAMPLING. With .none every block
-            // edge snaps to a whole pixel, and under a moving transform each edge crosses its
-            // boundary on its own frame — the blocks pop and crawl a pixel at a time.
+            // Smooth: the picture underneath is full fidelity now, and the blocks are cut by
+            // the shader at exactly the right size. Nearest-neighbour here would only fight it.
             .interpolation(.medium)
             .frame(width: size, height: size)
+            .resolving(maturity: maturity, side: size,
+                       seed: Double(abs(axis.id.hashValue % 997)))
             .scaleEffect(x: mv.sx, y: mv.sy)
             .rotationEffect(.degrees(mv.rot))
             .offset(y: mv.dy)
@@ -325,10 +333,14 @@ private struct AxisImagePicker: View {
                             chosen = option.id
                         } label: {
                             VStack(spacing: 9) {
-                                Image(uiImage: AxisArt.rendered(option, tint: UIColor(axis.color), maturity: maturity))
+                                Image(uiImage: AxisArt.artwork(option)
+                                        ?? AxisArt.source(option, tint: UIColor(axis.color)))
                                     .resizable()
-                                    .interpolation(.none)
+                                    .interpolation(.medium)
                                     .aspectRatio(1, contentMode: .fit)
+                                    .frame(width: 120, height: 120)
+                                    .resolving(maturity: maturity, side: 120,
+                                               seed: Double(abs(option.id.hashValue % 997)))
                                     .padding(10)
                                     .background {
                                         RoundedRectangle(cornerRadius: 16, style: .continuous)

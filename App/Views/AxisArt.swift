@@ -9,9 +9,11 @@ import NuminousCore
 /// Symbol so the mechanic can be judged before anyone commissions a set of images. Real
 /// art would be bundled assets keyed by the same ids; nothing else here would change.
 ///
-/// Pixellation is done with genuine blocks — the image is drawn down to an N×N grid and
-/// scaled back up with interpolation OFF. A Gaussian blur was the obvious alternative and
-/// is the wrong one: blurred reads as "loading" or "broken", blocks read as deliberate.
+/// This file only makes the FULL-FIDELITY picture. The blocks and the dissolve that carry
+/// growth live in `Resolve.metal` and are applied on the GPU, so the arc is continuous, the
+/// picture can animate while it is coarse, and a bought icon drops in wherever one exists.
+/// The block curve deliberately lives in exactly one place — `ResolveEffect` — because two
+/// copies of it would drift.
 enum AxisArt {
 
     /// One element of a picture: a symbol, how big, and where it sits.
@@ -55,7 +57,7 @@ enum AxisArt {
                     scene("gut.cup",   "Slow mornings", "cup.and.saucer.fill", "sun.max.fill"),
                     scene("gut.flame", "Cooking", "flame.fill", "fork.knife")]
         case "mind":
-            return [scene("mind.brain", "Thinking", "brain.head.profile", "lightbulb.fill"),
+            return [scene("mind-brain", "Thinking", "brain.head.profile", "lightbulb.fill"),
                     scene("mind.book",  "Reading", "book.fill", "lightbulb.fill", "sparkles"),
                     scene("mind.idea",  "Ideas", "lightbulb.fill", "sparkles"),
                     scene("mind.write", "Writing", "pencil", "book.fill")]
@@ -105,11 +107,22 @@ enum AxisArt {
         UserDefaults.standard.set(option.id, forKey: key(axisID))
     }
 
+    // MARK: - Real artwork
+
+    /// A bought or drawn image for this option, if one is bundled. Falls back to the
+    /// generated placeholder, so the seven can be replaced one at a time rather than all at
+    /// once — which is how they will actually arrive.
+    static func artwork(_ option: Option) -> UIImage? {
+        guard let url = Bundle.main.url(forResource: option.id, withExtension: "png",
+                                        subdirectory: "AxisArt")
+                ?? Bundle.main.url(forResource: option.id, withExtension: "png") else { return nil }
+        return UIImage(contentsOfFile: url.path)
+    }
+
     // MARK: - Rendering
 
     private static let side: CGFloat = 240
     private static var sourceCache: [String: UIImage] = [:]
-    private static var blockCache: [String: UIImage] = [:]
 
     /// The full-fidelity picture for an option, in that axis's colour.
     ///
@@ -179,63 +192,4 @@ enum AxisArt {
         return image
     }
 
-    /// How coarse the grid is at a given maturity.
-    ///
-    /// Gamma-curved and slow. The first version reached a legible picture around a third of
-    /// the way up, so most of a life's growth bought no visible change and things read as
-    /// finished long before they were. Squaring the input holds the coarse end open: half
-    /// grown is still unmistakably blocks, and only the last stretch resolves.
-    static func blocks(for maturity: Double) -> Int {
-        let m = min(1, max(0, maturity))
-        return Int(round(4.0 * pow(34.0, pow(m, 1.8))))  // 4 blocks at 0, ~11 at ½, 136 at 1
-    }
-
-    /// The picture as it stands at this maturity: a sparse scatter of blocks when young,
-    /// whole when grown.
-    ///
-    /// Coarseness alone was not enough. A simple shape survives being reduced to a handful of
-    /// blocks — a heart at five blocks across is still unmistakably a heart — so a young Heart
-    /// looked finished while a young Mind looked like nothing. Blocks are therefore also
-    /// DROPPED at random, in proportion to how far there is to go, so what you see early is
-    /// genuinely incomplete rather than merely chunky. The scatter is deterministic per
-    /// picture, so it does not crawl between frames.
-    static func rendered(_ option: Option, tint: UIColor, maturity: Double) -> UIImage {
-        let m = min(1, max(0, maturity))
-        let src = source(option, tint: tint)
-        let n = blocks(for: m)
-        // Cache on a quantised maturity, not just the block count: the dissolve keeps
-        // changing after the grid has stopped getting finer.
-        let q = Int((m * 40).rounded())
-        let cacheKey = "\(option.id)|\(tint.hashValue)|\(n)|\(q)"
-        if let hit = blockCache[cacheKey] { return hit }
-
-        let small = UIGraphicsImageRenderer(size: CGSize(width: n, height: n)).image { _ in
-            src.draw(in: CGRect(x: 0, y: 0, width: n, height: n))
-        }
-        let cell = side / CGFloat(n)
-        // Gentle. Coarseness already does most of the early work — at four blocks across, a
-        // heart is a blob — and stacking a heavy dissolve on top of that erased the picture
-        // entirely rather than leaving it unfinished.
-        let missing = pow(1 - m, 2.0) * 0.34
-        var seed = UInt64(abs(option.id.hashValue) % 100_000) &+ UInt64(q) &+ 11
-        func rnd() -> Double {
-            seed = seed &* 6364136223846793005 &+ 1442695040888963407
-            return Double((seed >> 33) % 1000) / 1000
-        }
-
-        let out = UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { ctx in
-            ctx.cgContext.interpolationQuality = .none
-            small.draw(in: CGRect(x: 0, y: 0, width: side, height: side))
-            guard missing > 0.001 else { return }
-            ctx.cgContext.setBlendMode(.clear)
-            for row in 0..<n {
-                for col in 0..<n where rnd() < missing {
-                    ctx.cgContext.fill(CGRect(x: CGFloat(col) * cell, y: CGFloat(row) * cell,
-                                              width: cell, height: cell))
-                }
-            }
-        }
-        blockCache[cacheKey] = out
-        return out
-    }
 }

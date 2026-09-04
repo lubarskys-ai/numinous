@@ -44,6 +44,15 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
+      # A .metal shader in the app target needs the Metal toolchain, which Xcode now ships
+      # as a separately downloadable component — a runner without it fails with "cannot
+      # execute tool 'metal'", which reads like a code error and isn't one. Idempotent.
+      - name: Ensure Metal toolchain
+        run: |
+          if ! xcodebuild -showComponent MetalToolchain 2>/dev/null | grep -q "Status: installed"; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+
       - name: Build app (iOS Simulator SDK)
         run: |
           set -o pipefail
