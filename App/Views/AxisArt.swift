@@ -81,34 +81,93 @@ enum AxisArt {
     private static var blockCache: [String: UIImage] = [:]
 
     /// The full-fidelity picture for an option, in that axis's colour.
+    ///
+    /// A composition, not an icon on a swatch: two off-hue glows, grain, and a subject drawn
+    /// larger than the frame so the circle CROPS it. That crop is the difference — an icon is
+    /// centred with air around it, a picture runs off the edge. Everything is seeded from the
+    /// option id, so each choice is its own image and stays that image.
+    ///
+    /// It is still placeholder art. Generated compositions have a ceiling, and the real
+    /// version of this idea wants illustration or photography; what this can settle is the
+    /// mechanic and the composition, not the final look.
+    ///
+    /// Drawn as a CIRCLE on transparency — the silhouette then pixellates along with the
+    /// contents, so a young axis is a blocky smudge rather than a crisp disc full of blocks.
     static func source(_ option: Option, tint: UIColor) -> UIImage {
         let cacheKey = "\(option.id)|\(tint.hashValue)"
         if let hit = sourceCache[cacheKey] { return hit }
+
+        var seed = UInt64(abs(option.id.hashValue) % 100_000) &+ 7
+        func rnd() -> CGFloat {                     // deterministic per option
+            seed = seed &* 6364136223846793005 &+ 1442695040888963407
+            return CGFloat((seed >> 33) % 1000) / 1000
+        }
+
+        var h: CGFloat = 0, sat: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        tint.getHue(&h, saturation: &sat, brightness: &b, alpha: &a)
+        func shade(_ dh: CGFloat, _ ds: CGFloat, _ db: CGFloat, _ alpha: CGFloat = 1) -> UIColor {
+            UIColor(hue: (h + dh).truncatingRemainder(dividingBy: 1),
+                    saturation: min(1, max(0, sat + ds)),
+                    brightness: min(1, max(0, b + db)), alpha: alpha)
+        }
+
         let size = CGSize(width: side, height: side)
         let image = UIGraphicsImageRenderer(size: size).image { ctx in
-            // A two-stop wash of the axis colour, so each picture still reads as "this axis"
-            // when it is too pixellated to read as anything else.
             let c = ctx.cgContext
-            var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-            tint.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
-            let top = UIColor(hue: h, saturation: max(0, s - 0.18), brightness: min(1, b + 0.22), alpha: 1)
-            let bottom = UIColor(hue: h, saturation: min(1, s + 0.12), brightness: max(0, b - 0.24), alpha: 1)
+            c.addEllipse(in: CGRect(origin: .zero, size: size))
+            c.clip()
+
+            // Ground: a deep-to-light wash at a per-option angle.
+            let angle = rnd() * .pi * 2
+            let start = CGPoint(x: side / 2 - cos(angle) * side, y: side / 2 - sin(angle) * side)
+            let end = CGPoint(x: side / 2 + cos(angle) * side, y: side / 2 + sin(angle) * side)
             if let g = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                                  colors: [top.cgColor, bottom.cgColor] as CFArray, locations: [0, 1]) {
-                // Extend past both ends, or the corners beyond the gradient's axis stay unpainted.
-                c.drawLinearGradient(g, start: .zero, end: CGPoint(x: side * 0.35, y: side),
+                                  colors: [shade(0, -0.10, 0.20).cgColor, shade(0.02, 0.10, -0.30).cgColor] as CFArray,
+                                  locations: [0, 1]) {
+                c.drawLinearGradient(g, start: start, end: end,
                                      options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
             }
-            let config = UIImage.SymbolConfiguration(pointSize: side * 0.44, weight: .semibold)
-            // A missing symbol must not blank the picture — fall back rather than draw nothing.
+
+            // Two soft glows pulled slightly off the axis hue — what keeps it from reading flat.
+            for i in 0..<2 {
+                let gx = side * (0.18 + rnd() * 0.64), gy = side * (0.16 + rnd() * 0.62)
+                let radius = side * (0.34 + rnd() * 0.30)
+                let hueShift: CGFloat = i == 0 ? 0.055 : -0.06
+                let glow = shade(hueShift, -0.18, 0.28, 0.55)
+                if let g = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                      colors: [glow.cgColor, glow.withAlphaComponent(0).cgColor] as CFArray,
+                                      locations: [0, 1]) {
+                    c.drawRadialGradient(g, startCenter: CGPoint(x: gx, y: gy), startRadius: 0,
+                                         endCenter: CGPoint(x: gx, y: gy), endRadius: radius, options: [])
+                }
+            }
+
+            // The subject, drawn BIGGER THAN THE FRAME and off-centre, so the circle crops it.
+            // This is the whole difference between an icon and a picture: an icon sits
+            // centred inside its badge with air around it; a photograph runs off the edge.
+            let config = UIImage.SymbolConfiguration(pointSize: side * (1.02 + rnd() * 0.30), weight: .light)
             let glyph = UIImage(systemName: option.symbol, withConfiguration: config)
                 ?? UIImage(systemName: "circle.fill", withConfiguration: config)
             if let glyph {
-                let tinted = glyph.withTintColor(.white.withAlphaComponent(0.92), renderingMode: .alwaysOriginal)
-                let r = CGRect(x: (side - tinted.size.width) / 2, y: (side - tinted.size.height) / 2,
-                               width: tinted.size.width, height: tinted.size.height)
-                tinted.draw(in: r)
+                let tinted = glyph.withTintColor(.white.withAlphaComponent(0.55), renderingMode: .alwaysOriginal)
+                let cx = side * (0.30 + rnd() * 0.42), cy = side * (0.30 + rnd() * 0.42)
+                tinted.draw(in: CGRect(x: cx - tinted.size.width / 2, y: cy - tinted.size.height / 2,
+                                       width: tinted.size.width, height: tinted.size.height))
             }
+
+            // Grain. A perfectly smooth gradient is the other tell of generated art, and it
+            // also gives the pixellation something to bite on early in the arc.
+            for _ in 0..<420 {
+                let x = rnd() * side, y = rnd() * side
+                let v = rnd()
+                c.setFillColor(UIColor(white: v > 0.5 ? 1 : 0, alpha: 0.05 + rnd() * 0.05).cgColor)
+                c.fill(CGRect(x: x, y: y, width: 2.5, height: 2.5))
+            }
+
+            // A breath of shadow at the rim so the disc has some body.
+            c.setStrokeColor(UIColor.black.withAlphaComponent(0.16).cgColor)
+            c.setLineWidth(side * 0.08)
+            c.strokeEllipse(in: CGRect(origin: .zero, size: size).insetBy(dx: -side * 0.02, dy: -side * 0.02))
         }
         sourceCache[cacheKey] = image
         return image
