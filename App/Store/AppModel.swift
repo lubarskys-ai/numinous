@@ -122,6 +122,18 @@ final class AppModel: ObservableObject {
         return min(1, Double(n) / Self.maturityFullPerAxis)
     }
 
+    /// Every axis's maturity in ONE pass over the links. `axisMaturity` scans them all
+    /// for a single axis, so asking it seven times — which any per-axis view does on every
+    /// render — walks the whole graph seven times.
+    func axisMaturities() -> [String: Double] {
+        var counts: [String: Int] = [:]
+        for l in score.links where l.isCounted {
+            if let a = l.axisA { counts[a, default: 0] += 1 }
+            if let b = l.axisB, b != l.axisA { counts[b, default: 0] += 1 }
+        }
+        return counts.mapValues { min(1, Double($0) / Self.maturityFullPerAxis) }
+    }
+
     /// Overall maturity — the average across axes, so the avatar as a whole forms
     /// slowly and only once growth is *broad* (drives staging + the companion).
     var maturity: Double {

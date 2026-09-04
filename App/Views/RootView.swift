@@ -39,6 +39,12 @@ struct RootView: View {
             MapView()
                 .tabItem { Label("Map", systemImage: "map") }
                 .tag("map")
+            // PROTOTYPE tab, here to be looked at rather than kept. If the idea holds, this
+            // belongs on Home — which already shows the figure and names your thinnest part —
+            // not as a sixth destination in a bar a reviewer already called too complicated.
+            AxesView()
+                .tabItem { Label("You", systemImage: "square.grid.2x2") }
+                .tag("axes")
         }
         // The companion follows you across every tab; tap it for the full avatar. It
         // hides while the keyboard is up so it never sits over a note's editing controls
