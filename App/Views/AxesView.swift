@@ -26,11 +26,11 @@ struct AxesView: View {
     private let dw: CGFloat = 340
     private let dh: CGFloat = 560
 
-    // Canvas pan + pinch.
-    @State private var scale: CGFloat = 1
-    @GestureState private var pinch: CGFloat = 1
-    @State private var offset: CGSize = .zero
-    @GestureState private var drag: CGSize = .zero
+    /// Memoised against `model.revision`, which AppModel documents as the way to hold
+    /// expensive derived collections: axisMaturities() walks every link, and recomputing it
+    /// inside a gesture-driven body meant a full graph scan per frame of every pan and pinch.
+    @State private var mats: [String: Double] = [:]
+    @State private var matsRevision: Int = -1
 
     @State private var picking: Axis?
     /// Prototype-only: `maturityFullPerAxis` is 480 links per axis, so a real vault sits near
@@ -38,64 +38,20 @@ struct AxesView: View {
     @State private var preview: Double? = nil
     @State private var showScrubber = false
 
-    private var zoom: CGFloat { min(4, max(0.7, scale * pinch)) }
-
     var body: some View {
         NavigationStack {
             GeometryReader { geo in
-                // Both computed ONCE per render. Reading maturity per form per frame meant
-                // seven whole-graph scans thirty times a second, and re-deriving the images on
-                // top of that; the animation only needs the transforms.
-                let mats = preview == nil ? model.axisMaturities() : [:]
-                let frames: [(axis: Axis, image: UIImage, size: CGFloat)] = model.axes.map { axis in
+                let frames: [AxisFrame] = model.axes.map { axis in
                     let m = preview ?? (mats[axis.id] ?? 0)
-                    return (axis,
-                            AxisArt.rendered(AxisArt.chosen(for: axis.id),
-                                             tint: UIColor(axis.color), maturity: m),
-                            diameter(m))
+                    return AxisFrame(axis: axis,
+                                     image: AxisArt.rendered(AxisArt.chosen(for: axis.id),
+                                                             tint: UIColor(axis.color), maturity: m),
+                                     size: diameter(m))
                 }
-                let fit = min(geo.size.width / dw, geo.size.height / dh)
-
-                ZStack {
-                    // The canvas takes the pan; each form takes its own drag, so pushing one
-                    // around never slides the whole world with it.
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .gesture(
-                            DragGesture(minimumDistance: 8)
-                                .updating($drag) { v, state, _ in state = v.translation }
-                                .onEnded { v in
-                                    offset.width += v.translation.width
-                                    offset.height += v.translation.height
-                                }
-                        )
-
-                    TimelineView(.animation) { timeline in
-                        let t = timeline.date.timeIntervalSinceReferenceDate
-                        // The ZStack is load-bearing. A bare ForEach as TimelineView's content
-                        // is not stacked — the forms accumulate down the screen instead of
-                        // sitting where .position puts them.
-                        ZStack {
-                            ForEach(Array(frames.enumerated()), id: \.element.axis.id) { index, f in
-                                FloatingForm(axis: f.axis, image: f.image, size: f.size,
-                                             base: Self.anchors[index % Self.anchors.count],
-                                             t: t) { picking = f.axis }
-                            }
-                        }
-                    }
-                }
-                .frame(width: dw, height: dh)
-                .scaleEffect(fit * zoom, anchor: .center)
-                .frame(width: geo.size.width, height: geo.size.height)
-                .offset(x: offset.width + drag.width, y: offset.height + drag.height)
-                .simultaneousGesture(
-                    MagnificationGesture()
-                        .updating($pinch) { v, state, _ in state = v }
-                        .onEnded { v in
-                            scale = min(4, max(0.7, scale * v))
-                            if scale <= 1.01 { offset = .zero }
-                        }
-                )
+                AxesField(frames: frames,
+                          fit: min(geo.size.width / dw, geo.size.height / dh),
+                          canvas: CGSize(width: dw, height: dh),
+                          viewport: geo.size) { picking = $0 }
             }
             .background(backdrop)
             .navigationTitle("You")
@@ -111,7 +67,15 @@ struct AxesView: View {
             .sheet(item: $picking) { axis in
                 AxisImagePicker(axis: axis, maturity: maturity(axis))
             }
+            .onAppear { refreshMaturities() }
+            .onChange(of: model.revision) { _ in refreshMaturities() }
         }
+    }
+
+    private func refreshMaturities() {
+        guard matsRevision != model.revision else { return }
+        mats = model.axisMaturities()
+        matsRevision = model.revision
     }
 
     /// Only for the picker sheet — the field itself reads the whole set once per render.
@@ -137,7 +101,7 @@ struct AxesView: View {
 
     /// Hand-placed scatter, not a grid — the point of the screen is that these are seven
     /// separate things, and a grid says "rows of the same thing".
-    private static let anchors: [CGPoint] = [
+    static let anchors: [CGPoint] = [
         CGPoint(x: 98,  y: 74),
         CGPoint(x: 246, y: 150),
         CGPoint(x: 82,  y: 232),
@@ -213,6 +177,86 @@ struct AxesView: View {
     }
 }
 
+/// One form's ingredients, computed by the parent and handed down as plain values so the
+/// field can pan and zoom without anything recomputing.
+struct AxisFrame: Identifiable {
+    let axis: Axis
+    let image: UIImage
+    let size: CGFloat
+    var id: String { axis.id }
+}
+
+/// The pannable, zoomable field.
+///
+/// This is a separate view for the same reason FloatingForm is: while pan and pinch lived on
+/// the parent, every frame of every gesture invalidated the parent's body, which walked the
+/// whole graph for maturities and re-derived all seven images. The gesture was paying for a
+/// full recomputation of the screen on every touch event. Here it owns its own state and the
+/// frames arrive as finished values, so a pan moves pixels and nothing else.
+private struct AxesField: View {
+    let frames: [AxisFrame]
+    let fit: CGFloat
+    let canvas: CGSize
+    let viewport: CGSize
+    let onPick: (Axis) -> Void
+
+    @State private var scale: CGFloat = 1
+    @GestureState private var pinch: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @GestureState private var drag: CGSize = .zero
+
+    private var zoom: CGFloat { min(4, max(0.7, scale * pinch)) }
+    private var gesturing: Bool { pinch != 1 || drag != .zero }
+
+    var body: some View {
+        ZStack {
+            // The canvas takes the pan; each form takes its own drag, so pushing one around
+            // never slides the whole world with it.
+            Color.clear
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 8)
+                        .updating($drag) { v, state, _ in state = v.translation }
+                        .onEnded { v in
+                            offset.width += v.translation.width
+                            offset.height += v.translation.height
+                        }
+                )
+
+            // Pause the breathing WHILE a gesture is live. Measured at ~14% CPU during a
+            // pinch, so this was never CPU-bound: the cost is the renderer resampling seven
+            // images every frame against a scale that is also changing every frame. Paused,
+            // the content is identical frame to frame and a pinch becomes a transform applied
+            // to something already drawn. Nobody is watching a heart beat while they zoom.
+            TimelineView(.animation(minimumInterval: nil, paused: gesturing)) { timeline in
+                let t = timeline.date.timeIntervalSinceReferenceDate
+                // The ZStack is load-bearing. A bare ForEach as TimelineView's content is not
+                // stacked — the forms accumulate down the screen instead of sitting where
+                // .position puts them.
+                ZStack {
+                    ForEach(Array(frames.enumerated()), id: \.element.id) { index, f in
+                        FloatingForm(axis: f.axis, image: f.image, size: f.size,
+                                     base: AxesView.anchors[index % AxesView.anchors.count],
+                                     t: t) { onPick(f.axis) }
+                    }
+                }
+            }
+        }
+        .frame(width: canvas.width, height: canvas.height)
+        .scaleEffect(fit * zoom, anchor: .center)
+        .frame(width: viewport.width, height: viewport.height)
+        .offset(x: offset.width + drag.width, y: offset.height + drag.height)
+        .simultaneousGesture(
+            MagnificationGesture()
+                .updating($pinch) { v, state, _ in state = v }
+                .onEnded { v in
+                    scale = min(4, max(0.7, scale * v))
+                    if scale <= 1.01 { offset = .zero }
+                }
+        )
+    }
+}
+
 /// One floating form, owning its own drag.
 ///
 /// This is a separate view for a reason that is entirely about smoothness: while the drag
@@ -240,7 +284,7 @@ private struct FloatingForm: View {
             // they stay blocks; what this changes is the RESAMPLING. With .none every block
             // edge snaps to a whole pixel, and under a moving transform each edge crosses its
             // boundary on its own frame — the blocks pop and crawl a pixel at a time.
-            .interpolation(.high)
+            .interpolation(.medium)
             .frame(width: size, height: size)
             .scaleEffect(x: mv.sx, y: mv.sy)
             .rotationEffect(.degrees(mv.rot))
