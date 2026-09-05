@@ -244,6 +244,15 @@ enum AxisArt {
     struct Animation {
         let frames: [UIImage]
         let duration: Double
+        /// A MORPH is a change of state, not a loop: the thing at the end is not the thing at
+        /// the start. A book that opens, a heart that fills. Those play from the axis's own
+        /// maturity rather than from a clock, so the picture stops being decoration and
+        /// becomes the reading — the book is shut when Mind is empty and open when it is full,
+        /// and it opens a little further each time you feed it.
+        ///
+        /// A LOOP returns to where it began — Lordicon's hover-pinch rests, pinches, rests —
+        /// and has nothing to say about maturity, so it plays on time as before.
+        let isMorph: Bool
     }
 
     /// Where imported frames live. Flat files, not a folder: a directory inside the app
@@ -289,7 +298,12 @@ enum AxisArt {
         }
 
         if frames.count > 1 {
-            found = Animation(frames: frames, duration: max(0.2, duration(forAxis: axisID)))
+            // A reveal is a picture that happens to arrive in pieces. There is nothing to
+            // play, so it is not offered as an animation at all and the still is used.
+            if mode(forAxis: axisID) != "reveal" {
+                found = Animation(frames: frames, duration: max(0.2, duration(forAxis: axisID)),
+                                  isMorph: mode(forAxis: axisID) == "morph")
+            }
         }
         animationCache[axisID] = found
         return found
@@ -311,13 +325,36 @@ enum AxisArt {
         return 2.0
     }
 
-    /// Which frame is showing at this moment. Nil when the axis has no animation, so callers
-    /// fall through to the still picture without branching twice.
-    static func frame(forAxis axisID: String, at t: TimeInterval) -> UIImage? {
+    /// Which frame is showing. Nil when the axis has no animation, so callers fall through to
+    /// the still picture without branching twice.
+    ///
+    /// A morph is positioned by MATURITY and a loop by the clock. Passing the maturity is
+    /// therefore not optional in spirit even though it has a default: an axis view that
+    /// forgets it gets a book that never opens.
+    static func frame(forAxis axisID: String, at t: TimeInterval, maturity: Double? = nil) -> UIImage? {
         guard let anim = animation(forAxis: axisID) else { return nil }
+        let last = anim.frames.count - 1
+        if anim.isMorph, let m = maturity {
+            return anim.frames[min(last, max(0, Int(min(1, max(0, m)) * Double(last))))]
+        }
         let phase = t.truncatingRemainder(dividingBy: anim.duration) / anim.duration
-        let index = min(anim.frames.count - 1, max(0, Int(phase * Double(anim.frames.count))))
-        return anim.frames[index]
+        return anim.frames[min(last, max(0, Int(phase * Double(anim.frames.count))))]
+    }
+
+    /// loop / morph / reveal, from the marker written at import. "loop" when unmarked, which
+    /// is what every animation imported before this existed should be treated as.
+    private static func mode(forAxis axisID: String) -> String {
+        let file = "\(axisID).mode"
+        if let dir = framesDir(axisID),
+           let text = try? String(contentsOf: dir.appendingPathComponent("\(file).txt"), encoding: .utf8) {
+            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if let url = Bundle.main.url(forResource: file, withExtension: "txt", subdirectory: "AxisArt")
+            ?? Bundle.main.url(forResource: file, withExtension: "txt"),
+           let text = try? String(contentsOf: url, encoding: .utf8) {
+            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return "loop"
     }
 
     static func hasAnimation(forAxis axisID: String) -> Bool { animation(forAxis: axisID) != nil }
@@ -342,6 +379,8 @@ enum AxisArt {
         let wanted = min(count, maxFrames)
         let indices = (0..<wanted).map { Int(Double($0) * Double(count) / Double(wanted)) }
 
+        let kind = classify(source, count: count)
+
         guard let dir = framesDir(axisID) else { throw ImportError.couldNotSave }
         removeFrames(axisID)
         do {
@@ -355,17 +394,77 @@ enum AxisArt {
             }
             try String(total).write(to: dir.appendingPathComponent("\(axisID).duration.txt"),
                                     atomically: true, encoding: .utf8)
+            try kind.write(to: dir.appendingPathComponent("\(axisID).mode.txt"),
+                           atomically: true, encoding: .utf8)
         } catch {
             throw ImportError.couldNotSave
         }
 
-        // A still of the first frame too, so anywhere that doesn't animate still has a picture.
-        if let cg = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+        // A still too, so anywhere that doesn't animate has a picture. For a loop or a morph
+        // that is the FIRST frame — the resting state, the closed book, which is also what an
+        // empty axis should show. For a reveal the first frame is blank, so the still has to
+        // be the finished drawing at the end.
+        if let cg = CGImageSourceCreateImageAtIndex(source, kind == "reveal" ? count - 1 : 0, nil) {
             try? importArtwork(UIImage(cgImage: cg), forAxis: axisID)
         }
         animationCache.removeValue(forKey: axisID)
         clearArtCache()
         return true
+    }
+
+    /// Does this animation END somewhere other than it STARTED?
+    ///
+    /// That one question separates the two kinds of icon, and it needs no naming convention
+    /// and no setting. Lordicon's hover-pinch rests, pinches and returns, so its first and
+    /// last frames are the same picture. Its morph-open starts as a closed book and ends as an
+    /// open one, and they are not the same picture at all.
+    ///
+    /// Measured the way you would look at it: both frames scaled to a thumbnail, and the mean
+    /// per-pixel difference taken. Small images because the question is about gross shape, and
+    /// a thumbnail is immune to the sub-pixel jitter a pinch leaves behind.
+    /// Which of the three kinds of animation this is.
+    ///
+    ///   loop    ends where it started — a pinch, a bounce. Plays on the clock.
+    ///   morph   ends somewhere else, and both ends are real pictures — a book that opens.
+    ///           Positioned by maturity, so it says something instead of just moving.
+    ///   reveal  starts from NOTHING and draws itself in. Only one end is a picture.
+    ///
+    /// Reveal has to be separated from morph or it is treated as one, and a maturity-driven
+    /// reveal means an empty axis shows an invisible icon — which reads as a bug, not as an
+    /// empty axis. Its resting state is its LAST frame, and it does not animate at all.
+    private static func classify(_ source: CGImageSource, count: Int) -> String {
+        guard count > 1,
+              let first = CGImageSourceCreateImageAtIndex(source, 0, nil),
+              let a = thumbnailBytes(first) else { return "loop" }
+        // Alpha across the first frame: an entrance animation begins with an empty canvas.
+        let painted = stride(from: 3, to: a.count, by: 4).filter { a[$0] > 8 }.count
+        if Double(painted) / Double(a.count / 4) < 0.02 { return "reveal" }
+        return looksLikeMorph(source, count: count) ? "morph" : "loop"
+    }
+
+    private static func looksLikeMorph(_ source: CGImageSource, count: Int) -> Bool {
+        guard count > 1,
+              let first = CGImageSourceCreateImageAtIndex(source, 0, nil),
+              let last = CGImageSourceCreateImageAtIndex(source, count - 1, nil),
+              let a = thumbnailBytes(first), let b = thumbnailBytes(last), a.count == b.count
+        else { return false }
+        var total = 0
+        for i in 0..<a.count { total += abs(Int(a[i]) - Int(b[i])) }
+        let mean = Double(total) / Double(a.count)
+        // A pinch that returns to rest lands near zero; a closed book against an open one is
+        // far above it. The gap between the two cases is wide, so the threshold is not delicate.
+        return mean > 6.0
+    }
+
+    private static func thumbnailBytes(_ image: CGImage, side: Int = 48) -> [UInt8]? {
+        var buffer = [UInt8](repeating: 0, count: side * side * 4)
+        guard let ctx = CGContext(data: &buffer, width: side, height: side, bitsPerComponent: 8,
+                                  bytesPerRow: side * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        ctx.interpolationQuality = .medium
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+        return buffer
     }
 
     private static func frameDelay(_ source: CGImageSource, _ index: Int) -> Double {

@@ -62,7 +62,10 @@ struct AxisDetailView: View {
                 let mv = AxisMotion.values(axis.id, t)
                 // An imported animation plays; otherwise the still picture, moved by the
                 // per-axis motion. Both go through the same resolve shader either way.
-                Image(uiImage: AxisArt.frame(forAxis: axis.id, at: t)
+                //
+                // A MORPH does not play at all: it is positioned by this axis's maturity, so
+                // the book opens as Mind fills rather than flapping on a timer.
+                Image(uiImage: AxisArt.frame(forAxis: axis.id, at: t, maturity: m)
                         ?? AxisArt.artwork(option, axisID: axis.id)
                         ?? AxisArt.source(option, tint: UIColor(axis.color)))
                     .resizable()
