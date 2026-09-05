@@ -34,5 +34,15 @@ public extension Axis {
     static let heart      = Axis(id: "heart",      name: "Heart",      colorHex: "#C44A73")
     static let spirit     = Axis(id: "spirit",     name: "Spirit",     colorHex: "#8A6DB0")
 
-    static let defaultSet: [Axis] = [.body, .gut, .mind, .meaning, .influences, .heart, .spirit]
+    /// Axes kept in the code but no longer offered, because there is no reliable way to
+    /// FILL them. Gut wanted nutrition data nobody logs consistently and Influences wanted a
+    /// steady diet of authors and mentors; both sat near-empty, and an axis that never grows
+    /// is worse than a missing one — it reads as a part of your life you are failing at when
+    /// really the app just never asked.
+    ///
+    /// Definitions stay so existing notes keep their axis and nothing is orphaned. Putting
+    /// either back is one line in `defaultSet` and one removal from `retiredIDs`.
+    static let retiredIDs: Set<String> = ["gut", "influences"]
+
+    static let defaultSet: [Axis] = [.body, .mind, .meaning, .heart, .spirit]
 }

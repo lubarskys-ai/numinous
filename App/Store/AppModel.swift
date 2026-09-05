@@ -136,7 +136,11 @@ final class AppModel: ObservableObject {
     /// diluting the moment a contact import created it.
     static let bookkeepingAxisIDs: Set<String> = ["concierge"]
 
-    var lifeAxes: [Axis] { axes.filter { !Self.bookkeepingAxisIDs.contains($0.id) } }
+    /// Hidden from the axis views for existing installs, the way `defaultSet` hides them from
+    /// new ones. Their notes and links are untouched — this is a retirement, not a deletion.
+    static let hiddenAxisIDs: Set<String> = bookkeepingAxisIDs.union(Axis.retiredIDs)
+
+    var lifeAxes: [Axis] { axes.filter { !Self.hiddenAxisIDs.contains($0.id) } }
 
     /// Every axis's maturity in ONE pass over the links. `axisMaturity` scans them all
     /// for a single axis, so asking it seven times — which any per-axis view does on every
@@ -351,28 +355,15 @@ final class AppModel: ObservableObject {
 
     /// One-time (v4): add the `gut` (gut-biome) axis, placed just after `body`
     /// (its fellow physical axis; fed by nutrition data via HealthKit).
-    private static func migrateAddGutAxis(_ axes: inout [Axis]) -> Bool {
-        guard !axes.contains(where: { $0.id == "gut" }) else { return false }
-        if let bodyIndex = axes.firstIndex(where: { $0.id == "body" }) {
-            axes.insert(.gut, at: bodyIndex + 1)
-        } else {
-            axes.append(.gut)
-        }
-        return true
-    }
+    /// Retired. `gut` is no longer offered, so this adds nothing — but the function stays so
+    /// the migration version numbering is unbroken for anyone upgrading across it.
+    private static func migrateAddGutAxis(_ axes: inout [Axis]) -> Bool { false }
 
     /// One-time (v8): add the `influences` axis — people who shape you through their
     /// work (book authors, and later podcast hosts, etc.). Placed just before `heart`,
     /// bridging Mind (their ideas) and Heart (them, as people).
-    private static func migrateAddInfluencesAxis(_ axes: inout [Axis]) -> Bool {
-        guard !axes.contains(where: { $0.id == "influences" }) else { return false }
-        if let heartIndex = axes.firstIndex(where: { $0.id == "heart" }) {
-            axes.insert(.influences, at: heartIndex)
-        } else {
-            axes.append(.influences)
-        }
-        return true
-    }
+    /// Retired, as above.
+    private static func migrateAddInfluencesAxis(_ axes: inout [Axis]) -> Bool { false }
 
     /// One-time (v8): turn the `Author` metadata on already-imported books into real
     /// `[[authors/Name]]` links in the body, create the author stub notes, and ensure
@@ -407,7 +398,7 @@ final class AppModel: ObservableObject {
     /// notes count (once engaged) and render with the right color.
     private static func ensureAuthorsFolder(_ folders: inout [Folder]) {
         guard !folders.contains(where: { $0.id == Folder.normalize("authors") }) else { return }
-        folders.append(Folder(name: "authors", category: "Authors", axisID: "influences"))
+        folders.append(Folder(name: "authors", category: "Authors", axisID: "mind"))
     }
 
     /// Split an author string into one target path per author. Only splits on clear
@@ -1075,10 +1066,10 @@ final class AppModel: ObservableObject {
     /// order below is the priority when a name could fit two axes.
     private func guessAxis(forFolderPath path: String) -> String? {
         let table: [(axis: String, words: [String])] = [
-            ("influences", ["author", "mentor", "inspiration", "quote", "influence", "hero", "teacher"]),
+            ("mind",       ["author", "mentor", "inspiration", "quote", "influence", "hero", "teacher"]),
             ("heart",      ["people", "contact", "friend", "family", "relationship", "love", "partner"]),
             ("body",       ["workout", "fitness", "health", "exercise", "run", "gym", "training", "body", "sport"]),
-            ("gut",        ["food", "meal", "diet", "nutrition", "recipe", "cook", "eat", "restaurant"]),
+            ("body",       ["food", "meal", "diet", "nutrition", "recipe", "cook", "eat", "restaurant"]),
             ("spirit",     ["spirit", "faith", "medit", "prayer", "gratitude", "mindful", "religion", "soul"]),
             ("mind",       ["book", "read", "idea", "learn", "study", "knowledge", "thought", "note", "research", "concept"]),
             ("meaning",    ["travel", "trip", "place", "work", "career", "project", "goal", "purpose", "journal", "diary", "mission"]),
@@ -1560,7 +1551,7 @@ final class AppModel: ObservableObject {
         // Author links spawned `authors/…` stub notes via ingest — make sure that
         // folder carries the Influences axis (otherwise it'd land uncategorized).
         if folder(named: "authors") == nil, notes.contains(where: { Folder.normalize($0.folderName) == "authors" }) {
-            folders.append(Folder(name: "authors", category: "Authors", axisID: "influences"))
+            folders.append(Folder(name: "authors", category: "Authors", axisID: "mind"))
             persist()
         }
         return result
@@ -1659,7 +1650,7 @@ final class AppModel: ObservableObject {
         switch item.kind {
         case .workout:   (folder, category, axis) = ("health/workouts", "Fitness", "body")
         case .mindful:   (folder, category, axis) = ("health/mindful", "Mindfulness", "spirit")
-        case .nutrition: (folder, category, axis) = ("health/nutrition", "Nutrition", "gut")
+        case .nutrition: (folder, category, axis) = ("health/nutrition", "Nutrition", "body")
         }
 
         // Longer effort grows you more: a workout's / mindful session's intensity scales
@@ -4035,11 +4026,11 @@ final class AppModel: ObservableObject {
         case "books", "reading", "learning", "articles", "podcasts":
             return "mind"
         case "authors", "author", "influences":
-            return "influences"
+            return "mind"
         case "health", "fitness", "exercise", "workouts", "sports", "golf clubs", "body":
             return "body"
         case "food", "nutrition", "diet", "meals", "cooking", "restaurants":
-            return "gut"
+            return "body"
         case "spirit", "faith", "meditation", "gratitude", "journal", "diary", "prayer":
             return "spirit"
         case "location", "locations", "places", "travel", "home", "entertainment", "movies", "music", "hobbies", "experiences":
