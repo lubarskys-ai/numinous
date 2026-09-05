@@ -3171,17 +3171,45 @@ final class AppModel: ObservableObject {
     /// or nil if location was unavailable or denied.
     @discardableResult
     func logCurrentLocationToTodayDiary() async -> String? {
-        guard let c = await autoLocator.currentCoordinate() else { return nil }
+        guard let fix = await autoLocator.currentFix() else { return nil }
+        let c = fix.coordinate
         let name: String, lat: Double, lng: Double
-        if let venue = await LocationService.nearbyPlaces(c, limit: 1).first {
+
+        // A PLACE YOU HAVE ALREADY BEEN beats anything a map can offer, and it is a signal
+        // only this app has. If a place you logged before sits within the fix's own margin of
+        // error, that is almost certainly where you are again — people return to the same
+        // dozen places — and it reuses your own name for it rather than the map's.
+        if let known = nearestKnownPlace(to: fix) {
+            (name, lat, lng) = known
+        } else if let venue = await LocationService.venueHere(fix) {
             (name, lat, lng) = (venue.name, venue.latitude, venue.longitude)
         } else if let p = await autoLocator.currentPlaceStructured(), let plat = p.latitude, let plng = p.longitude {
+            // No venue close enough to name honestly: the street address is vaguer and true.
             (name, lat, lng) = (p.name, plat, plng)
         } else {
             (name, lat, lng) = (String(format: "%.4f, %.4f", c.latitude, c.longitude), c.latitude, c.longitude)
         }
         linkPlace(ensurePlaceNote(name: name, latitude: lat, longitude: lng), into: openTodayDiary())
         return name
+    }
+
+    /// A place already in your notes, within this fix's own margin of error. Nearest first.
+    func nearestKnownPlace(to fix: CLLocation) -> (name: String, latitude: Double, longitude: Double)? {
+        let accuracy = fix.horizontalAccuracy > 0 ? fix.horizontalAccuracy : 100
+        let tolerance = min(max(accuracy, 25), 90)
+        var best: (name: String, latitude: Double, longitude: Double)?
+        var bestDistance = Double.greatestFiniteMagnitude
+        for note in notes {
+            for place in note.allPlaces {
+                guard let lat = place.latitude, let lng = place.longitude else { continue }
+                let d = CLLocation(latitude: lat, longitude: lng).distance(from: fix)
+                if d < bestDistance && d <= tolerance {
+                    bestDistance = d
+                    best = (place.name, lat, lng)
+                }
+            }
+        }
+        return best
     }
 
     /// Typed name → note: geocode it, make it a place note + pin, and link it into the note.

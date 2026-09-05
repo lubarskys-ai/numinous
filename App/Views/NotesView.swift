@@ -495,7 +495,7 @@ struct ReconnectView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .task { await refresh() }
-            .sheet(item: $openNote) { w in NavigationStack { NoteDetailView(noteID: w.id) } }
+            .sheet(item: $openNote) { w in NoteSheet(noteID: w.id) }
         }
     }
 

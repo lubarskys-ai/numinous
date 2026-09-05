@@ -122,7 +122,7 @@ struct NoteDetailView: View {
                 }
             }
             .sheet(item: $openLinkTarget) { t in
-                NavigationStack { NoteDetailView(noteID: t.id) }
+                NoteSheet(noteID: t.id)
             }
             // These belong to the note body, but they are attached HERE rather than to the
             // body Section: a sheet presented from inside a List section is dropped the first

@@ -120,6 +120,45 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
         }
     }
 
+    /// WHICH VENUE YOU ARE ACTUALLY IN, or nil when the honest answer is "a street address".
+    ///
+    /// The Action Button used to take the nearest point of interest within 150 metres and log
+    /// it, whatever it was and however far away. Standing at home that logs the petrol station
+    /// down the road; standing in a strip mall it logs whichever unit is nearest the centroid
+    /// of a GPS guess. It was confidently wrong, which is the worst way for it to be wrong,
+    /// because a diary entry saying you were somewhere you have never been is harder to
+    /// notice than a missing one.
+    ///
+    /// Two rules, both derived from the fix rather than guessed at:
+    ///
+    ///   SEARCH NO WIDER THAN YOU CAN SEE. The radius follows the fix's own accuracy, so a
+    ///   vague fix does not get a wider net to pull a wrong answer out of — it gets a
+    ///   narrower one and usually returns nothing.
+    ///   ACCEPT ONLY WHAT IS CLOSER THAN THE ERROR. A venue further away than the fix's own
+    ///   margin of error cannot be distinguished from its neighbours, so it is not claimed.
+    ///
+    /// When neither holds, the caller falls back to the address — which is vaguer and true.
+    static func venueHere(_ fix: CLLocation) async -> (name: String, latitude: Double, longitude: Double, metres: Double)? {
+        let accuracy = fix.horizontalAccuracy > 0 ? fix.horizontalAccuracy : 100
+        guard accuracy <= 120 else { return nil }        // too vague to name a building
+        let radius = min(max(accuracy, 25), 120)
+        let request = MKLocalPointsOfInterestRequest(center: fix.coordinate, radius: radius)
+        guard let items = try? await MKLocalSearch(request: request).start().mapItems else { return nil }
+
+        let scored = items.compactMap { item -> (String, Double, Double, Double)? in
+            guard let name = item.name else { return nil }
+            let c = item.placemark.coordinate
+            let d = CLLocation(latitude: c.latitude, longitude: c.longitude).distance(from: fix)
+            return (name, c.latitude, c.longitude, d)
+        }.sorted { $0.3 < $1.3 }
+
+        guard let best = scored.first, best.3 <= max(30, accuracy) else { return nil }
+        // Two venues equally close is a strip mall, and picking one is a coin toss dressed
+        // up as a fact.
+        if scored.count > 1, scored[1].3 - best.3 < 12, accuracy > 20 { return nil }
+        return (best.0, best.1, best.2, best.3)
+    }
+
     /// Businesses / points of interest within ~`radius` metres of a coordinate, NEAREST FIRST —
     /// so "find my location" can offer the real venues around you (a café, a shop, a park)
     /// instead of only a street address. Each result carries a "N m away" subtitle.
@@ -153,8 +192,29 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
     /// Just the current coordinate (no reverse-geocode to a name) — used to bias a name
     /// lookup to where you are.
     func currentCoordinate() async -> CLLocationCoordinate2D? {
-        guard await ensureAuthorized(), let location = await requestLocation() else { return nil }
-        return location.coordinate
+        await currentFix()?.coordinate
+    }
+
+    /// The whole fix, ACCURACY INCLUDED, because the accuracy is the part that matters when
+    /// deciding which venue you are standing in.
+    ///
+    /// currentCoordinate() threw the CLLocation away and returned only the coordinate, which
+    /// meant the Action Button treated a 165-metre cold GPS fix exactly like a 5-metre one and
+    /// then confidently named whichever business happened to be nearest that guess.
+    ///
+    /// A first fix indoors is often poor and improves within a couple of seconds, so one
+    /// retry is worth the wait when the first is bad.
+    func currentFix(acceptableAccuracy: CLLocationDistance = 65) async -> CLLocation? {
+        guard await ensureAuthorized(), let first = await requestLocation() else { return nil }
+        if first.horizontalAccuracy <= acceptableAccuracy && first.horizontalAccuracy > 0 {
+            return first
+        }
+        try? await Task.sleep(nanoseconds: 1_800_000_000)
+        guard let second = await requestLocation() else { return first }
+        // Whichever is better; a negative accuracy means "invalid", so it never wins.
+        let firstOK = first.horizontalAccuracy > 0 ? first.horizontalAccuracy : .greatestFiniteMagnitude
+        let secondOK = second.horizontalAccuracy > 0 ? second.horizontalAccuracy : .greatestFiniteMagnitude
+        return secondOK < firstOK ? second : first
     }
 
     /// A cheap sanity check that a string is plausibly a place/address — not a dollar

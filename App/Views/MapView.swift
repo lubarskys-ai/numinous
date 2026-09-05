@@ -174,7 +174,7 @@ struct MapView: View {
             .navigationTitle("Map")
             .navigationBarTitleDisplayMode(.inline)
             .sheet(item: $openNote) { ref in
-                NavigationStack { NoteDetailView(noteID: ref.id) }
+                NoteSheet(noteID: ref.id)
             }
             .confirmationDialog(stacked.map { "\($0.members.count) notes here" } ?? "",
                                 isPresented: Binding(get: { stacked != nil },
