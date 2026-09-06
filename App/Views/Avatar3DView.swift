@@ -40,6 +40,36 @@ enum AvatarMode {
     case avatar
 }
 
+/// Where the force layout settled, kept between builds.
+///
+/// Settling the graph is O(nodes²) per pass and runs up to eighty passes — on a real vault
+/// that is most of a second of arithmetic, and it was being redone every single time the
+/// screen opened, every time the mode was switched, and every time the maturity ticked. None
+/// of those change where a note sits. The graph does.
+@MainActor
+enum GraphLayoutCache {
+    private static var key: String = ""
+    private static var positions: [UUID: SCNVector3] = [:]
+
+    static func signature(nodes: [GraphNode], links: [GraphEdge], mode: AvatarMode) -> String {
+        // The shape of the graph, not its contents: how many notes, how many links, and a
+        // cheap order-independent digest of which. Renaming a note does not move it.
+        var digest: UInt64 = 1469598103934665603
+        for n in nodes { digest ^= UInt64(truncatingIfNeeded: n.id.hashValue); digest &*= 1099511628211 }
+        for l in links { digest ^= UInt64(truncatingIfNeeded: l.a.hashValue &+ l.b.hashValue); digest &*= 1099511628211 }
+        return "\(mode)-\(nodes.count)-\(links.count)-\(digest)"
+    }
+
+    static func cached(_ signature: String) -> [UUID: SCNVector3]? {
+        key == signature && !positions.isEmpty ? positions : nil
+    }
+
+    static func store(_ signature: String, _ layout: [UUID: SCNVector3]) {
+        key = signature
+        positions = layout
+    }
+}
+
 struct Avatar3DView: UIViewRepresentable {
     var mode: AvatarMode = .graph
     var color: (String) -> UIColor
@@ -894,6 +924,10 @@ struct Avatar3DView: UIViewRepresentable {
         let ids = nodes.map(\.id)
         let idSet = Set(ids)
         let linkedSet: Set<UUID> = Set(links.flatMap { [$0.a, $0.b] }).intersection(idSet)
+        // The settled layout, from before if the graph has not changed.
+        let layoutKey = GraphLayoutCache.signature(nodes: nodes, links: links, mode: mode)
+        let reuse = MainActor.assumeIsolated { GraphLayoutCache.cached(layoutKey) }
+
         let fdIds = ids.filter { linkedSet.contains($0) }
         var fx = [UUID: Double](), fy = [UUID: Double](), fz = [UUID: Double]()
         for (i, id) in fdIds.enumerated() {
@@ -916,7 +950,7 @@ struct Avatar3DView: UIViewRepresentable {
             //
             // So: a shorter, stronger spring to pull each cluster into a knot, weaker global
             // repulsion so knots are allowed to be knots, and a bigger push between components.
-            let kSpring = 0.075  // shorter, stronger springs — tight clusters
+            let kSpring = 0.045  // shorter still: a cluster should read as a knot, not a ring
             let kRepel  = 1.35   // less all-pairs push, so density can vary across the graph
             // How connected each node is. HIGH-degree nodes (hubs) otherwise pile up in the centre
             // (the "hairball"); we give hub↔hub pairs extra repulsion so they fan out — but a hub's
@@ -929,7 +963,9 @@ struct Avatar3DView: UIViewRepresentable {
             let hubSpread = 0.08  // how hard hubs push each other apart (unfolds the dense core)
             let hubMax = 12.0     // cap so a super-hub can't blow up the layout
             var temp = 0.6
-            let iters = fdIds.count > 800 ? 18 : (fdIds.count > 400 ? 32 : 80)
+            // Nothing to settle if it was settled last time.
+            let iters = reuse != nil ? 0
+                : (fdIds.count > 800 ? 18 : (fdIds.count > 400 ? 32 : 80))
             for _ in 0..<iters {
                 var dx = [UUID: Double](), dy = [UUID: Double](), dz = [UUID: Double]()
                 for ai in 0..<fdIds.count {
@@ -961,22 +997,46 @@ struct Avatar3DView: UIViewRepresentable {
                 }
                 temp *= 0.96
             }
-            // Push SEPARATE constellations apart WITHOUT stretching their internal links: find
-            // the connected components, then translate each one rigidly outward from the centre.
-            // The gaps between groupings widen while every cluster keeps its tight, short-axis
-            // shape — "spread the groups, don't lengthen the axes". Union–find is ~linear.
-            var parent = [UUID: UUID](minimumCapacity: fdIds.count)
-            for id in fdIds { parent[id] = id }
-            func find(_ x: UUID) -> UUID {
-                var r = x
-                while parent[r]! != r { parent[r] = parent[parent[r]!]!; r = parent[r]! }
-                return r
-            }
+            // WHICH CLUSTERS, THOUGH. The previous version separated connected COMPONENTS —
+            // islands with no link at all between them. A real vault is one island: everything
+            // reaches everything else eventually through a hub, so there was exactly one
+            // component and the spreading step did nothing whatsoever. The knots a person
+            // actually sees are COMMUNITIES inside that single web, and no amount of turning
+            // the spread up will move something the code cannot find.
+            //
+            // Label propagation finds them, in a few passes over the links and no library:
+            // every note starts as its own group and repeatedly joins whichever group most of
+            // its neighbours are in. Densely linked notes converge on one label; a note that
+            // bridges two dense areas lands in one or the other. It is not the most rigorous
+            // community algorithm and it does not need to be — it needs to find the clumps a
+            // person can already see, which is the easy case.
+            var label = [UUID: UUID](minimumCapacity: fdIds.count)
+            for id in fdIds { label[id] = id }
+            var neighbours = [UUID: [UUID]](minimumCapacity: fdIds.count)
             for e in links where fx[e.a] != nil && fx[e.b] != nil {
-                let ra = find(e.a), rb = find(e.b); if ra != rb { parent[ra] = rb }
+                neighbours[e.a, default: []].append(e.b)
+                neighbours[e.b, default: []].append(e.a)
+            }
+            // A fixed, stable order: label propagation is order-dependent, and a graph that
+            // rearranged itself between two openings of the same screen would be unusable.
+            let ordered = fdIds.sorted { $0.uuidString < $1.uuidString }
+            for _ in 0..<6 {
+                var changed = false
+                for id in ordered {
+                    guard let mine = neighbours[id], !mine.isEmpty else { continue }
+                    var tally = [UUID: Int]()
+                    for other in mine { tally[label[other]!, default: 0] += 1 }
+                    // Ties broken by uuid, again for stability rather than for meaning.
+                    if let best = tally.max(by: { ($0.value, $1.key.uuidString) < ($1.value, $0.key.uuidString) })?.key,
+                       best != label[id] {
+                        label[id] = best
+                        changed = true
+                    }
+                }
+                if !changed { break }
             }
             var comps = [UUID: [UUID]]()
-            for id in fdIds { comps[find(id), default: []].append(id) }
+            for id in fdIds { comps[label[id]!, default: []].append(id) }
             if comps.count > 1 {
                 let gn = Double(fdIds.count)
                 let gx = fdIds.reduce(0.0) { $0 + fx[$1]! } / gn
@@ -985,7 +1045,9 @@ struct Avatar3DView: UIViewRepresentable {
                 // Wider now that nothing is pulling the web into a figure. The starfish used
                 // to do the separating as a side effect of dragging clusters out to five
                 // limbs; with it gone the graph has to spread on its own account.
-                let spread = mode == .graph ? 5.2 : 1.9
+                // Now that this moves real communities rather than one all-encompassing
+                // island, the number finally means what it says.
+                let spread = mode == .graph ? 3.6 : 1.9
                 for (_, members) in comps {
                     let mn = Double(members.count)
                     let cx = members.reduce(0.0) { $0 + fx[$1]! } / mn
@@ -1032,7 +1094,16 @@ struct Avatar3DView: UIViewRepresentable {
             let phi = acos(1 - 2 * t), theta = golden * Double(i)
             fx[id] = 4.0 * sin(phi) * cos(theta); fy[id] = 4.0 * cos(phi); fz[id] = 4.0 * sin(phi) * sin(theta)
         }
-        func graphPos(_ id: UUID) -> SCNVector3 { v(fx[id] ?? 0, fy[id] ?? 0, fz[id] ?? 0) }
+        // Keep what was worked out, and prefer what was worked out before.
+        if reuse == nil {
+            var settled: [UUID: SCNVector3] = [:]
+            for id in fdIds { settled[id] = v(fx[id] ?? 0, fy[id] ?? 0, fz[id] ?? 0) }
+            MainActor.assumeIsolated { GraphLayoutCache.store(layoutKey, settled) }
+        }
+        func graphPos(_ id: UUID) -> SCNVector3 {
+            if let hit = reuse?[id] { return hit }
+            return v(fx[id] ?? 0, fy[id] ?? 0, fz[id] ?? 0)
+        }
 
         // The connectome IS the body: each axis's connected notes migrate into a HUMANOID part,
         // so the neural web resolves into a figure — head, torso, spine, and four limbs — rather
