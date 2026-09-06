@@ -112,8 +112,9 @@ struct PhotoAvatarView: View {
                         .resizable().scaledToFit()
                         .blur(radius: 26)
                         .blendMode(.plusLighter)
-                        .opacity(running ? 0.46 * min(1, max(0, (undoing - 0.07) * 3.0))
-                                         : 0.46 * presence(preview?["spirit"] ?? maturity("spirit")))
+                        .opacity(running && preview == nil
+                                 ? 0.46 * min(1, max(0, (undoing - 0.07) * 3.0))
+                                 : 0.46 * presence(preview?["spirit"] ?? maturity("spirit")))
                         .foregroundStyle(spiritColor)
                         .allowsHitTesting(false)
 
@@ -215,7 +216,11 @@ struct PhotoAvatarView: View {
     /// time the coarsening becomes dramatic, and the whole thing reads as a fade with some
     /// texture in it rather than as a picture coming apart.
     private func visible(_ axis: String) -> Double {
-        guard running else { return presence(preview?[axis] ?? maturity(axis)) }
+        // The freeze holds the emptied photograph after the dissolve — but it must not outrank
+        // the preview, or the sliders drive the block size of something whose opacity is
+        // pinned at zero and appear to do nothing at all. Asking to see the rebuild is asking
+        // to stop being frozen.
+        guard running, preview == nil else { return presence(preview?[axis] ?? maturity(axis)) }
         // Zero a little BEFORE the run ends. Fading to nothing exactly at the last frame left
         // a few surviving cells twinkling out one at a time, which read as the effect finishing
         // untidily rather than finishing. The last stretch is empty on purpose.
