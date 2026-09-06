@@ -302,28 +302,40 @@ enum PhotoAvatar {
               let maskCG = context.createCGImage(person, from: extent)
         else { return photo }
 
-        func bitmap(_ image: CGImage) -> [UInt8] {
-            var buffer = [UInt8](repeating: 0, count: width * height * 4)
-            buffer.withUnsafeMutableBytes { raw in
-                guard let ctx = CGContext(data: raw.baseAddress, width: width, height: height,
-                                          bitsPerComponent: 8, bytesPerRow: width * 4,
-                                          space: CGColorSpaceCreateDeviceRGB(),
-                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-                else { return }
-                ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-            }
-            return buffer
-        }
+        // ONE CONTEXT THAT OWNS ITS OWN MEMORY, and the pixels edited in place inside it.
+        //
+        // The first version built a Swift array, handed its pointer to a CGContext inside a
+        // `withUnsafeMutableBytes` closure, and called makeImage() there — then used the image
+        // AFTER the closure returned. That image is backed by memory the closure no longer
+        // guarantees, which is undefined behaviour and crashed on the first run through. It is
+        // the sort of thing that appears to work in a simulator and does not on a phone.
+        //
+        // Letting Core Graphics allocate means the memory lives exactly as long as the context
+        // does, and the image it makes is safe to use afterwards.
+        guard let canvas = CGContext(data: nil, width: width, height: height,
+                                     bitsPerComponent: 8, bytesPerRow: width * 4,
+                                     space: CGColorSpaceCreateDeviceRGB(),
+                                     bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+              let maskCanvas = CGContext(data: nil, width: width, height: height,
+                                         bitsPerComponent: 8, bytesPerRow: width * 4,
+                                         space: CGColorSpaceCreateDeviceRGB(),
+                                         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return photo }
 
-        var pixels = bitmap(photoCG)
-        let mask = bitmap(maskCG)
+        let whole = CGRect(x: 0, y: 0, width: width, height: height)
+        canvas.draw(photoCG, in: whole)
+        maskCanvas.draw(maskCG, in: whole)
+        guard let pixels = canvas.data?.assumingMemoryBound(to: UInt8.self),
+              let mask = maskCanvas.data?.assumingMemoryBound(to: UInt8.self)
+        else { return photo }
+        let rowBytes = canvas.bytesPerRow, maskRow = maskCanvas.bytesPerRow
 
         for y in 0..<height {
             var x = 0
             while x < width {
-                guard mask[(y * width + x) * 4] > 100 else { x += 1; continue }
+                guard mask[y * maskRow + x * 4] > 100 else { x += 1; continue }
                 var end = x
-                while end < width && mask[(y * width + end) * 4] > 100 { end += 1 }
+                while end < width && mask[y * maskRow + end * 4] > 100 { end += 1 }
 
                 let leftX = x - 1, rightX = end
                 let hasLeft = leftX >= 0, hasRight = rightX < width
@@ -333,8 +345,8 @@ enum PhotoAvatar {
                 var samples = 0
                 for probe in 1...28 {
                     for side in [leftX - probe, rightX + probe] where side >= 1 && side < width - 1 {
-                        difference += abs(Double(pixels[(y * width + side) * 4])
-                                          - Double(pixels[(y * width + side + 1) * 4]))
+                        difference += abs(Double(pixels[y * rowBytes + side * 4])
+                                          - Double(pixels[y * rowBytes + (side + 1) * 4]))
                         samples += 1
                     }
                 }
@@ -344,12 +356,12 @@ enum PhotoAvatar {
                     let t = Double(px - x + 1) / Double(end - x + 1)
                     let mirrorL = leftX - (px - x), mirrorR = rightX + (end - 1 - px)
                     for channel in 0..<3 {
-                        let edgeL = hasLeft ? Double(pixels[(y * width + leftX) * 4 + channel]) : 0
-                        let edgeR = hasRight ? Double(pixels[(y * width + rightX) * 4 + channel]) : 0
+                        let edgeL = hasLeft ? Double(pixels[y * rowBytes + leftX * 4 + channel]) : 0
+                        let edgeR = hasRight ? Double(pixels[y * rowBytes + rightX * 4 + channel]) : 0
                         let reflectedL = (hasLeft && mirrorL >= 0)
-                            ? Double(pixels[(y * width + mirrorL) * 4 + channel]) : edgeL
+                            ? Double(pixels[y * rowBytes + mirrorL * 4 + channel]) : edgeL
                         let reflectedR = (hasRight && mirrorR < width)
-                            ? Double(pixels[(y * width + mirrorR) * 4 + channel]) : edgeR
+                            ? Double(pixels[y * rowBytes + mirrorR * 4 + channel]) : edgeR
 
                         let flat: Double, mirrored: Double
                         if hasLeft && hasRight {
@@ -358,7 +370,7 @@ enum PhotoAvatar {
                         } else if hasLeft { flat = edgeL; mirrored = reflectedL }
                         else { flat = edgeR; mirrored = reflectedR }
 
-                        pixels[(y * width + px) * 4 + channel] =
+                        pixels[y * rowBytes + px * 4 + channel] =
                             UInt8(max(0, min(255, flat * (1 - texture) + mirrored * texture)))
                     }
                 }
@@ -366,11 +378,7 @@ enum PhotoAvatar {
             }
         }
 
-        guard let filled = pixels.withUnsafeMutableBytes({ raw -> CGImage? in
-            CGContext(data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8,
-                      bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
-                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)?.makeImage()
-        }) else { return photo }
+        guard let filled = canvas.makeImage() else { return photo }
 
         // A whisker of softening, inside the hole only, so the run-across does not read as
         // suspiciously cleaner than the photograph around it.

@@ -120,7 +120,16 @@ struct PhotoAvatarView: View {
                         .resolving(maturity: showing(region.axis), side: fitted.width,
                                    seed: region.seed, blocksAtZero: 9)
                         .mask {
-                            Image(uiImage: person).resizable().scaledToFit()
+                            // COARSEN THE OUTLINE TOO. Cutting blocks out with a sharp
+                            // silhouette leaves a crisp edge with a mosaic inside it, and a
+                            // crisp edge reads as a person who is present — just oddly
+                            // textured. Running the same effect over the mask breaks the
+                            // outline into the same squares, so you actually come apart at the
+                            // edges rather than staying a neat cut-out full of pixels.
+                            Image(uiImage: person)
+                                .resizable().scaledToFit()
+                                .resolving(maturity: showing(region.axis), side: fitted.width,
+                                           seed: region.seed, blocksAtZero: 9)
                         }
                         .opacity(visible(region.axis))
                         .mask {
