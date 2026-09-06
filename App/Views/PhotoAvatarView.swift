@@ -19,8 +19,6 @@ struct PhotoAvatarView: View {
     let spiritColor: Color
     /// Play the erasure once, on the way in.
     var introduce: Bool = false
-    /// Overrides the real maturities while the rebuild is being worked on. Nil in normal use.
-    var preview: [String: Double]? = nil
     /// True while the intro is running, so opacity can behave differently than it does across
     /// the months.
 
@@ -77,7 +75,7 @@ struct PhotoAvatarView: View {
 
     /// What to draw: the real maturity, or the intro's, whichever is further along.
     private func showing(_ axis: String) -> Double {
-        max(axis == "all" ? wholeLife() : (preview?[axis] ?? maturity(axis)), undoing)
+        max(axis == "all" ? wholeLife() : maturity(axis), undoing)
     }
 
     /// The five maturities, in the order the shader deals its squares out.
@@ -86,7 +84,7 @@ struct PhotoAvatarView: View {
     /// even though it comes back as five.
     private func axisValues() -> [Double] {
         ["mind", "heart", "body", "meaning", "spirit"].map { axis in
-            max(preview?[axis] ?? maturity(axis), undoing)
+            max(maturity(axis), undoing)
         }
     }
 
@@ -95,7 +93,7 @@ struct PhotoAvatarView: View {
     /// that lets a strong axis paper over an empty one.
     private func wholeLife() -> Double {
         let axes = ["mind", "heart", "body", "meaning", "spirit"]
-        let values = axes.map { preview?[$0] ?? maturity($0) }
+        let values = axes.map { maturity($0) }
         let mean = values.reduce(0, +) / Double(values.count)
         let weakest = values.min() ?? 0
         return mean * 0.7 + weakest * 0.3
@@ -118,9 +116,9 @@ struct PhotoAvatarView: View {
                     // black and composite the black in, which is what once put a dark oval on
                     // his chest.
                     spiritColor
-                        .opacity(running && preview == nil
+                        .opacity(running
                                  ? 0.85 * min(1, max(0, (undoing - 0.07) * 3.0))
-                                 : 0.85 * presence(preview?["spirit"] ?? maturity("spirit")))
+                                 : 0.85 * presence(maturity("spirit")))
                         .mask {
                             Image(uiImage: person).resizable().scaledToFit().blur(radius: 26)
                         }
@@ -192,12 +190,10 @@ struct PhotoAvatarView: View {
     /// time the coarsening becomes dramatic, and the whole thing reads as a fade with some
     /// texture in it rather than as a picture coming apart.
     private func visible(_ axis: String) -> Double {
-        // The freeze holds the emptied photograph after the dissolve — but it must not outrank
-        // the preview, or the sliders drive the block size of something whose opacity is
-        // pinned at zero and appear to do nothing at all. Asking to see the rebuild is asking
-        // to stop being frozen.
-        guard running, preview == nil else {
-            return presence(axis == "all" ? wholeLife() : (preview?[axis] ?? maturity(axis)))
+        // The freeze holds the emptied photograph after the dissolve; once it is over, what
+        // shows is simply how far the life has actually got.
+        guard running else {
+            return presence(axis == "all" ? wholeLife() : maturity(axis))
         }
         // Zero a little BEFORE the run ends. Fading to nothing exactly at the last frame left
         // a few surviving cells twinkling out one at a time, which read as the effect finishing
