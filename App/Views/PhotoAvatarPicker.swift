@@ -15,7 +15,7 @@ struct PhotoAvatarPicker: View {
     @State private var cleanItem: PhotosPickerItem?
     @State private var cleanImage: UIImage?
     @State private var people: [(index: Int, centre: CGPoint)] = []
-    @State private var chosen: Int?
+    @State private var chosen: CGPoint?
     @State private var busyBackground = false
     @State private var working = false
     @State private var problem: String?
@@ -31,11 +31,11 @@ struct PhotoAvatarPicker: View {
                             ForEach(people, id: \.index) { person in
                                 let fitted = fit(image.size, in: geo.size)
                                 Button {
-                                    chosen = person.index
+                                    chosen = person.centre
                                 } label: {
                                     Circle()
-                                        .strokeBorder(chosen == person.index ? Color.accentColor : .white,
-                                                      lineWidth: chosen == person.index ? 4 : 2)
+                                        .strokeBorder(chosen == person.centre ? Color.accentColor : .white,
+                                                      lineWidth: chosen == person.centre ? 4 : 2)
                                         .background(Circle().fill(.black.opacity(0.25)))
                                         .frame(width: 44, height: 44)
                                 }
@@ -137,18 +137,18 @@ struct PhotoAvatarPicker: View {
         chosen = nil
         problem = nil
         people = (try? PhotoAvatar.people(in: picked)) ?? []
-        if people.count == 1 { chosen = people[0].index }
+        if people.count == 1 { chosen = people[0].centre }
         if people.isEmpty { problem = PhotoAvatar.whyNoOneFound() }
     }
 
     private func use() {
         guard let image else { return }
         working = true
-        let index = chosen ?? 0
+        let youAt = chosen ?? CGPoint(x: 0.5, y: 0.5)
         Task {
             defer { working = false }
             do {
-                let prepared = try PhotoAvatar.prepare(image: image, personIndex: index,
+                let prepared = try PhotoAvatar.prepare(image: image, youAt: youAt,
                                                        cleanBackground: cleanImage)
                 busyBackground = prepared.backgroundIsBusy
                 try PhotoAvatar.save(prepared)

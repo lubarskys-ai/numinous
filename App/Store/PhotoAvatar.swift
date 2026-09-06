@@ -112,12 +112,20 @@ enum PhotoAvatar {
     /// When one is supplied it is used as-is and the fill below is skipped entirely, because
     /// nothing written here will beat it. When one is not, the row fill does its best, and its
     /// best is very good on a plain wall and merely decent through a hedge.
-    static func prepare(image: UIImage, personIndex: Int,
+    /// `youAt` is WHERE YOU TAPPED, not which entry you tapped.
+    ///
+    /// The picker detects the people once to draw its circles, and this detects them again to
+    /// do the work. Vision does not promise the same order from two runs, so an index agreed
+    /// between them is a handshake nobody guaranteed — and the cost of it being wrong is
+    /// erasing the wrong person out of a photograph of a marriage. A point cannot get out of
+    /// order. Whoever is nearest it is who was meant.
+    static func prepare(image: UIImage, youAt: CGPoint,
                         cleanBackground: UIImage? = nil) throws -> Prepared {
         guard let cg = upright(image).cgImage else { throw Failure.unreadable }
         let context = CIContext()
         let photo = CIImage(cgImage: cg)
 
+        let personIndex = try nearestBody(cg, to: youAt)
         let mask = try personMask(cg, personIndex: personIndex, extent: photo.extent)
         // A segmentation edge always leaves a rim of the person behind, and a rim of somebody
         // is more noticeable than a slightly larger patch of wall. Grown a little, and softened
@@ -149,6 +157,25 @@ enum PhotoAvatar {
             anchors: try anchors(cg, personIndex: personIndex),
             // A supplied background is never "busy" — it has already been dealt with.
             backgroundIsBusy: cleanBackground == nil && isBusy(photo, behind: grown, context: context))
+    }
+
+    /// Which detected body is nearest the point that was tapped.
+    private static func nearestBody(_ cg: CGImage, to point: CGPoint) throws -> Int {
+        let request = VNDetectHumanBodyPoseRequest()
+        try VNImageRequestHandler(cgImage: cg).perform([request])
+        guard let bodies = request.results, !bodies.isEmpty else { throw Failure.noPersonFound }
+        var best = 0
+        var bestDistance = Double.greatestFiniteMagnitude
+        for (index, body) in bodies.enumerated() {
+            guard let points = try? body.recognizedPoints(.all) else { continue }
+            for candidate in points.values where candidate.confidence > 0.15 {
+                let dx = Double(candidate.location.x - point.x)
+                let dy = Double(candidate.location.y - point.y)
+                let distance = dx * dx + dy * dy
+                if distance < bestDistance { bestDistance = distance; best = index }
+            }
+        }
+        return best
     }
 
     /// One person's outline, or everybody's when the photo holds only one.
