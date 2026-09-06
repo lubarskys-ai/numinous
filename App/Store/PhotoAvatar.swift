@@ -118,7 +118,7 @@ enum PhotoAvatar {
             .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 4])
             .cropped(to: photo.extent)
 
-        let background = erase(photo, person: grown)
+        let background = erase(photo, person: grown, context: context)
         let person = photo.applyingFilter("CIBlendWithMask", parameters: [kCIInputMaskImageKey: grown])
 
         guard let backgroundCG = context.createCGImage(background, from: photo.extent),
@@ -182,25 +182,118 @@ enum PhotoAvatar {
                                                 y: extent.height / image.extent.height))
     }
 
-    /// Close the hole by spreading the surrounding colours inward.
+    /// Close the hole ROW BY ROW, taking each row's own neighbours across the gap.
     ///
-    /// Blur the picture, paste the KNOWN background back over the result, and repeat with a
-    /// tighter radius each pass. Real colour creeps a little further into the hole every time,
-    /// from its edges, until the hole is filled with what surrounds it. Crude beside a trained
-    /// model and, on a plain surface, very hard to catch.
-    private static func erase(_ photo: CIImage, person: CIImage) -> CIImage {
-        let known = photo.applyingFilter("CIBlendWithMask", parameters: [
-            kCIInputMaskImageKey: person.applyingFilter("CIColorInvert")])
-        var filled = known
-        for radius in [64.0, 48.0, 32.0, 24.0, 16.0, 12.0, 8.0, 6.0, 4.0] {
-            filled = filled
-                .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: radius])
-                .cropped(to: photo.extent)
-                .applyingFilter("CISourceOverCompositing", parameters: [kCIInputBackgroundImageKey: filled])
-            filled = known.applyingFilter("CISourceOverCompositing",
-                                          parameters: [kCIInputBackgroundImageKey: filled])
+    /// The first version blurred the picture repeatedly and pasted the known background back
+    /// each time, so colour crept inward from the edges. It closed a hole in a wall invisibly
+    /// and made a mess of everything else, because a blur has no idea which way the world
+    /// runs. It dragged the hedge up onto the plaster.
+    ///
+    /// A person standing in front of scenery almost always has a HORIZONTALLY BANDED
+    /// background — a wall, a hedge, a kerb, a road, each carrying straight on through where
+    /// they stand. Filling each row from its own left and right keeps every band at its own
+    /// height, which is most of the difference between "he was never there" and "something has
+    /// been smudged out".
+    ///
+    /// How the gap is filled then depends on what the ground is made of, measured rather than
+    /// chosen:
+    ///
+    ///   FLAT ground — plaster, sky, sand — takes the two edge colours run across it. Smooth
+    ///   is what flat looks like.
+    ///   TEXTURED ground — foliage, gravel, paving — takes the real pixels just outside the
+    ///   gap, REFLECTED inward, so leaves stay leaves instead of becoming a green streak.
+    ///
+    /// Mixing them in proportion matters more than picking one: a standing figure crosses
+    /// plaster, then hedge, then paving on its way down the frame, and each row gets what that
+    /// row needs. Reflecting on flat ground was what dragged a pink smear of somebody's arm
+    /// across the wall.
+    private static func erase(_ photo: CIImage, person: CIImage, context: CIContext) -> CIImage {
+        let extent = photo.extent
+        let width = Int(extent.width), height = Int(extent.height)
+        guard width > 0, height > 0,
+              let photoCG = context.createCGImage(photo, from: extent),
+              let maskCG = context.createCGImage(person, from: extent)
+        else { return photo }
+
+        func bitmap(_ image: CGImage) -> [UInt8] {
+            var buffer = [UInt8](repeating: 0, count: width * height * 4)
+            buffer.withUnsafeMutableBytes { raw in
+                guard let ctx = CGContext(data: raw.baseAddress, width: width, height: height,
+                                          bitsPerComponent: 8, bytesPerRow: width * 4,
+                                          space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+                else { return }
+                ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            }
+            return buffer
         }
-        return filled.cropped(to: photo.extent)
+
+        var pixels = bitmap(photoCG)
+        let mask = bitmap(maskCG)
+
+        for y in 0..<height {
+            var x = 0
+            while x < width {
+                guard mask[(y * width + x) * 4] > 100 else { x += 1; continue }
+                var end = x
+                while end < width && mask[(y * width + end) * 4] > 100 { end += 1 }
+
+                let leftX = x - 1, rightX = end
+                let hasLeft = leftX >= 0, hasRight = rightX < width
+
+                // How textured is the ground either side of this gap.
+                var difference = 0.0
+                var samples = 0
+                for probe in 1...28 {
+                    for side in [leftX - probe, rightX + probe] where side >= 1 && side < width - 1 {
+                        difference += abs(Double(pixels[(y * width + side) * 4])
+                                          - Double(pixels[(y * width + side + 1) * 4]))
+                        samples += 1
+                    }
+                }
+                let texture = samples > 0 ? min(1.0, (difference / Double(samples)) / 9.0) : 0
+
+                for px in x..<end {
+                    let t = Double(px - x + 1) / Double(end - x + 1)
+                    let mirrorL = leftX - (px - x), mirrorR = rightX + (end - 1 - px)
+                    for channel in 0..<3 {
+                        let edgeL = hasLeft ? Double(pixels[(y * width + leftX) * 4 + channel]) : 0
+                        let edgeR = hasRight ? Double(pixels[(y * width + rightX) * 4 + channel]) : 0
+                        let reflectedL = (hasLeft && mirrorL >= 0)
+                            ? Double(pixels[(y * width + mirrorL) * 4 + channel]) : edgeL
+                        let reflectedR = (hasRight && mirrorR < width)
+                            ? Double(pixels[(y * width + mirrorR) * 4 + channel]) : edgeR
+
+                        let flat: Double, mirrored: Double
+                        if hasLeft && hasRight {
+                            flat = edgeL * (1 - t) + edgeR * t
+                            mirrored = reflectedL * (1 - t) + reflectedR * t
+                        } else if hasLeft { flat = edgeL; mirrored = reflectedL }
+                        else { flat = edgeR; mirrored = reflectedR }
+
+                        pixels[(y * width + px) * 4 + channel] =
+                            UInt8(max(0, min(255, flat * (1 - texture) + mirrored * texture)))
+                    }
+                }
+                x = end
+            }
+        }
+
+        guard let filled = pixels.withUnsafeMutableBytes({ raw -> CGImage? in
+            CGContext(data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                      bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)?.makeImage()
+        }) else { return photo }
+
+        // A whisker of softening, inside the hole only, so the run-across does not read as
+        // suspiciously cleaner than the photograph around it.
+        let image = CIImage(cgImage: filled)
+        return image
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 1.2])
+            .cropped(to: extent)
+            .applyingFilter("CIBlendWithMask", parameters: [
+                kCIInputBackgroundImageKey: image, kCIInputMaskImageKey: person])
+            .cropped(to: extent)
     }
 
     /// How much detail sat behind the person, which is what decides whether erasing them is
