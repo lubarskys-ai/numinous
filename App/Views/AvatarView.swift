@@ -14,6 +14,9 @@ struct AvatarView: View {
     var initialMode: AvatarMode = .graph
     @EnvironmentObject var model: AppModel
     @State private var mode: AvatarMode?
+    @State private var pickingPhoto = false
+    /// Reloaded rather than watched: the photo changes when you choose one, and never after.
+    @State private var photo: (background: UIImage, person: UIImage, anchors: PhotoAvatar.Anchors)?
     private var shown: AvatarMode { mode ?? initialMode }
     @State private var reflection: ReflectionRecord?
     @State private var zoom: Double = 1
@@ -46,6 +49,15 @@ struct AvatarView: View {
                 // The avatar gets the WHOLE screen. The reflection and the zoom controls float
                 // over it — as a VStack sibling, the reflection card was taking real layout
                 // space and squeezing the figure into the top half.
+                if shown == .avatar, let photo {
+                    // YOUR OWN PHOTOGRAPH, when you have chosen one. It replaces the modelled
+                    // figure rather than sitting beside it, because the two say the same thing
+                    // and only one of them is you.
+                    PhotoAvatarView(background: photo.background, person: photo.person,
+                                    anchors: photo.anchors,
+                                    maturity: { model.axisMaturity($0) },
+                                    spiritColor: model.axis(id: "spirit")?.color ?? .purple)
+                } else {
                 Avatar3DView(
                     mode: shown,
                     color: { axisColor[$0] ?? .gray },
@@ -86,11 +98,26 @@ struct AvatarView: View {
                     .padding(.horizontal, 14)
                     .padding(.bottom, 12)
                 }
+                }
             }
             .navigationTitle(shown == .graph ? "Connections" : "You")
             // Both screens, one tap apart. Which one you land on depends on how you got here —
             // tapping the little figure opens the figure; "see in graph" opens the graph.
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if shown == .avatar {
+                        Menu {
+                            Button(photo == nil ? "Use a photo of me…" : "Choose a different photo…",
+                                   systemImage: "photo") { pickingPhoto = true }
+                            if photo != nil {
+                                Button("Back to the drawn figure", systemImage: "figure.stand",
+                                       role: .destructive) {
+                                    PhotoAvatar.forget(); photo = nil
+                                }
+                            }
+                        } label: { Image(systemName: "ellipsis.circle") }
+                    }
+                }
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
                         withAnimation(.easeInOut(duration: 0.25)) {
@@ -106,7 +133,13 @@ struct AvatarView: View {
                 }
             }
             .toolbarBackground(.hidden, for: .navigationBar)
-            .onAppear { if reflection == nil { reflection = model.currentReflection() } }
+            .onAppear {
+                if reflection == nil { reflection = model.currentReflection() }
+                if photo == nil { photo = PhotoAvatar.stored() }
+            }
+            .sheet(isPresented: $pickingPhoto) {
+                PhotoAvatarPicker { photo = PhotoAvatar.stored() }
+            }
             .onDisappear { model.avatarFocus = nil }   // don't re-focus next time the avatar opens
             // Push within the avatar's own stack rather than a sheet: this view lives
             // inside a full-screen cover, and a sheet presented from there fails silently.
