@@ -360,29 +360,39 @@ enum PhotoAvatar {
 
         func isHole(_ x: Int, _ y: Int) -> Bool { mask[y * maskRow + x * 4] > 100 }
 
-        // ACROSS AND DOWN, not just across.
+        // ACROSS ONLY, after trying across AND down and looking at the result.
         //
-        // Filling only from the left and right leaves the middle of a wide gap as the furthest
-        // point from any real pixel in the picture — which is where a torso is, and why the
-        // centre came out dark and ghostly on a harder photograph. The rows above and below a
-        // chest are usually far closer than the walls to either side of it.
+        // Filling the middle of a wide gap from above and below as well is the obvious answer
+        // to a dark centre — the rows above a chest are nearer than the walls beside it — and
+        // on the test photograph it came out visibly WORSE: long vertical smears down the wall
+        // and through the hedge where the horizontal fill had been clean. A standing body makes
+        // a tall thin hole, so a column through it spans from head to feet and has nothing near
+        // it in that direction at all.
         //
-        // Both fills are computed, and each pixel takes more of whichever direction had real
-        // information nearer to hand.
-        var across = [UInt8](repeating: 0, count: width * height * 3)
-        var down = [UInt8](repeating: 0, count: width * height * 3)
-        var acrossReach = [Int32](repeating: 0, count: width * height)
-        var downReach = [Int32](repeating: 0, count: width * height)
-
+        // Kept as a note rather than as code, because the reasoning was sound and the result
+        // was not, and the next person to have the same good idea should know it was tried.
         for y in 0..<height {
             var x = 0
             while x < width {
-                guard isHole(x, y) else { x += 1; continue }
+                guard mask[y * maskRow + x * 4] > 100 else { x += 1; continue }
                 var end = x
-                while end < width && isHole(end, y) { end += 1 }
+                while end < width && mask[y * maskRow + end * 4] > 100 { end += 1 }
+
                 let leftX = x - 1, rightX = end
                 let hasLeft = leftX >= 0, hasRight = rightX < width
-                let texture = textured(y, leftX, rightX)
+
+                // How textured is the ground either side of this gap.
+                var difference = 0.0
+                var samples = 0
+                for probe in 1...28 {
+                    for side in [leftX - probe, rightX + probe] where side >= 1 && side < width - 1 {
+                        difference += abs(Double(pixels[y * rowBytes + side * 4])
+                                          - Double(pixels[y * rowBytes + (side + 1) * 4]))
+                        samples += 1
+                    }
+                }
+                let texture = samples > 0 ? min(1.0, (difference / Double(samples)) / 9.0) : 0
+
                 for px in x..<end {
                     let t = Double(px - x + 1) / Double(end - x + 1)
                     let mirrorL = leftX - (px - x), mirrorR = rightX + (end - 1 - px)
@@ -393,59 +403,19 @@ enum PhotoAvatar {
                             ? Double(pixels[y * rowBytes + mirrorL * 4 + channel]) : edgeL
                         let reflectedR = (hasRight && mirrorR < width)
                             ? Double(pixels[y * rowBytes + mirrorR * 4 + channel]) : edgeR
+
                         let flat: Double, mirrored: Double
                         if hasLeft && hasRight {
                             flat = edgeL * (1 - t) + edgeR * t
                             mirrored = reflectedL * (1 - t) + reflectedR * t
                         } else if hasLeft { flat = edgeL; mirrored = reflectedL }
                         else { flat = edgeR; mirrored = reflectedR }
-                        across[(y * width + px) * 3 + channel] =
+
+                        pixels[y * rowBytes + px * 4 + channel] =
                             UInt8(max(0, min(255, flat * (1 - texture) + mirrored * texture)))
                     }
-                    // How far the nearest real pixel is, in this direction.
-                    acrossReach[y * width + px] = Int32(min(px - x + 1, end - px))
                 }
                 x = end
-            }
-        }
-
-        for x in 0..<width {
-            var y = 0
-            while y < height {
-                guard isHole(x, y) else { y += 1; continue }
-                var end = y
-                while end < height && isHole(x, end) { end += 1 }
-                let topY = y - 1, bottomY = end
-                let hasTop = topY >= 0, hasBottom = bottomY < height
-                for py in y..<end {
-                    let t = Double(py - y + 1) / Double(end - y + 1)
-                    for channel in 0..<3 {
-                        let edgeT = hasTop ? Double(pixels[topY * rowBytes + x * 4 + channel]) : 0
-                        let edgeB = hasBottom ? Double(pixels[bottomY * rowBytes + x * 4 + channel]) : 0
-                        let value: Double
-                        if hasTop && hasBottom { value = edgeT * (1 - t) + edgeB * t }
-                        else if hasTop { value = edgeT } else { value = edgeB }
-                        down[(py * width + x) * 3 + channel] = UInt8(max(0, min(255, value)))
-                    }
-                    downReach[py * width + x] = Int32(min(py - y + 1, end - py))
-                }
-                y = end
-            }
-        }
-
-        for y in 0..<height {
-            for x in 0..<width where isHole(x, y) {
-                let index = y * width + x
-                let a = Double(acrossReach[index]), d = Double(downReach[index])
-                guard a + d > 0 else { continue }
-                // Nearer information wins. Squared, so a clearly closer edge dominates rather
-                // than the two being averaged into mush.
-                let wa = (d * d) / (a * a + d * d)
-                for channel in 0..<3 {
-                    pixels[y * rowBytes + x * 4 + channel] = UInt8(max(0, min(255,
-                        Double(across[index * 3 + channel]) * wa
-                        + Double(down[index * 3 + channel]) * (1 - wa))))
-                }
             }
         }
 

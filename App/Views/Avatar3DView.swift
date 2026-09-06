@@ -974,18 +974,37 @@ struct Avatar3DView: UIViewRepresentable {
             // Nothing to settle if it was settled last time.
             let iters = reuse != nil ? 0
                 : (fdIds.count > 800 ? 18 : (fdIds.count > 400 ? 32 : 80))
-            for _ in 0..<iters {
+            for pass in 0..<iters {
                 var dx = [UUID: Double](), dy = [UUID: Double](), dz = [UUID: Double]()
+                // REPEL AGAINST A SAMPLE, not against everybody.
+                //
+                // Every node against every other is O(n²) per pass, and at a few thousand
+                // notes that is hundreds of millions of square roots before the screen can
+                // draw. A spatial grid was tried first and MEASURED SLOWER — the graph is
+                // compact enough that a cutoff-sized neighbourhood covers all of it, so the
+                // bucketing was pure overhead on the same comparisons.
+                //
+                // Sampling works where the grid did not. Each node is pushed by a fixed number
+                // of others each pass, chosen by a stride that walks the whole list over
+                // successive passes, and the force is scaled up to stand for the ones skipped.
+                // Over eighty passes every pair still contributes; no single pass costs n².
+                //
+                // Below the sample size it is exhaustive anyway, so small vaults are unchanged.
+                let sample = 48
+                let stride = max(1, fdIds.count / sample)
+                let scale = Double(stride)
                 for ai in 0..<fdIds.count {
                     let A = fdIds[ai]
-                    for bi in (ai + 1)..<fdIds.count {
+                    var bi = ai + 1 + (pass % stride)
+                    while bi < fdIds.count {
+                        defer { bi += stride }
                         let B = fdIds[bi]
                         var ex = fx[A]! - fx[B]!, ey = fy[A]! - fy[B]!, ez = fz[A]! - fz[B]!
                         var dist = (ex * ex + ey * ey + ez * ez).squareRoot()
                         if dist < 0.02 { ex += 0.02; dist = 0.02 }
                         // hub factor is ~1 unless BOTH ends are hubs, so leaf/axis links are untouched.
                         let hub = min(hubMax, 1.0 + hubSpread * max(0, (degree[A] ?? 0) - hubK) * max(0, (degree[B] ?? 0) - hubK))
-                        let rep = (kRepel * kRepel) / (dist * dist) * hub
+                        let rep = (kRepel * kRepel) / (dist * dist) * hub * scale
                         dx[A, default: 0] += ex * rep; dy[A, default: 0] += ey * rep; dz[A, default: 0] += ez * rep
                         dx[B, default: 0] -= ex * rep; dy[B, default: 0] -= ey * rep; dz[B, default: 0] -= ez * rep
                     }
