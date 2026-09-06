@@ -59,78 +59,106 @@ struct PhotoAvatarView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let side = min(geo.size.width, geo.size.height)
+            // THE WHOLE PHOTOGRAPH, not a slice of its middle.
+            //
+            // scaledToFill blows a landscape picture up until its HEIGHT covers a portrait
+            // screen, which throws away most of its width — a man standing at the left of the
+            // frame came out as a close-up of his arm. The picture is the point here: it is a
+            // place you chose, and it has to be seen whole.
+            //
+            // Everything is then laid out inside that fitted rectangle, so the head and chest
+            // anchors line up with the photograph rather than with the screen.
+            let fitted = fit(background.size, in: geo.size)
             ZStack {
+                // The letterbox is filled with an out-of-focus copy of the picture, so the
+                // screen is of a place rather than a photo on a black card.
                 Image(uiImage: background)
                     .resizable().scaledToFill()
                     .frame(width: geo.size.width, height: geo.size.height)
-                    .clipped()
+                    .clipped().blur(radius: 34).opacity(0.5)
+                    .overlay(Color.black.opacity(0.35))
 
-                // SPIRIT IS NOT A BODY PART, so it is not drawn as one. It gathers as a glow
-                // around the whole of you — present before any of you is, which is the right
-                // way round for the axis that is least about anatomy.
-                Image(uiImage: person)
-                    .resizable().scaledToFill()
-                    .frame(width: geo.size.width, height: geo.size.height)
-                    .clipped()
-                    .blur(radius: 26)
-                    .blendMode(.plusLighter)
-                    // From nothing. A base glow on an empty axis lit you up before you had
-                    // done anything, which is the opposite of the point.
-                    .opacity(running ? 0.46 * min(1, undoing * 2.8) : 0.46 * presence(maturity("spirit")))
-                    .foregroundStyle(spiritColor)
-                    .allowsHitTesting(false)
+                ZStack {
+                    Image(uiImage: background)
+                        .resizable().scaledToFit()
 
-                // Each region is the same picture of you, coarsened by its own axis, shown only
-                // where that region is. They overlap softly, so no seam is ever visible between
-                // a head that has grown and a chest that has not.
-                ForEach(regions, id: \.axis) { region in
+                    // Spirit is not a body part, so it is not drawn as one: a glow gathering
+                    // around the whole of you, present before any of you is.
                     Image(uiImage: person)
-                        .resizable().scaledToFill()
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .clipped()
-                        .resolving(maturity: showing(region.axis), side: side,
+                        .resizable().scaledToFit()
+                        .blur(radius: 26)
+                        .blendMode(.plusLighter)
+                        .opacity(running ? 0.46 * min(1, undoing * 2.8)
+                                         : 0.46 * presence(maturity("spirit")))
+                        .foregroundStyle(spiritColor)
+                        .allowsHitTesting(false)
+
+                    // Each region is the same picture of you, coarsened by its own axis and
+                    // shown only where that region is. They overlap softly, so no seam shows
+                    // between a head that has grown and a chest that has not.
+                    ForEach(regions, id: \.axis) { region in
+                        // COARSEN SOMETHING OPAQUE, then cut your shape out of it.
+                        //
+                        // Coarsening the cut-out directly does not work, and this is why the
+                        // blocks never looked like blocks: the filter averages the transparent
+                        // pixels around you along with you. Every block came out part-alpha, so
+                        // a coarse setting produced a uniformly see-through smudge instead of
+                        // big squares — faint, which is exactly what "blurring minimal at best"
+                        // looks like.
+                        //
+                        // Laying you over the background first gives the filter something solid
+                        // to work on. The blocks are then real blocks, and your outline is
+                        // taken out of them afterwards, so the photograph around you stays as
+                        // sharp as it ever was.
+                        ZStack {
+                            Image(uiImage: background).resizable().scaledToFit()
+                            Image(uiImage: person).resizable().scaledToFit()
+                        }
+                        .resolving(maturity: showing(region.axis), side: fitted.width,
                                    seed: region.seed, blocksAtZero: 9)
-                        // YOU BEGIN ERASED. Coarsening alone does not do that: the coarsest
-                        // block still carries your colour, so an untouched axis showed a
-                        // blocky but unmistakably present man standing there. Presence has to
-                        // be its own term, and it has to start at exactly nothing — the first
-                        // day should be the photograph without you in it, not the photograph
-                        // with a mosaic of you in it.
+                        .mask {
+                            Image(uiImage: person).resizable().scaledToFit()
+                        }
                         .opacity(visible(region.axis))
                         .mask {
                             RadialGradient(
                                 colors: [.white, .white.opacity(0.85), .clear],
                                 center: unitPoint(region.centre),
                                 startRadius: 0,
-                                endRadius: side * region.reach * max(0.35, anchors.height))
+                                endRadius: fitted.height * region.reach
+                                    * max(0.35, anchors.height))
                         }
+                    }
                 }
+                .frame(width: fitted.width, height: fitted.height)
+                .clipped()
             }
         }
         .ignoresSafeArea()
         .onAppear {
             // WATCH YOURSELF GO. Arriving at an empty photograph explains nothing — it looks
-            // like a picture of a wall. Coming apart, once, in front of you, says what the
-            // screen is for and what the months ahead are going to undo: the coarsening runs
-            // backwards, the blocks swell, and you thin out of your own photograph.
-            //
-            // It also fixes the order in which the eye reads the thing. You have to see it
-            // whole before "not whole yet" can mean anything.
+            // like a picture of a wall. Coming apart, once, in front of you says what the
+            // screen is for and what the months ahead are going to undo.
             guard introduce else { return }
             Task { await comeApart() }
         }
     }
 
+    /// The photograph's rectangle inside the screen, scaled to fit and centred.
+    private func fit(_ size: CGSize, in box: CGSize) -> CGRect {
+        guard size.width > 0, size.height > 0 else { return CGRect(origin: .zero, size: box) }
+        let scale = min(box.width / size.width, box.height / size.height)
+        let w = size.width * scale, h = size.height * scale
+        return CGRect(x: (box.width - w) / 2, y: (box.height - h) / 2, width: w, height: h)
+    }
+
     /// How much of you shows, right now.
     ///
-    /// The intro needs the OPPOSITE curve to the months. Across a life, presence should rise
-    /// slowly from nothing, so a first few notes barely trouble the picture. During the
-    /// dissolve it has to HOLD while the blocks swell — otherwise you are already too faint to
-    /// see by the time the coarsening becomes dramatic, and the whole thing reads as a fade
-    /// with some texture in it rather than as a picture coming apart.
-    ///
-    /// So it holds at full until the last third, then goes quickly.
+    /// The intro needs the OPPOSITE curve to the months. Across a life, presence rises slowly
+    /// from nothing, so a first few notes barely trouble the picture. During the dissolve it
+    /// has to HOLD while the blocks swell — otherwise you are already too faint to see by the
+    /// time the coarsening becomes dramatic, and the whole thing reads as a fade with some
+    /// texture in it rather than as a picture coming apart.
     private func visible(_ axis: String) -> Double {
         guard running else { return presence(maturity(axis)) }
         return min(1, undoing * 2.8)
