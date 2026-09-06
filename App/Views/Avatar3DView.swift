@@ -1112,6 +1112,30 @@ struct Avatar3DView: UIViewRepresentable {
                 let s = targetR * pow(r / pR, gamma) / r   // scale ∝ r^(gamma-1): huge near centre, ~1 at rim
                 fx[id] = dx0 * s; fy[id] = dy0 * s; fz[id] = dz0 * s
             }
+
+            // AND THEN OUT OF THE BUBBLE. The remap above rescales every node's DISTANCE from
+            // the centre to one target radius, which is a sphere by construction — so however
+            // the clusters arrange themselves the graph always arrives as a ball floating in
+            // the middle of a tall screen, with a wide empty margin down each side and the
+            // whole thing smaller than it needs to be.
+            //
+            // Stretching each direction to its own extent lets it fill the shape it is
+            // actually being shown in. The de-densified interior is kept; only the outline
+            // stops being a circle.
+            let aspect: (x: Double, y: Double, z: Double) = (3.1, 5.4, 2.0)
+            for axis in 0..<3 {
+                var spread = [Double]()
+                for id in fdIds {
+                    spread.append(abs(axis == 0 ? fx[id]! : axis == 1 ? fy[id]! : fz[id]!))
+                }
+                spread.sort()
+                let reach = max(0.01, spread[Int(Double(spread.count - 1) * 0.85)])
+                let scale = (axis == 0 ? aspect.x : axis == 1 ? aspect.y : aspect.z) / reach
+                for id in fdIds {
+                    if axis == 0 { fx[id]! *= scale } else if axis == 1 { fy[id]! *= scale }
+                    else { fz[id]! *= scale }
+                }
+            }
         }
         // Unlinked files sit on a surrounding shell (fibonacci sphere).
         let unlinked = ids.filter { !linkedSet.contains($0) }

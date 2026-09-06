@@ -12,11 +12,8 @@ struct PhotoAvatarPicker: View {
 
     @State private var item: PhotosPickerItem?
     @State private var image: UIImage?
-    @State private var cleanItem: PhotosPickerItem?
-    @State private var cleanImage: UIImage?
     @State private var people: [(index: Int, centre: CGPoint)] = []
     @State private var chosen: CGPoint?
-    @State private var busyBackground = false
     @State private var working = false
     @State private var problem: String?
 
@@ -32,7 +29,6 @@ struct PhotoAvatarPicker: View {
                                 let fitted = fit(image.size, in: geo.size)
                                 Button {
                                     chosen = person.centre
-                                    checkBackground()
                                 } label: {
                                     Circle()
                                         .strokeBorder(chosen == person.centre ? Color.accentColor : .white,
@@ -52,15 +48,6 @@ struct PhotoAvatarPicker: View {
                         Text(chosen == nil ? "Tap yourself." : "That's you.")
                             .font(.headline)
                     }
-                    if busyBackground && cleanImage == nil {
-                        Label("This background has a lot of detail, so where you stood will not "
-                              + "erase cleanly. Either pick a photo with more plain wall or sky "
-                              + "behind you — or duplicate this one in Photos, erase yourself "
-                              + "with Clean Up, and add it below. You only ever do that once.",
-                              systemImage: "exclamationmark.circle")
-                            .font(.footnote).foregroundStyle(.secondary)
-                            .padding(.horizontal, 24).multilineTextAlignment(.leading)
-                    }
                 } else {
                     ContentUnavailableView(
                         "Choose the best version of you",
@@ -74,24 +61,6 @@ struct PhotoAvatarPicker: View {
                              selection: $item, matching: .images)
                     .buttonStyle(.borderedProminent)
 
-                // THE BEST ERASURE AVAILABLE IS THE ONE ON THE PHONE ALREADY, and it belongs
-                // to the Photos app. Apple's Clean Up reconstructs what was behind you instead
-                // of borrowing from beside you, and no amount of arithmetic here matches it —
-                // but it is not offered to other apps, so it cannot be called. It can be
-                // handed the result, which takes one minute, once, and is then perfect forever.
-                if image != nil {
-                    VStack(spacing: 8) {
-                        PhotosPicker(cleanImage == nil
-                                     ? "Add the same photo with yourself erased (optional)"
-                                     : "Erased version added ✓",
-                                     selection: $cleanItem, matching: .images)
-                        Text("For a flawless result: duplicate this photo in Photos, use "
-                             + "**Clean Up** to erase yourself, and add it here. Numinous will "
-                             + "use it as the background instead of filling the gap itself.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center).padding(.horizontal, 28)
-                    }
-                }
 
                 if let problem {
                     Text(problem).font(.footnote).foregroundStyle(.red)
@@ -111,13 +80,6 @@ struct PhotoAvatarPicker: View {
             }
             .overlay { if working { ProgressView().controlSize(.large) } }
             .onChange(of: item) { _, new in Task { await load(new) } }
-            .onChange(of: cleanItem) { _, new in
-                Task {
-                    guard let data = try? await new?.loadTransferable(type: Data.self),
-                          let picked = UIImage(data: data) else { return }
-                    cleanImage = PhotoAvatar.upright(picked)
-                }
-            }
         }
     }
 
@@ -135,20 +97,13 @@ struct PhotoAvatarPicker: View {
         // targets ended up beside the person instead of on them.
         let picked = PhotoAvatar.upright(raw)
         image = picked
-        cleanImage = nil
-        cleanItem = nil
         chosen = nil
         problem = nil
         people = (try? PhotoAvatar.people(in: picked)) ?? []
-        if people.count == 1 { chosen = people[0].centre; checkBackground() }
+        if people.count == 1 { chosen = people[0].centre }
         if people.isEmpty { problem = PhotoAvatar.whyNoOneFound() }
     }
 
-    /// Look at the ground behind whoever was tapped, while there is still time to act on it.
-    private func checkBackground() {
-        guard let image, let youAt = chosen else { return }
-        Task { busyBackground = PhotoAvatar.backgroundWillSmear(image, youAt: youAt) }
-    }
 
     private func use() {
         guard let image else { return }
@@ -157,8 +112,7 @@ struct PhotoAvatarPicker: View {
         Task {
             defer { working = false }
             do {
-                let prepared = try PhotoAvatar.prepare(image: image, youAt: youAt,
-                                                       cleanBackground: cleanImage)
+                let prepared = try PhotoAvatar.prepare(image: image, youAt: youAt)
                 try PhotoAvatar.save(prepared)
                 onSaved()
                 dismiss()

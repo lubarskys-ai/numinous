@@ -12,7 +12,6 @@ import NuminousCore
 /// part bolted onto a mannequin; this is your own head, in your own photograph, becoming clear
 /// because you have been thinking. Nothing is added to you that was not already there.
 struct PhotoAvatarView: View {
-    let background: UIImage
     let person: UIImage
     let anchors: PhotoAvatar.Anchors
     /// Per-axis maturity, 0…1.
@@ -83,110 +82,51 @@ struct PhotoAvatarView: View {
 
     var body: some View {
         GeometryReader { geo in
-            // THE WHOLE PHOTOGRAPH, not a slice of its middle.
-            //
-            // scaledToFill blows a landscape picture up until its HEIGHT covers a portrait
-            // screen, which throws away most of its width — a man standing at the left of the
-            // frame came out as a close-up of his arm. The picture is the point here: it is a
-            // place you chose, and it has to be seen whole.
-            //
-            // Everything is then laid out inside that fitted rectangle, so the head and chest
-            // anchors line up with the photograph rather than with the screen.
-            let fitted = fit(background.size, in: geo.size)
+            let fitted = fit(person.size, in: geo.size)
             ZStack {
-                // The letterbox is filled with an out-of-focus copy of the picture, so the
-                // screen is of a place rather than a photo on a black card.
-                Image(uiImage: background)
-                    .resizable().scaledToFill()
-                    .frame(width: geo.size.width, height: geo.size.height)
-                    .clipped().blur(radius: 34).opacity(0.5)
-                    .overlay(Color.black.opacity(0.35))
+                // BLACK, AND NOTHING ELSE. The photograph is gone — with it went the smears,
+                // the dark patch where a torso had been, and the whole business of
+                // reconstructing a wall. What is left is you, cropped close, at the size the
+                // screen can actually give you.
+                Color.black
 
                 ZStack {
-                    Image(uiImage: background)
-                        .resizable().scaledToFit()
-
-                    // Spirit is not a body part, so it is not drawn as one: a coloured glow
-                    // in the shape of you, gathering around the whole figure.
-                    //
-                    // The first version tinted the photograph with foregroundStyle, which does
-                    // nothing to a photograph — that is for template images — so Spirit moved
-                    // its slider and changed the screen not at all. Colouring a rectangle and
-                    // cutting your shape out of it gives an actual glow of an actual colour.
-                    // THE FADE GOES ON THE COLOUR, NOT ON THE VIEW, and that distinction was
-                    // the black blob on his chest.
-                    //
-                    // .blendMode followed by .opacity makes SwiftUI draw the layer on its own,
-                    // against BLACK, and then composite the result — so the black comes with
-                    // it. The glow is masked by a blurred cut-out of the person, which is
-                    // densest through the torso, so the black landed precisely there: a soft
-                    // oval on the chest with a halo round it, exactly as reported, and nothing
-                    // whatever to do with the erase it was blamed on for three rounds.
-                    //
-                    // Fading the colour itself adds no layer, so plusLighter keeps blending
-                    // with the photograph underneath, which is the only thing it can lighten.
+                    // Spirit gathers as a glow around the whole of you rather than in a part,
+                    // because it is the one axis that is not anatomy. The fade goes on the
+                    // COLOUR — putting it on the view makes SwiftUI draw the layer against
+                    // black and composite the black in, which is what once put a dark oval on
+                    // his chest.
                     spiritColor
                         .opacity(running && preview == nil
                                  ? 0.85 * min(1, max(0, (undoing - 0.07) * 3.0))
                                  : 0.85 * presence(preview?["spirit"] ?? maturity("spirit")))
                         .mask {
-                            Image(uiImage: person)
-                                .resizable().scaledToFit()
-                                .blur(radius: 30)
+                            Image(uiImage: person).resizable().scaledToFit().blur(radius: 26)
                         }
                         .blendMode(.plusLighter)
                         .allowsHitTesting(false)
 
-                    // Each region is the same picture of you, coarsened by its own axis and
-                    // shown only where that region is. They overlap softly, so no seam shows
-                    // between a head that has grown and a chest that has not.
+                    // Each region is you, coarsened by its own axis, shown only where that
+                    // region is. On black the blocks read as blocks with no compositing tricks
+                    // needed: there is nothing behind them to average with.
                     ForEach(regions, id: \.axis) { region in
-                        // COARSEN SOMETHING OPAQUE, then cut your shape out of it.
-                        //
-                        // Coarsening the cut-out directly does not work, and this is why the
-                        // blocks never looked like blocks: the filter averages the transparent
-                        // pixels around you along with you. Every block came out part-alpha, so
-                        // a coarse setting produced a uniformly see-through smudge instead of
-                        // big squares — faint, which is exactly what "blurring minimal at best"
-                        // looks like.
-                        //
-                        // Laying you over the background first gives the filter something solid
-                        // to work on. The blocks are then real blocks, and your outline is
-                        // taken out of them afterwards, so the photograph around you stays as
-                        // sharp as it ever was.
-                        ZStack {
-                            Image(uiImage: background).resizable().scaledToFit()
-                            Image(uiImage: person).resizable().scaledToFit()
-                        }
-                        .resolving(maturity: showing(region.axis), side: fitted.width,
-                                   seed: region.seed, blocksAtZero: 9)
-                        .mask {
-                            // COARSEN THE OUTLINE TOO. Cutting blocks out with a sharp
-                            // silhouette leaves a crisp edge with a mosaic inside it, and a
-                            // crisp edge reads as a person who is present — just oddly
-                            // textured. Running the same effect over the mask breaks the
-                            // outline into the same squares, so you actually come apart at the
-                            // edges rather than staying a neat cut-out full of pixels.
-                            Image(uiImage: person)
-                                .resizable().scaledToFit()
-                                .resolving(maturity: showing(region.axis), side: fitted.width,
-                                           seed: region.seed, blocksAtZero: 9)
-                        }
-                        .opacity(visible(region.axis))
-                        .mask {
-                            RadialGradient(
-                                colors: [.white, .white.opacity(0.85), .clear],
-                                center: unitPoint(region.centre),
-                                startRadius: 0,
-                                endRadius: fitted.height * region.reach
-                                    * max(0.35, anchors.height))
-                        }
+                        Image(uiImage: person)
+                            .resizable().scaledToFit()
+                            .resolving(maturity: showing(region.axis), side: fitted.width,
+                                       seed: region.seed, blocksAtZero: 9)
+                            .opacity(visible(region.axis))
+                            .mask {
+                                RadialGradient(
+                                    colors: [.white, .white.opacity(0.85), .clear],
+                                    center: unitPoint(region.centre),
+                                    startRadius: 0,
+                                    endRadius: fitted.height * region.reach)
+                            }
                     }
                 }
                 .frame(width: fitted.width, height: fitted.height)
                 .scaleEffect(scale)
                 .offset(offset)
-                .clipped()
                 .contentShape(Rectangle())
                 .gesture(
                     SimultaneousGesture(
@@ -202,8 +142,6 @@ struct PhotoAvatarView: View {
                             pan.width += value.translation.width
                             pan.height += value.translation.height
                         }))
-                // Back to the whole picture, without hunting for the exact pinch that
-                // gets there.
                 .onTapGesture(count: 2) {
                     withAnimation(.easeInOut(duration: 0.25)) { zoom = 1; pan = .zero }
                 }
@@ -211,9 +149,6 @@ struct PhotoAvatarView: View {
         }
         .ignoresSafeArea()
         .onAppear {
-            // WATCH YOURSELF GO. Arriving at an empty photograph explains nothing — it looks
-            // like a picture of a wall. Coming apart, once, in front of you says what the
-            // screen is for and what the months ahead are going to undo.
             guard introduce else { return }
             Task { await comeApart() }
         }

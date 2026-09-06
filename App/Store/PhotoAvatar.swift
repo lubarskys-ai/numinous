@@ -21,11 +21,13 @@ import Vision
 ///   FIND THE PARTS OF A BODY. Head, neck, shoulders, hips, knees, ankles, located in YOUR
 ///   photograph. That is what lets Mind fill in your head and Heart the middle of your chest,
 ///   rather than guessing from a rectangle.
-///   ERASE, not just fade. There is no public "clean up" on iOS — that is the Photos app's
-///   own, not offered to other apps — so the hole is closed by spreading the surrounding
-///   colours inward. Against a wall or a sky it is invisible. Against a hedge it is not,
-///   which is why `backgroundIsBusy` warns you at the moment you choose.
 ///   PIXELLATE. The coarse-to-fine reading the axis pictures already use.
+///
+/// AND ONE THING IT NO LONGER TRIES TO DO. The first version kept the photograph and removed
+/// the person from it, which meant reconstructing whatever had been standing behind them —
+/// genuinely hard, four attempts deep, and never right on a busy background. Keeping the
+/// PERSON and throwing the photograph away deletes that problem entirely: cutting somebody out
+/// was always easy, and it was only putting them back that was not.
 @MainActor
 enum PhotoAvatar {
 
@@ -33,24 +35,46 @@ enum PhotoAvatar {
 
     /// Everything needed to draw the avatar, computed once when the photo is chosen.
     struct Prepared {
-        /// The photograph with you taken out of it.
-        let background: UIImage
-        /// Just you, on transparency.
+        /// You, cut out and cropped close, on transparency.
+        ///
+        /// THE PHOTOGRAPH IS NO LONGER KEPT, and losing it removed the hardest problem in this
+        /// feature. Reconstructing what stood behind someone is genuinely difficult — it is
+        /// what Apple's Clean Up does with a trained model and what four attempts here did with
+        /// arithmetic, producing smears through a hedge and a dark patch where a torso had
+        /// been. None of that exists any more. Cutting a person OUT is easy and already
+        /// worked; it was only putting them back that was hard, and nothing needs putting back.
+        ///
+        /// It is also simply better to look at: cropped close and dropped on black, a person
+        /// fills the screen instead of standing small in the middle of a holiday snap.
         let person: UIImage
         /// Where your parts are, in unit coordinates with the origin at bottom-left.
         let anchors: Anchors
-        /// True when erasing left visible smears, so the caller can say so out loud.
-        let backgroundIsBusy: Bool
     }
 
     /// The handful of body points the axes are hung on. Unit coordinates.
     struct Anchors: Codable {
+        /// Where each part is, as a fraction of the CROPPED picture.
         var head: CGPoint
         var neck: CGPoint
         var chest: CGPoint
         var hip: CGPoint
         /// How tall the person stands in the frame, used to size each region's falloff.
         var height: CGFloat
+
+        /// The same points, re-expressed against a crop of the original.
+        ///
+        /// Every anchor is a fraction of a picture, so cropping the picture moves all of them.
+        /// Forgetting this is the sort of thing that puts a head in the middle of a chest and
+        /// looks like a tuning problem for a day.
+        func moved(into box: CGRect, from full: CGRect) -> Anchors {
+            func shift(_ p: CGPoint) -> CGPoint {
+                CGPoint(x: (p.x * full.width - box.minX) / max(1, box.width),
+                        y: (p.y * full.height - box.minY) / max(1, box.height))
+            }
+            return Anchors(head: shift(head), neck: shift(neck), chest: shift(chest),
+                           hip: shift(hip),
+                           height: height * full.height / max(1, box.height))
+        }
     }
 
     /// A photograph standing upright, with its rotation baked in.
@@ -61,7 +85,7 @@ enum PhotoAvatar {
     /// sideways buffer. So Vision looked for a person in a rotated picture, the tap targets
     /// landed in rotated coordinates and missed the man standing there, the saved cut-out came
     /// out rotated, a landscape image drawn into a portrait frame looked squashed, and the
-    /// erase blurred a band across the wrong part of the photograph.
+    /// cut-out came out rotated and squashed.
     ///
     /// Redrawing the image once, upright, makes every one of those go away — and it must
     /// happen before anything else looks at the pixels, which is why it is the first line of
@@ -78,8 +102,6 @@ enum PhotoAvatar {
 
     // MARK: - Choosing
 
-    /// Will this background erase cleanly, or leave a smear?
-    ///
     /// Asked when the photo is CHOSEN rather than after it is committed. The answer was being
     /// worked out during preparation and reported to a screen that closed a moment later, so
     /// nobody ever saw it — advice about a decision, delivered after the decision, to a view on
@@ -135,59 +157,46 @@ enum PhotoAvatar {
     /// between them is a handshake nobody guaranteed — and the cost of it being wrong is
     /// erasing the wrong person out of a photograph of a marriage. A point cannot get out of
     /// order. Whoever is nearest it is who was meant.
-    static func prepare(image: UIImage, youAt: CGPoint,
-                        cleanBackground: UIImage? = nil) throws -> Prepared {
+    static func prepare(image: UIImage, youAt: CGPoint) throws -> Prepared {
         guard let cg = upright(image).cgImage else { throw Failure.unreadable }
         let context = CIContext()
         let photo = CIImage(cgImage: cg)
 
         let personIndex = try nearestBody(cg, to: youAt)
         let mask = try personMask(cg, personIndex: personIndex, extent: photo.extent)
-        // A segmentation edge always leaves a rim of the person behind, and a rim of somebody
-        // is more noticeable than a slightly larger patch of wall. Grown a little, and softened
-        // so the join does not read as a cut-out. This is also what catches a hat or a bag,
-        // which the model does not always count as part of a person.
-        var grown = mask
-            .applyingFilter("CIMorphologyMaximum", parameters: ["inputRadius": 9])
-
-        // THE SHADOW IS NOT PART OF A PERSON, so nothing includes it — and a shadow with
-        // nobody casting it is stranger than a person standing there. Nudging the outline
-        // downward a few times and keeping the union catches the contact shadow at the feet,
-        // which is the part that reads as wrong. A long shadow thrown across a floor is
-        // another matter and is left alone: guessing at how far it runs would take real ground
-        // with it.
-        let drop = photo.extent.height * 0.012
-        for step in 1...4 {
-            grown = grown.applyingFilter("CISourceOverCompositing", parameters: [
-                kCIInputBackgroundImageKey: grown.transformed(
-                    by: CGAffineTransform(translationX: 0, y: -drop * CGFloat(step)))])
-        }
-
-        grown = grown
-            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 4])
+        // Grown a little and softened, so no rim of background survives around a shoulder and
+        // the edge does not read as scissors. This is also what catches a hat or a bag.
+        let grown = mask
+            .applyingFilter("CIMorphologyMaximum", parameters: ["inputRadius": 6])
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 3])
             .cropped(to: photo.extent)
 
-        // A background that has already been repaired properly beats anything computed here.
-        let background: CIImage
-        if let clean = cleanBackground.map(upright), let cleanCG = clean.cgImage {
-            background = CIImage(cgImage: cleanCG)
-                .transformed(by: CGAffineTransform(scaleX: photo.extent.width / CGFloat(cleanCG.width),
-                                                   y: photo.extent.height / CGFloat(cleanCG.height)))
-        } else {
-            background = erase(photo, person: grown, context: context)
-        }
-        let person = photo.applyingFilter("CIBlendWithMask", parameters: [kCIInputMaskImageKey: grown])
+        let cutOut = photo.applyingFilter("CIBlendWithMask", parameters: [kCIInputMaskImageKey: grown])
+        let anchors = try anchors(cg, personIndex: personIndex)
 
-        guard let backgroundCG = context.createCGImage(background, from: photo.extent),
-              let personCG = context.createCGImage(person, from: photo.extent)
-        else { throw Failure.couldNotPrepare }
+        // Crop close. The frame is taken from the body's own joints rather than from the
+        // mask's bounds, because a mask can pick up a stray patch of somebody's arm across the
+        // room and a skeleton cannot.
+        let box = tightBox(anchors, in: photo.extent)
+        guard let cropped = context.createCGImage(cutOut, from: box) else { throw Failure.couldNotPrepare }
 
-        return Prepared(
-            background: UIImage(cgImage: backgroundCG),
-            person: UIImage(cgImage: personCG),
-            anchors: try anchors(cg, personIndex: personIndex),
-            // A supplied background is never "busy" — it has already been dealt with.
-            backgroundIsBusy: cleanBackground == nil && isBusy(photo, behind: grown, context: context))
+        return Prepared(person: UIImage(cgImage: cropped),
+                        anchors: anchors.moved(into: box, from: photo.extent))
+    }
+
+    /// The rectangle to crop to: the body, with room around it.
+    private static func tightBox(_ a: Anchors, in extent: CGRect) -> CGRect {
+        // Joints sit inside a body, and hair, shoes and outstretched hands live beyond the last
+        // one — so the margins are generous, and taller above the head than below the feet
+        // because that is where a hat is.
+        let top = min(1, a.head.y + a.height * 0.22)
+        let bottom = max(0, a.head.y - a.height * 1.12)
+        let halfWidth = max(0.10, a.height * 0.46)
+        let left = max(0, a.head.x - halfWidth), right = min(1, a.head.x + halfWidth)
+        // Vision counts from the bottom and so does a CIImage, so no flip is needed.
+        return CGRect(x: left * extent.width, y: bottom * extent.height,
+                      width: max(1, (right - left) * extent.width),
+                      height: max(1, (top - bottom) * extent.height))
     }
 
     /// Which detected body is nearest the point that was tapped.
@@ -448,7 +457,6 @@ enum PhotoAvatar {
             .cropped(to: extent)
     }
 
-    /// How much detail sat behind the person, which is what decides whether erasing them is
     /// invisible or a smear. A wall has almost no edges; a hedge is nothing but edges.
     private static func isBusy(_ photo: CIImage, behind mask: CIImage, context: CIContext) -> Bool {
         // Look in a band around the outline — the fill is only ever as good as what borders it.
@@ -528,19 +536,17 @@ extension PhotoAvatar {
     private static func file(_ name: String) -> URL? { folder?.appendingPathComponent(name) }
 
     /// Everything needed to draw, loaded back. Nil when no photo has been chosen.
-    static func stored() -> (background: UIImage, person: UIImage, anchors: Anchors)? {
-        guard let bg = file("background.png").flatMap({ UIImage(contentsOfFile: $0.path) }),
-              let person = file("person.png").flatMap({ UIImage(contentsOfFile: $0.path) }),
+    static func stored() -> (person: UIImage, anchors: Anchors)? {
+        guard let person = file("person.png").flatMap({ UIImage(contentsOfFile: $0.path) }),
               let data = file("anchors.json").flatMap({ try? Data(contentsOf: $0) }),
               let anchors = try? JSONDecoder().decode(Anchors.self, from: data)
         else { return nil }
-        return (bg, person, anchors)
+        return (person, anchors)
     }
 
     static func save(_ prepared: Prepared) throws {
-        guard let bg = file("background.png"), let person = file("person.png"),
-              let anchors = file("anchors.json") else { throw Failure.couldNotPrepare }
-        try prepared.background.pngData()?.write(to: bg, options: .atomic)
+        guard let person = file("person.png"), let anchors = file("anchors.json")
+        else { throw Failure.couldNotPrepare }
         try prepared.person.pngData()?.write(to: person, options: .atomic)
         try JSONEncoder().encode(prepared.anchors).write(to: anchors, options: .atomic)
     }

@@ -16,7 +16,7 @@ struct AvatarView: View {
     @State private var mode: AvatarMode?
     @State private var pickingPhoto = false
     /// Reloaded rather than watched: the photo changes when you choose one, and never after.
-    @State private var photo: (background: UIImage, person: UIImage, anchors: PhotoAvatar.Anchors)?
+    @State private var photo: (person: UIImage, anchors: PhotoAvatar.Anchors)?
     /// Only the first sight of a newly chosen photo plays the erasure; opening the screen
     /// again afterwards would make it a performance rather than a beginning.
     @State private var justChosen = false
@@ -60,8 +60,7 @@ struct AvatarView: View {
                     // YOUR OWN PHOTOGRAPH, when you have chosen one. It replaces the modelled
                     // figure rather than sitting beside it, because the two say the same thing
                     // and only one of them is you.
-                    PhotoAvatarView(background: photo.background, person: photo.person,
-                                    anchors: photo.anchors,
+                    PhotoAvatarView(person: photo.person, anchors: photo.anchors,
                                     maturity: { model.axisMaturity($0) },
                                     spiritColor: model.axis(id: "spirit")?.color ?? .purple,
                                     introduce: justChosen || replays > 0,
