@@ -17,6 +17,9 @@ struct AvatarView: View {
     @State private var pickingPhoto = false
     /// Reloaded rather than watched: the photo changes when you choose one, and never after.
     @State private var photo: (background: UIImage, person: UIImage, anchors: PhotoAvatar.Anchors)?
+    /// Only the first sight of a newly chosen photo plays the erasure; opening the screen
+    /// again afterwards would make it a performance rather than a beginning.
+    @State private var justChosen = false
     private var shown: AvatarMode { mode ?? initialMode }
     @State private var reflection: ReflectionRecord?
     @State private var zoom: Double = 1
@@ -56,7 +59,9 @@ struct AvatarView: View {
                     PhotoAvatarView(background: photo.background, person: photo.person,
                                     anchors: photo.anchors,
                                     maturity: { model.axisMaturity($0) },
-                                    spiritColor: model.axis(id: "spirit")?.color ?? .purple)
+                                    spiritColor: model.axis(id: "spirit")?.color ?? .purple,
+                                    introduce: justChosen)
+                        .id(justChosen)
                 } else {
                 Avatar3DView(
                     mode: shown,
@@ -138,7 +143,7 @@ struct AvatarView: View {
                 if photo == nil { photo = PhotoAvatar.stored() }
             }
             .sheet(isPresented: $pickingPhoto) {
-                PhotoAvatarPicker { photo = PhotoAvatar.stored() }
+                PhotoAvatarPicker { photo = PhotoAvatar.stored(); justChosen = true }
             }
             .onDisappear { model.avatarFocus = nil }   // don't re-focus next time the avatar opens
             // Push within the avatar's own stack rather than a sheet: this view lives
