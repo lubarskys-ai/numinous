@@ -20,6 +20,8 @@ struct AvatarView: View {
     /// Only the first sight of a newly chosen photo plays the erasure; opening the screen
     /// again afterwards would make it a performance rather than a beginning.
     @State private var justChosen = false
+    /// Bumped to replay the dissolve on demand.
+    @State private var replays = 0
     private var shown: AvatarMode { mode ?? initialMode }
     @State private var reflection: ReflectionRecord?
     @State private var zoom: Double = 1
@@ -60,8 +62,9 @@ struct AvatarView: View {
                                     anchors: photo.anchors,
                                     maturity: { model.axisMaturity($0) },
                                     spiritColor: model.axis(id: "spirit")?.color ?? .purple,
-                                    introduce: justChosen)
-                        .id(justChosen)
+                                    introduce: justChosen || replays > 0)
+                        // A new identity restarts the view, which is what re-runs the intro.
+                        .id(replays)
                 } else {
                 Avatar3DView(
                     mode: shown,
@@ -115,6 +118,11 @@ struct AvatarView: View {
                             Button(photo == nil ? "Use a photo of me…" : "Choose a different photo…",
                                    systemImage: "photo") { pickingPhoto = true }
                             if photo != nil {
+                                // Handy while the timing is still being argued about, and
+                                // worth keeping afterwards: it is a nice thing to watch.
+                                Button("Play the erasure again", systemImage: "arrow.counterclockwise") {
+                                    replays += 1
+                                }
                                 Button("Back to the drawn figure", systemImage: "figure.stand",
                                        role: .destructive) {
                                     PhotoAvatar.forget(); photo = nil

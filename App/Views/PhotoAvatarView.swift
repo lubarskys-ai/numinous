@@ -20,11 +20,14 @@ struct PhotoAvatarView: View {
     let spiritColor: Color
     /// Play the erasure once, on the way in.
     var introduce: Bool = false
+    /// True while the intro is running, so opacity can behave differently than it does across
+    /// the months.
 
     /// Runs 1 → 0 while the photograph comes apart. The effective maturity is the HIGHER of
     /// this and the real one, so the picture starts whole and falls to wherever your life has
     /// actually got to.
     @State private var undoing: Double = 0
+    @State private var running = false
 
     /// Take the picture apart, a frame at a time.
     ///
@@ -37,7 +40,8 @@ struct PhotoAvatarView: View {
     /// Stepping the value by hand gives the shader a new block size on every frame, which is
     /// the only way the coarsening is visible at all. Eased at both ends so it does not start
     /// or stop abruptly.
-    private func comeApart(seconds: Double = 4.2, frames: Int = 90) async {
+    private func comeApart(seconds: Double = 5.0, frames: Int = 110) async {
+        running = true
         let step = UInt64(seconds / Double(frames) * 1_000_000_000)
         for frame in 0...frames {
             let t = Double(frame) / Double(frames)
@@ -45,6 +49,7 @@ struct PhotoAvatarView: View {
             try? await Task.sleep(nanoseconds: step)
         }
         undoing = 0
+        running = false
     }
 
     /// What to draw: the real maturity, or the intro's, whichever is further along.
@@ -72,7 +77,7 @@ struct PhotoAvatarView: View {
                     .blendMode(.plusLighter)
                     // From nothing. A base glow on an empty axis lit you up before you had
                     // done anything, which is the opposite of the point.
-                    .opacity(0.46 * presence(showing("spirit")))
+                    .opacity(running ? 0.46 * min(1, undoing * 2.8) : 0.46 * presence(maturity("spirit")))
                     .foregroundStyle(spiritColor)
                     .allowsHitTesting(false)
 
@@ -85,14 +90,14 @@ struct PhotoAvatarView: View {
                         .frame(width: geo.size.width, height: geo.size.height)
                         .clipped()
                         .resolving(maturity: showing(region.axis), side: side,
-                                   seed: region.seed, blocksAtZero: 26)
+                                   seed: region.seed, blocksAtZero: 9)
                         // YOU BEGIN ERASED. Coarsening alone does not do that: the coarsest
                         // block still carries your colour, so an untouched axis showed a
                         // blocky but unmistakably present man standing there. Presence has to
                         // be its own term, and it has to start at exactly nothing — the first
                         // day should be the photograph without you in it, not the photograph
                         // with a mosaic of you in it.
-                        .opacity(presence(showing(region.axis)))
+                        .opacity(visible(region.axis))
                         .mask {
                             RadialGradient(
                                 colors: [.white, .white.opacity(0.85), .clear],
@@ -115,6 +120,20 @@ struct PhotoAvatarView: View {
             guard introduce else { return }
             Task { await comeApart() }
         }
+    }
+
+    /// How much of you shows, right now.
+    ///
+    /// The intro needs the OPPOSITE curve to the months. Across a life, presence should rise
+    /// slowly from nothing, so a first few notes barely trouble the picture. During the
+    /// dissolve it has to HOLD while the blocks swell — otherwise you are already too faint to
+    /// see by the time the coarsening becomes dramatic, and the whole thing reads as a fade
+    /// with some texture in it rather than as a picture coming apart.
+    ///
+    /// So it holds at full until the last third, then goes quickly.
+    private func visible(_ axis: String) -> Double {
+        guard running else { return presence(maturity(axis)) }
+        return min(1, undoing * 2.8)
     }
 
     /// How much of you is there at all, as against how sharp that much is.
