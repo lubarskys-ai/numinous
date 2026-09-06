@@ -78,6 +78,22 @@ enum PhotoAvatar {
 
     // MARK: - Choosing
 
+    /// Will this background erase cleanly, or leave a smear?
+    ///
+    /// Asked when the photo is CHOSEN rather than after it is committed. The answer was being
+    /// worked out during preparation and reported to a screen that closed a moment later, so
+    /// nobody ever saw it — advice about a decision, delivered after the decision, to a view on
+    /// its way out.
+    static func backgroundWillSmear(_ image: UIImage, youAt: CGPoint) -> Bool {
+        guard let cg = upright(image).cgImage else { return false }
+        let context = CIContext()
+        let photo = CIImage(cgImage: cg)
+        guard let index = try? nearestBody(cg, to: youAt),
+              let mask = try? personMask(cg, personIndex: index, extent: photo.extent)
+        else { return false }
+        return isBusy(photo, behind: mask, context: context)
+    }
+
     /// Every person in the photo, with a point to tap on each — so "which one is you" is a tap
     /// and never a guess.
     ///

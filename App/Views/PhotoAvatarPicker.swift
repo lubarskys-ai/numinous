@@ -32,6 +32,7 @@ struct PhotoAvatarPicker: View {
                                 let fitted = fit(image.size, in: geo.size)
                                 Button {
                                     chosen = person.centre
+                                    checkBackground()
                                 } label: {
                                     Circle()
                                         .strokeBorder(chosen == person.centre ? Color.accentColor : .white,
@@ -51,9 +52,11 @@ struct PhotoAvatarPicker: View {
                         Text(chosen == nil ? "Tap yourself." : "That's you.")
                             .font(.headline)
                     }
-                    if busyBackground {
-                        Label("This background is busy, so where you stood will read as a soft "
-                              + "shadow rather than disappearing. A plainer wall or sky erases cleanly.",
+                    if busyBackground && cleanImage == nil {
+                        Label("This background has a lot of detail, so where you stood will not "
+                              + "erase cleanly. Either pick a photo with more plain wall or sky "
+                              + "behind you — or duplicate this one in Photos, erase yourself "
+                              + "with Clean Up, and add it below. You only ever do that once.",
                               systemImage: "exclamationmark.circle")
                             .font(.footnote).foregroundStyle(.secondary)
                             .padding(.horizontal, 24).multilineTextAlignment(.leading)
@@ -137,8 +140,14 @@ struct PhotoAvatarPicker: View {
         chosen = nil
         problem = nil
         people = (try? PhotoAvatar.people(in: picked)) ?? []
-        if people.count == 1 { chosen = people[0].centre }
+        if people.count == 1 { chosen = people[0].centre; checkBackground() }
         if people.isEmpty { problem = PhotoAvatar.whyNoOneFound() }
+    }
+
+    /// Look at the ground behind whoever was tapped, while there is still time to act on it.
+    private func checkBackground() {
+        guard let image, let youAt = chosen else { return }
+        Task { busyBackground = PhotoAvatar.backgroundWillSmear(image, youAt: youAt) }
     }
 
     private func use() {
@@ -150,7 +159,6 @@ struct PhotoAvatarPicker: View {
             do {
                 let prepared = try PhotoAvatar.prepare(image: image, youAt: youAt,
                                                        cleanBackground: cleanImage)
-                busyBackground = prepared.backgroundIsBusy
                 try PhotoAvatar.save(prepared)
                 onSaved()
                 dismiss()
