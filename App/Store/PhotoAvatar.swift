@@ -53,6 +53,29 @@ enum PhotoAvatar {
         var height: CGFloat
     }
 
+    /// A photograph standing upright, with its rotation baked in.
+    ///
+    /// THE BUG THIS EXISTS TO KILL, which produced four different-looking symptoms from one
+    /// cause. A phone stores a portrait photo as a landscape buffer plus a note saying "turn
+    /// this a quarter turn". SwiftUI reads that note. `cgImage` does not — it hands back the
+    /// sideways buffer. So Vision looked for a person in a rotated picture, the tap targets
+    /// landed in rotated coordinates and missed the man standing there, the saved cut-out came
+    /// out rotated, a landscape image drawn into a portrait frame looked squashed, and the
+    /// erase blurred a band across the wrong part of the photograph.
+    ///
+    /// Redrawing the image once, upright, makes every one of those go away — and it must
+    /// happen before anything else looks at the pixels, which is why it is the first line of
+    /// both entry points.
+    static func upright(_ image: UIImage) -> UIImage {
+        guard image.imageOrientation != .up else { return image }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        return UIGraphicsImageRenderer(size: image.size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: image.size))
+        }
+    }
+
     // MARK: - Choosing
 
     /// Every person in the photo, with a point to tap on each — so "which one is you" is a tap
@@ -64,7 +87,7 @@ enum PhotoAvatar {
     /// is a much better thing to tap than a mask's centroid, which for someone standing with
     /// their arms out lands in the empty air between them.
     static func people(in image: UIImage) throws -> [(index: Int, centre: CGPoint)] {
-        guard let cg = image.cgImage else { return [] }
+        guard let cg = upright(image).cgImage else { return [] }
         let pose = VNDetectHumanBodyPoseRequest()
         try VNImageRequestHandler(cgImage: cg).perform([pose])
         return (pose.results ?? []).enumerated().compactMap { position, body in
@@ -81,7 +104,7 @@ enum PhotoAvatar {
 
     /// Take one person out of the photograph and keep both halves.
     static func prepare(image: UIImage, personIndex: Int) throws -> Prepared {
-        guard let cg = image.cgImage else { throw Failure.unreadable }
+        guard let cg = upright(image).cgImage else { throw Failure.unreadable }
         let context = CIContext()
         let photo = CIImage(cgImage: cg)
 

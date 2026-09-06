@@ -98,7 +98,11 @@ struct PhotoAvatarPicker: View {
 
     private func load(_ new: PhotosPickerItem?) async {
         guard let data = try? await new?.loadTransferable(type: Data.self),
-              let picked = UIImage(data: data) else { return }
+              let raw = UIImage(data: data) else { return }
+        // Straightened before it is shown, so what you tap and what the app measured are the
+        // same picture. Showing the original and measuring the rotated one is how the tap
+        // targets ended up beside the person instead of on them.
+        let picked = PhotoAvatar.upright(raw)
         image = picked
         chosen = nil
         problem = nil
