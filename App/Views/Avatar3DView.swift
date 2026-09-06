@@ -536,7 +536,10 @@ struct Avatar3DView: UIViewRepresentable {
         // Translucent body: overlapping forms, grey→axis color with growth. It
         // doesn't write depth, so the connectome inside stays fully visible.
         func part(_ geo: SCNGeometry, _ axis: String, _ pos: SCNVector3, scale: SCNVector3 = SCNVector3(1, 1, 1), euler: SCNVector3 = SCNVector3(0, 0, 0)) {
-            guard mode == .avatar else { return }
+            // The primitive stand-in body — overlapping capsules and spheres, one per axis.
+            // It is the same "assembled from labelled parts" reading as the organs, and the
+            // real sculpted mesh is what this screen is for.
+            return
             // Begin at the FIRST note, not at forty per cent.
             //
             // The old gate held every part invisible below 0.4 region maturity, which was
@@ -563,35 +566,6 @@ struct Avatar3DView: UIViewRepresentable {
             n.position = pos; n.scale = scale; n.eulerAngles = euler; n.renderingOrder = 0
             bodyFloat.addChildNode(n)
         }
-        // WHERE EACH AXIS WILL GROW, visible before there is anything there yet.
-        //
-        // A body that appears part by part needs somewhere for the eye to rest while the parts
-        // are still coming: five faint lights at the places the parts will be — the brain
-        // hemispheres for Mind and Meaning, the chest for Heart, the solar plexus for Spirit,
-        // the torso for Body. Each brightens and swells with its own axis, so an empty figure
-        // is not an empty screen: it is a diagram of what you have not filled in yet.
-        if mode == .avatar {
-            for axis in ["mind", "meaning", "heart", "spirit", "body"] {
-                let mr = max(0, min(1, regionMaturity(axis)))
-                let r = GLTFBody.region(axis)
-                let seed = SCNSphere(radius: 0.06 + 0.10 * mr)
-                seed.segmentCount = 24
-                let m = SCNMaterial()
-                m.lightingModel = .constant
-                // Self-lit and solid. The floor on transparency is what keeps the figure
-                // legible on the first day, when every axis is still at zero.
-                m.diffuse.contents = color(axis)
-                m.emission.contents = color(axis)
-                m.transparency = 0.34 + 0.56 * CGFloat(mr)
-                m.writesToDepthBuffer = false
-                seed.materials = [m]
-                let n = SCNNode(geometry: seed)
-                n.position = v(r.0 * 2.0, r.1 * 2.0, r.2 * 2.0)
-                n.renderingOrder = -1
-                bodyFloat.addChildNode(n)
-            }
-        }
-
         // ── Maturation: begin as a diffuse cloud that coalesces into a body ──
         let matur = max(0, min(1, maturity))
         // WHOLE-BODY maturity from the density of the web itself — the more connections, the more
@@ -640,13 +614,17 @@ struct Avatar3DView: UIViewRepresentable {
         let showSculptedBody = mode == .avatar
         var usedRigged = false
         if showSculptedBody {
-            if maxRegion > 0.62,
-               let rigged = RiggedBody.load(dominantColor: color(dominantAxis), growth01: growth(dominantAxis), maturity: matur) {
+            // FROM INFANCY, not from 62% of a lived life. The gate belonged to a screen where
+            // the figure was the connectome's late reward; on a screen that is only the figure
+            // it meant showing nothing for years. It starts small and unformed and grows —
+            // which is the whole idea — and the pixellation on the view above carries the
+            // "not yet resolved" reading that the old opacity gate was doing badly.
+            if let rigged = RiggedBody.load(dominantColor: color(dominantAxis), growth01: growth(dominantAxis), maturity: matur) {
                 if mode == .avatar { bodyFloat.addChildNode(rigged) }
                 usedRigged = true
             }
             if let loaded = GLTFBody.load(color: color, growth: growth, regionMaturity: regionMaturity) {
-                if mode == .avatar, maxRegion > 0.62, !usedRigged { bodyFloat.addChildNode(loaded.node) }
+                if mode == .avatar, !usedRigged { bodyFloat.addChildNode(loaded.node) }
                 bodySamples = loaded.samples
             }
         }
@@ -892,7 +870,12 @@ struct Avatar3DView: UIViewRepresentable {
             let c = region(axisKey)
             organ.position = v(c.0, c.1, c.2)
             organ.renderingOrder = 2
-            if mode == .avatar { bodyFloat.addChildNode(organ) }
+            // ORGANS ARE THE RETIRED CONCEPT. A brain, a heart and a coil of intestine
+            // swelling in one at a time was the avatar-made-of-your-notes idea, and it is the
+            // thing that made the figure read as a diagram of a person rather than a person.
+            // The screen now shows a body growing up, and a body growing up does not display
+            // its organs.
+            _ = organ
         }
 
         // ── Force-directed graph layout (Obsidian-style). Run Fruchterman–Reingold
@@ -980,7 +963,10 @@ struct Avatar3DView: UIViewRepresentable {
                 let gx = fdIds.reduce(0.0) { $0 + fx[$1]! } / gn
                 let gy = fdIds.reduce(0.0) { $0 + fy[$1]! } / gn
                 let gz = fdIds.reduce(0.0) { $0 + fz[$1]! } / gn
-                let spread = 1.9   // >1 widens the gaps between groups; internal links untouched
+                // Wider now that nothing is pulling the web into a figure. The starfish used
+                // to do the separating as a side effect of dragging clusters out to five
+                // limbs; with it gone the graph has to spread on its own account.
+                let spread = mode == .graph ? 3.4 : 1.9
                 for (_, members) in comps {
                     let mn = Double(members.count)
                     let cx = members.reduce(0.0) { $0 + fx[$1]! } / mn
@@ -1206,6 +1192,11 @@ struct Avatar3DView: UIViewRepresentable {
         // the body instead of cutting straight across. Only cross-axis links carry
         // a small, slow travelling signal.
         func curve(_ a: SCNVector3, _ b: SCNVector3, _ steps: Int) -> [SCNVector3] {
+            // A LINK IS A STRAIGHT LINE between two notes. The bow toward the core existed to
+            // keep neural threads inside the body silhouette — and there is no body on this
+            // screen to keep them inside. Curving them now just makes the graph harder to read,
+            // because a curve implies a route and a link has none.
+            if mode == .graph { return [a, b] }
             let mx = (Double(a.x) + Double(b.x)) / 2, my = (Double(a.y) + Double(b.y)) / 2, mz = (Double(a.z) + Double(b.z)) / 2
             // Control pulled HARD toward the core (torso centre): a cross-limb thread makes a sharp,
             // curvy turn in through the middle and back out — funnelling the web through a central

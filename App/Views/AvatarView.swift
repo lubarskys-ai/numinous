@@ -62,6 +62,15 @@ struct AvatarView: View {
                     focusRequest: model.avatarFocus
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // NOT pixellated here, though it should be. SwiftUI's layerEffect samples a
+                // rasterised layer, and an SCNView is drawn by Metal outside that tree — so
+                // the shader reads undefined memory and paints a mosaic that does not change
+                // when the scene does. It looked like a tuning problem for two rounds; it is
+                // not one, and no value of blocksAtZero fixes it.
+                //
+                // The pixellation has to happen INSIDE SceneKit — a SCNTechnique rendering to
+                // a small offscreen target and blitting it back up with nearest-neighbour
+                // filtering, which is the same trick at a lower level.
                 .overlay { if shown == .graph { labelOverlay } }
                 .overlay(alignment: .top) { if shown == .graph { focusPill } }
                 .overlay(alignment: .bottom) {

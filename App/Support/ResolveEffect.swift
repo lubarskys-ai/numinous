@@ -14,10 +14,16 @@ struct ResolveEffect: ViewModifier {
     /// Keeps each picture's dissolve its own; two forms at the same maturity shouldn't lose
     /// the same cells.
     let seed: Double
+    /// How many blocks span the view at zero maturity.
+    ///
+    /// Four is right for an axis picture at 180pt: coarse enough to read as unfinished, not so
+    /// coarse that the icon is gone. It is badly wrong for a full-screen figure, where four
+    /// blocks across is four rectangles and no figure at all. The avatar asks for many more.
+    var blocksAtZero: Double = 4
 
     func body(content: Content) -> some View {
         let m = min(1, max(0, maturity))
-        let block = Self.blockSize(maturity: m, side: side)
+        let block = Self.blockSize(maturity: m, side: side, blocksAtZero: blocksAtZero)
         let missing = Self.missing(maturity: m)
         content.layerEffect(
             ShaderLibrary.resolve(.float(block), .float(missing), .float(Float(seed))),
@@ -31,8 +37,11 @@ struct ResolveEffect: ViewModifier {
     /// way up, so most of a life's growth bought no visible change and things read as
     /// finished long before they were. Squaring the input holds the coarse end open: half
     /// grown is still unmistakably blocks, and only the last stretch resolves.
-    static func blockSize(maturity m: Double, side: CGFloat) -> CGFloat {
-        let blocks = 4.0 * pow(34.0, pow(m, 1.8))       // 4 across at 0, ~11 at ½, 136 at 1
+    static func blockSize(maturity m: Double, side: CGFloat, blocksAtZero: Double = 4) -> CGFloat {
+        // The ceiling stays put — whole is whole — so a higher floor also means a gentler
+        // climb, which is right: a big picture needs less coarsening to read as unfinished.
+        let top = max(2.0, 136.0 / blocksAtZero)
+        let blocks = blocksAtZero * pow(top, pow(m, 1.8))
         let size = side / CGFloat(blocks)
         return size <= 1.2 ? 1 : size                    // 1 or less means "whole"
     }
@@ -46,7 +55,7 @@ struct ResolveEffect: ViewModifier {
 }
 
 extension View {
-    func resolving(maturity: Double, side: CGFloat, seed: Double) -> some View {
-        modifier(ResolveEffect(maturity: maturity, side: side, seed: seed))
+    func resolving(maturity: Double, side: CGFloat, seed: Double, blocksAtZero: Double = 4) -> some View {
+        modifier(ResolveEffect(maturity: maturity, side: side, seed: seed, blocksAtZero: blocksAtZero))
     }
 }
