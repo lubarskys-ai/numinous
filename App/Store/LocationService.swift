@@ -12,6 +12,19 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
     private let manager = CLLocationManager()
     private var authContinuation: CheckedContinuation<Bool, Never>?
     private var locationContinuation: CheckedContinuation<CLLocation?, Never>?
+    /// Which request the pending continuation belongs to.
+    ///
+    /// THE CRASH THIS EXISTS TO STOP. Each request arms an eight-second safety net so a fix
+    /// that never arrives cannot hang the caller forever. That was safe while only one request
+    /// was ever in flight — and then currentFix() started asking a SECOND time when the first
+    /// fix came back too vague to name a building with. The first request's net was still
+    /// counting down, and when it fired it resumed whatever continuation it found, which by
+    /// then belonged to the second request. Resuming a checked continuation twice is an
+    /// immediate crash.
+    ///
+    /// It presented as "the map search crashes the first time and works the second", because
+    /// the second attempt has permission already and takes the fast path with no retry.
+    private var locationToken = 0
 
     override init() {
         super.init()
@@ -245,12 +258,17 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
 
     private func requestLocation() async -> CLLocation? {
         await withCheckedContinuation { cont in
+            locationToken += 1
+            let token = locationToken
             locationContinuation = cont
             manager.requestLocation()
-            // Safety net: if no fix (or error) arrives, don't hang the caller forever.
+            // Safety net: if no fix (or error) arrives, don't hang the caller forever — but
+            // only ever for the request that armed it.
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 8_000_000_000)
-                if let c = locationContinuation { locationContinuation = nil; c.resume(returning: nil) }
+                guard token == locationToken, let c = locationContinuation else { return }
+                locationContinuation = nil
+                c.resume(returning: nil)
             }
         }
     }

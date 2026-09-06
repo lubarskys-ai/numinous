@@ -8,15 +8,17 @@ struct AvatarExpandedView: View {
 
     var body: some View {
         AvatarView(initialMode: mode)
-            .overlay(alignment: .topTrailing) {
+            // BOTTOM left, not top right: the top right belongs to the screen's own menu, and
+            // two controls stacked in one corner is how the photo picker became unreachable.
+            .overlay(alignment: .bottomLeading) {
                 Button { dismiss() } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.title2)
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(.secondary)
                 }
-                .padding(.top, 6)
-                .padding(.trailing, 14)
+                .padding(.leading, 16)
+                .padding(.bottom, 30)
             }
     }
 }

@@ -112,7 +112,7 @@ struct AvatarView: View {
             // Both screens, one tap apart. Which one you land on depends on how you got here —
             // tapping the little figure opens the figure; "see in graph" opens the graph.
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .topBarTrailing) {
                     if shown == .avatar {
                         Menu {
                             Button(photo == nil ? "Use a photo of me…" : "Choose a different photo…",
