@@ -12,6 +12,8 @@ struct PhotoAvatarPicker: View {
 
     @State private var item: PhotosPickerItem?
     @State private var image: UIImage?
+    @State private var cleanItem: PhotosPickerItem?
+    @State private var cleanImage: UIImage?
     @State private var people: [(index: Int, centre: CGPoint)] = []
     @State private var chosen: Int?
     @State private var busyBackground = false
@@ -69,6 +71,25 @@ struct PhotoAvatarPicker: View {
                              selection: $item, matching: .images)
                     .buttonStyle(.borderedProminent)
 
+                // THE BEST ERASURE AVAILABLE IS THE ONE ON THE PHONE ALREADY, and it belongs
+                // to the Photos app. Apple's Clean Up reconstructs what was behind you instead
+                // of borrowing from beside you, and no amount of arithmetic here matches it —
+                // but it is not offered to other apps, so it cannot be called. It can be
+                // handed the result, which takes one minute, once, and is then perfect forever.
+                if image != nil {
+                    VStack(spacing: 8) {
+                        PhotosPicker(cleanImage == nil
+                                     ? "Add the same photo with yourself erased (optional)"
+                                     : "Erased version added ✓",
+                                     selection: $cleanItem, matching: .images)
+                        Text("For a flawless result: duplicate this photo in Photos, use "
+                             + "**Clean Up** to erase yourself, and add it here. Numinous will "
+                             + "use it as the background instead of filling the gap itself.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center).padding(.horizontal, 28)
+                    }
+                }
+
                 if let problem {
                     Text(problem).font(.footnote).foregroundStyle(.red)
                         .padding(.horizontal, 24).multilineTextAlignment(.center)
@@ -87,6 +108,13 @@ struct PhotoAvatarPicker: View {
             }
             .overlay { if working { ProgressView().controlSize(.large) } }
             .onChange(of: item) { _, new in Task { await load(new) } }
+            .onChange(of: cleanItem) { _, new in
+                Task {
+                    guard let data = try? await new?.loadTransferable(type: Data.self),
+                          let picked = UIImage(data: data) else { return }
+                    cleanImage = PhotoAvatar.upright(picked)
+                }
+            }
         }
     }
 
@@ -104,6 +132,8 @@ struct PhotoAvatarPicker: View {
         // targets ended up beside the person instead of on them.
         let picked = PhotoAvatar.upright(raw)
         image = picked
+        cleanImage = nil
+        cleanItem = nil
         chosen = nil
         problem = nil
         people = (try? PhotoAvatar.people(in: picked)) ?? []
@@ -118,7 +148,8 @@ struct PhotoAvatarPicker: View {
         Task {
             defer { working = false }
             do {
-                let prepared = try PhotoAvatar.prepare(image: image, personIndex: index)
+                let prepared = try PhotoAvatar.prepare(image: image, personIndex: index,
+                                                       cleanBackground: cleanImage)
                 busyBackground = prepared.backgroundIsBusy
                 try PhotoAvatar.save(prepared)
                 onSaved()

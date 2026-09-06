@@ -103,7 +103,17 @@ enum PhotoAvatar {
     // MARK: - Preparing
 
     /// Take one person out of the photograph and keep both halves.
-    static func prepare(image: UIImage, personIndex: Int) throws -> Prepared {
+    ///
+    /// `cleanBackground` is the same photograph with you already removed — Apple's Clean Up,
+    /// in the Photos app, does this properly: a generative model that RECONSTRUCTS what was
+    /// behind you rather than borrowing from beside you. It is not offered to other apps, so
+    /// it cannot be called from here. It can, however, be handed the result.
+    ///
+    /// When one is supplied it is used as-is and the fill below is skipped entirely, because
+    /// nothing written here will beat it. When one is not, the row fill does its best, and its
+    /// best is very good on a plain wall and merely decent through a hedge.
+    static func prepare(image: UIImage, personIndex: Int,
+                        cleanBackground: UIImage? = nil) throws -> Prepared {
         guard let cg = upright(image).cgImage else { throw Failure.unreadable }
         let context = CIContext()
         let photo = CIImage(cgImage: cg)
@@ -118,7 +128,15 @@ enum PhotoAvatar {
             .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 4])
             .cropped(to: photo.extent)
 
-        let background = erase(photo, person: grown, context: context)
+        // A background that has already been repaired properly beats anything computed here.
+        let background: CIImage
+        if let clean = cleanBackground.map(upright), let cleanCG = clean.cgImage {
+            background = CIImage(cgImage: cleanCG)
+                .transformed(by: CGAffineTransform(scaleX: photo.extent.width / CGFloat(cleanCG.width),
+                                                   y: photo.extent.height / CGFloat(cleanCG.height)))
+        } else {
+            background = erase(photo, person: grown, context: context)
+        }
         let person = photo.applyingFilter("CIBlendWithMask", parameters: [kCIInputMaskImageKey: grown])
 
         guard let backgroundCG = context.createCGImage(background, from: photo.extent),
@@ -129,7 +147,8 @@ enum PhotoAvatar {
             background: UIImage(cgImage: backgroundCG),
             person: UIImage(cgImage: personCG),
             anchors: try anchors(cg, personIndex: personIndex),
-            backgroundIsBusy: isBusy(photo, behind: grown, context: context))
+            // A supplied background is never "busy" — it has already been dealt with.
+            backgroundIsBusy: cleanBackground == nil && isBusy(photo, behind: grown, context: context))
     }
 
     /// One person's outline, or everybody's when the photo holds only one.
