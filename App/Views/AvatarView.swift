@@ -22,6 +22,8 @@ struct AvatarView: View {
     @State private var justChosen = false
     /// Bumped to replay the dissolve on demand.
     @State private var replays = 0
+    @State private var previewing = false
+    @State private var previewValues: [String: Double] = [:]
     private var shown: AvatarMode { mode ?? initialMode }
     @State private var reflection: ReflectionRecord?
     @State private var zoom: Double = 1
@@ -62,7 +64,8 @@ struct AvatarView: View {
                                     anchors: photo.anchors,
                                     maturity: { model.axisMaturity($0) },
                                     spiritColor: model.axis(id: "spirit")?.color ?? .purple,
-                                    introduce: justChosen || replays > 0)
+                                    introduce: justChosen || replays > 0,
+                                    preview: previewing ? previewValues : nil)
                         // A new identity restarts the view, which is what re-runs the intro.
                         .id(replays)
                 } else {
@@ -107,6 +110,12 @@ struct AvatarView: View {
                     .padding(.bottom, 12)
                 }
                 }
+                if previewing, shown == .avatar {
+                    VStack { Spacer()
+                        RebuildPreview(values: $previewValues, showing: $previewing)
+                            .padding(.bottom, 14)
+                    }
+                }
             }
             .navigationTitle(shown == .graph ? "Connections" : "You")
             // Both screens, one tap apart. Which one you land on depends on how you got here —
@@ -122,6 +131,9 @@ struct AvatarView: View {
                                 // worth keeping afterwards: it is a nice thing to watch.
                                 Button("Play the erasure again", systemImage: "arrow.counterclockwise") {
                                     replays += 1
+                                }
+                                Button("Preview the rebuild", systemImage: "slider.horizontal.3") {
+                                    previewing = true
                                 }
                                 Button("Back to the drawn figure", systemImage: "figure.stand",
                                        role: .destructive) {

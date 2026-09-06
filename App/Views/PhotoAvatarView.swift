@@ -20,6 +20,8 @@ struct PhotoAvatarView: View {
     let spiritColor: Color
     /// Play the erasure once, on the way in.
     var introduce: Bool = false
+    /// Overrides the real maturities while the rebuild is being worked on. Nil in normal use.
+    var preview: [String: Double]? = nil
     /// True while the intro is running, so opacity can behave differently than it does across
     /// the months.
 
@@ -30,6 +32,19 @@ struct PhotoAvatarView: View {
     /// True from the moment the dissolve starts and never set back, so the screen HOLDS at
     /// the emptied photograph rather than snapping to the resting state at the end of it.
     @State private var running = false
+
+    // Zoom and move the picture. A photograph chosen for a life is going to be looked at
+    // closely — at a face coming back, at whether a hand has sharpened — and a fixed frame
+    // makes that impossible on anything smaller than a wall.
+    @State private var zoom: CGFloat = 1
+    @GestureState private var pinch: CGFloat = 1
+    @State private var pan: CGSize = .zero
+    @GestureState private var drag: CGSize = .zero
+
+    private var scale: CGFloat { min(6, max(1, zoom * pinch)) }
+    private var offset: CGSize {
+        CGSize(width: pan.width + drag.width, height: pan.height + drag.height)
+    }
 
     /// Take the picture apart, a frame at a time.
     ///
@@ -63,7 +78,7 @@ struct PhotoAvatarView: View {
 
     /// What to draw: the real maturity, or the intro's, whichever is further along.
     private func showing(_ axis: String) -> Double {
-        max(maturity(axis), undoing)
+        max(preview?[axis] ?? maturity(axis), undoing)
     }
 
     var body: some View {
@@ -97,8 +112,8 @@ struct PhotoAvatarView: View {
                         .resizable().scaledToFit()
                         .blur(radius: 26)
                         .blendMode(.plusLighter)
-                        .opacity(running ? 0.46 * min(1, undoing * 2.8)
-                                         : 0.46 * presence(maturity("spirit")))
+                        .opacity(running ? 0.46 * min(1, max(0, (undoing - 0.07) * 3.0))
+                                         : 0.46 * presence(preview?["spirit"] ?? maturity("spirit")))
                         .foregroundStyle(spiritColor)
                         .allowsHitTesting(false)
 
@@ -149,7 +164,29 @@ struct PhotoAvatarView: View {
                     }
                 }
                 .frame(width: fitted.width, height: fitted.height)
+                .scaleEffect(scale)
+                .offset(offset)
                 .clipped()
+                .contentShape(Rectangle())
+                .gesture(
+                    SimultaneousGesture(
+                        MagnifyGesture().updating($pinch) { value, state, _ in
+                            state = value.magnification
+                        }.onEnded { value in
+                            zoom = min(6, max(1, zoom * value.magnification))
+                            if zoom == 1 { pan = .zero }
+                        },
+                        DragGesture().updating($drag) { value, state, _ in
+                            state = value.translation
+                        }.onEnded { value in
+                            pan.width += value.translation.width
+                            pan.height += value.translation.height
+                        }))
+                // Back to the whole picture, without hunting for the exact pinch that
+                // gets there.
+                .onTapGesture(count: 2) {
+                    withAnimation(.easeInOut(duration: 0.25)) { zoom = 1; pan = .zero }
+                }
             }
         }
         .ignoresSafeArea()
@@ -178,8 +215,11 @@ struct PhotoAvatarView: View {
     /// time the coarsening becomes dramatic, and the whole thing reads as a fade with some
     /// texture in it rather than as a picture coming apart.
     private func visible(_ axis: String) -> Double {
-        guard running else { return presence(maturity(axis)) }
-        return min(1, undoing * 2.8)
+        guard running else { return presence(preview?[axis] ?? maturity(axis)) }
+        // Zero a little BEFORE the run ends. Fading to nothing exactly at the last frame left
+        // a few surviving cells twinkling out one at a time, which read as the effect finishing
+        // untidily rather than finishing. The last stretch is empty on purpose.
+        return min(1, max(0, (undoing - 0.07) * 3.0))
     }
 
     /// How much of you is there at all, as against how sharp that much is.
