@@ -1105,36 +1105,26 @@ struct Avatar3DView: UIViewRepresentable {
             // Force sims only run ~18 iterations on a big graph so a dense core never unfolds on its
             // own, and a solid 3-D ball always reads dense in the middle when flattened to the
             // screen — this remap fixes both directly, independent of the sim.
-            let targetR = 3.4, gamma = 0.4   // lower gamma = harder-hollowed centre
+            // NO RIM, AND NO BOX EITHER.
+            //
+            // The old remap sent every node to targetR * (r/pR)^gamma, with gamma at 0.4. At
+            // gamma that low almost everything lands within a whisker of targetR whatever it
+            // started as — which draws a hard circular edge round the whole graph and makes it
+            // a bubble. Stretching that bubble to the screen's proportions, as the last attempt
+            // did, only turned a circle into an oval: still an outline, still imposed.
+            //
+            // A graph should not have an outline at all. Its shape should be the shape of your
+            // connections — lopsided where your life is lopsided, reaching further in the
+            // directions you have gone further. So the remap now barely compresses: enough to
+            // keep the centre from packing solid, not enough to force anything to a boundary,
+            // and no per-axis stretching whatsoever. A few clusters will reach past the edge of
+            // the screen, which is what panning is for and what an unbounded thing looks like.
+            let targetR = 3.6, gamma = 0.86
             for id in fdIds {
                 let dx0 = fx[id]! - cx, dy0 = fy[id]! - cy, dz0 = fz[id]! - cz
                 let r = max(0.0001, (dx0 * dx0 + dy0 * dy0 + dz0 * dz0).squareRoot())
-                let s = targetR * pow(r / pR, gamma) / r   // scale ∝ r^(gamma-1): huge near centre, ~1 at rim
+                let s = targetR * pow(r / pR, gamma) / r
                 fx[id] = dx0 * s; fy[id] = dy0 * s; fz[id] = dz0 * s
-            }
-
-            // AND THEN OUT OF THE BUBBLE. The remap above rescales every node's DISTANCE from
-            // the centre to one target radius, which is a sphere by construction — so however
-            // the clusters arrange themselves the graph always arrives as a ball floating in
-            // the middle of a tall screen, with a wide empty margin down each side and the
-            // whole thing smaller than it needs to be.
-            //
-            // Stretching each direction to its own extent lets it fill the shape it is
-            // actually being shown in. The de-densified interior is kept; only the outline
-            // stops being a circle.
-            let aspect: (x: Double, y: Double, z: Double) = (3.1, 5.4, 2.0)
-            for axis in 0..<3 {
-                var spread = [Double]()
-                for id in fdIds {
-                    spread.append(abs(axis == 0 ? fx[id]! : axis == 1 ? fy[id]! : fz[id]!))
-                }
-                spread.sort()
-                let reach = max(0.01, spread[Int(Double(spread.count - 1) * 0.85)])
-                let scale = (axis == 0 ? aspect.x : axis == 1 ? aspect.y : aspect.z) / reach
-                for id in fdIds {
-                    if axis == 0 { fx[id]! *= scale } else if axis == 1 { fy[id]! *= scale }
-                    else { fz[id]! *= scale }
-                }
             }
         }
         // Unlinked files sit on a surrounding shell (fibonacci sphere).

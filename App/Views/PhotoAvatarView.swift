@@ -77,7 +77,18 @@ struct PhotoAvatarView: View {
 
     /// What to draw: the real maturity, or the intro's, whichever is further along.
     private func showing(_ axis: String) -> Double {
-        max(preview?[axis] ?? maturity(axis), undoing)
+        max(axis == "all" ? wholeLife() : (preview?[axis] ?? maturity(axis)), undoing)
+    }
+
+    /// The regions are gone, so the axes are read as one number: the least-grown part of a
+    /// life holds the whole picture back a little, which is truer to the idea than an average
+    /// that lets a strong axis paper over an empty one.
+    private func wholeLife() -> Double {
+        let axes = ["mind", "heart", "body", "meaning", "spirit"]
+        let values = axes.map { preview?[$0] ?? maturity($0) }
+        let mean = values.reduce(0, +) / Double(values.count)
+        let weakest = values.min() ?? 0
+        return mean * 0.7 + weakest * 0.3
     }
 
     var body: some View {
@@ -106,23 +117,23 @@ struct PhotoAvatarView: View {
                         .blendMode(.plusLighter)
                         .allowsHitTesting(false)
 
-                    // Each region is you, coarsened by its own axis, shown only where that
-                    // region is. On black the blocks read as blocks with no compositing tricks
-                    // needed: there is nothing behind them to average with.
-                    ForEach(regions, id: \.axis) { region in
-                        Image(uiImage: person)
-                            .resizable().scaledToFit()
-                            .resolving(maturity: showing(region.axis), side: fitted.width,
-                                       seed: region.seed, blocksAtZero: 9)
-                            .opacity(visible(region.axis))
-                            .mask {
-                                RadialGradient(
-                                    colors: [.white, .white.opacity(0.85), .clear],
-                                    center: unitPoint(region.centre),
-                                    startRadius: 0,
-                                    endRadius: fitted.height * region.reach)
-                            }
-                    }
+                    // ONE LAYER FOR THE WHOLE BODY.
+                    //
+                    // It was four — head, chest, hips and shoulders — each the same picture of
+                    // you, coarsened by its own axis and shown through a soft circular mask.
+                    // Around the torso all four masks reach at once, so four partly-opaque
+                    // copies of the same person stacked on top of each other, each with a
+                    // different block pattern. That is what made the middle dense and dark
+                    // while the head and legs, covered by one mask apiece, resolved cleanly.
+                    //
+                    // Overlapping soft masks cannot be made to add up to one: the fix is not to
+                    // overlap. The whole of you now comes back together, at the pace of your
+                    // whole life rather than of one part of it.
+                    Image(uiImage: person)
+                        .resizable().scaledToFit()
+                        .resolving(maturity: showing("all"), side: fitted.width,
+                                   seed: 7, blocksAtZero: 9)
+                        .opacity(visible("all"))
                 }
                 .frame(width: fitted.width, height: fitted.height)
                 .scaleEffect(scale)
@@ -174,7 +185,9 @@ struct PhotoAvatarView: View {
         // the preview, or the sliders drive the block size of something whose opacity is
         // pinned at zero and appear to do nothing at all. Asking to see the rebuild is asking
         // to stop being frozen.
-        guard running, preview == nil else { return presence(preview?[axis] ?? maturity(axis)) }
+        guard running, preview == nil else {
+            return presence(axis == "all" ? wholeLife() : (preview?[axis] ?? maturity(axis)))
+        }
         // Zero a little BEFORE the run ends. Fading to nothing exactly at the last frame left
         // a few surviving cells twinkling out one at a time, which read as the effect finishing
         // untidily rather than finishing. The last stretch is empty on purpose.
@@ -191,42 +204,7 @@ struct PhotoAvatarView: View {
         return m * m * (3 - 2 * m) * 0.94 + m * 0.06
     }
 
-    private struct Region { let axis: String; let centre: CGPoint; let reach: CGFloat; let seed: Double }
 
-    /// A soft band centred on this region's own height, in the picture's top-down coordinates.
-    private func bandStops(_ region: Region) -> [Gradient.Stop] {
-        let centre = 1 - region.centre.y                 // Vision counts up; a gradient counts down
-        let half = max(0.06, region.reach * max(0.25, anchors.height))
-        let fade = half * 0.85
-        func at(_ y: CGFloat) -> CGFloat { min(1, max(0, y)) }
-        return [
-            .init(color: .clear, location: at(centre - half - fade)),
-            .init(color: .white, location: at(centre - half)),
-            .init(color: .white, location: at(centre + half)),
-            .init(color: .clear, location: at(centre + half + fade)),
-        ]
-    }
-
-    /// Which axis owns which part of you. Read off the body the phone actually found in your
-    /// photograph, so it is your head and your chest — not a rectangle's top third.
-    private var regions: [Region] {
-        // Five axes and one body, so the heights have to be genuinely apart or they read as
-        // one thing moving. Top to bottom: head, chest, waist, legs — and Spirit around all
-        // of it rather than anywhere on it.
-        let head = anchors.head.y
-        let chest = anchors.chest.y
-        let hip = anchors.hip.y
-        let waist = (chest + hip) / 2
-        let legs = hip - (head - hip) * 0.55
-        return [
-            Region(axis: "mind", centre: CGPoint(x: anchors.head.x, y: head), reach: 0.16, seed: 3),
-            Region(axis: "heart", centre: CGPoint(x: anchors.chest.x, y: chest), reach: 0.14, seed: 17),
-            // Meaning has no organ of its own, so it takes the middle — the part of a standing
-            // figure that is neither thought nor feeling nor legs.
-            Region(axis: "meaning", centre: CGPoint(x: anchors.chest.x, y: waist), reach: 0.13, seed: 41),
-            Region(axis: "body", centre: CGPoint(x: anchors.hip.x, y: legs), reach: 0.30, seed: 29),
-        ]
-    }
 
     /// Vision reports the body with the origin at the BOTTOM left; SwiftUI draws from the top.
     /// Getting this backwards puts your head at your feet, which is the sort of thing that is
