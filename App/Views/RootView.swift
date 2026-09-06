@@ -10,6 +10,8 @@ struct RootView: View {
     @State private var selection: String =
         ProcessInfo.processInfo.environment["NUMINOUS_TAB"] ?? "home"
     @State private var showAvatar = false
+    /// Which of the two screens the next open lands on — see `AvatarMode`.
+    @State private var avatarMode: AvatarMode = .avatar
     @State private var showCapture = false
     @State private var showDiary = false
     @State private var companionAction: CompanionAction = .idle
@@ -49,7 +51,7 @@ struct RootView: View {
                               action: companionAction, actionStart: companionActionStart)
                     .frame(width: 100, height: 116)
                     .contentShape(Rectangle())
-                    .onTapGesture { showAvatar = true }
+                    .onTapGesture { avatarMode = .avatar; showAvatar = true }
                     .padding(.trailing, 8)
                     .padding(.bottom, 54)
                     .accessibilityLabel("Open avatar")
@@ -70,7 +72,7 @@ struct RootView: View {
             get: { model.needsOnboarding },
             set: { if !$0 { model.dismissOnboarding() } }
         )) { OnboardingView() }
-        .fullScreenCover(isPresented: $showAvatar) { AvatarExpandedView() }
+        .fullScreenCover(isPresented: $showAvatar) { AvatarExpandedView(mode: avatarMode) }
         // Quick-capture (from the Action Button / Siri / Shortcuts) opens here.
         .fullScreenCover(isPresented: $showCapture) { ComposeView(prefillTitle: nil, onSaved: { _ in selection = "notes" }) }
         // "Today's diary" (Action Button / Siri) opens the diary with the keyboard up.
@@ -80,7 +82,8 @@ struct RootView: View {
         // …and does a joyful, heart-popping cheer when a new connection forms.
         .onChange(of: model.spark?.id) { id in if id != nil { trigger(.cheer) } }
         // "See in graph" from a note opens the avatar, spotlighting that note's connections.
-        .onChange(of: model.avatarFocus) { if $0 != nil { showAvatar = true } }
+        // "See in graph" is about connections, so it opens the graph and not the figure.
+        .onChange(of: model.avatarFocus) { if $0 != nil { avatarMode = .graph; showAvatar = true } }
         // Refresh already-connected sources (contacts, Readwise) when returning to the app.
         .onChange(of: scenePhase) {
             if $0 == .active { Task { await model.autoSync() } }

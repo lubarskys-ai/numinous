@@ -14,6 +14,8 @@ struct HomeView: View {
     @State private var digest: AppModel.WeeklyDigest?
     @State private var showCompose = false
     @State private var showAvatar = false
+    /// Which of the two screens the next open lands on — see `AvatarMode`.
+    @State private var avatarMode: AvatarMode = .avatar
     @State private var showGuide = false
     @State private var showSetup = false
     @State private var showHealth = false
@@ -69,7 +71,7 @@ struct HomeView: View {
             await countUnimportedActivity()
         }
         .fullScreenCover(isPresented: $showCompose) { ComposeView(prefillTitle: nil, autofocus: true) }
-        .fullScreenCover(isPresented: $showAvatar) { AvatarExpandedView() }
+        .fullScreenCover(isPresented: $showAvatar) { AvatarExpandedView(mode: avatarMode) }
         .sheet(isPresented: $showGuide) { GuideView() }
         .sheet(isPresented: $showSetup) { AxisSettingsView() }
         .fullScreenCover(isPresented: $showHealth) { closable { HealthView() } }
@@ -89,7 +91,7 @@ struct HomeView: View {
                 .scaleEffect(1.85 - 0.65 * model.maturity)
                 .frame(height: 188)   // the figure sits high in its canvas; don't reserve the dead space below it
                 .contentShape(Rectangle())
-                .onTapGesture { showAvatar = true }
+                .onTapGesture { avatarMode = .avatar; showAvatar = true }
                 .accessibilityLabel("Your avatar. Open it.")
             Text(stageLine)
                 .font(.title3)

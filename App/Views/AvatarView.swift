@@ -2,11 +2,19 @@ import SwiftUI
 import UIKit
 import NuminousCore
 
-/// The Avatar tab: the 3D figure itself — grey when young, taking on each axis's
-/// color as it matures. Drag to rotate, pinch to zoom. A gentle "Numinous
-/// noticed…" reflection may sit beneath it.
+/// One screen, two things it can show — see `AvatarMode`.
+///
+/// In `.graph` it is your connections and nothing else: force-directed, clusters spread, no
+/// figure pulling on the layout. In `.avatar` it is the figure and nothing else: solid,
+/// growing region by region as each axis fills, with no note-dots inside it.
+///
+/// They were the same screen once, and the fusion cost both of them. A graph bent toward a
+/// silhouette is a picture of the app; a body made of dots can only ever be suggestive.
 struct AvatarView: View {
+    var initialMode: AvatarMode = .graph
     @EnvironmentObject var model: AppModel
+    @State private var mode: AvatarMode?
+    private var shown: AvatarMode { mode ?? initialMode }
     @State private var reflection: ReflectionRecord?
     @State private var zoom: Double = 1
     @State private var committedZoom: Double = 1
@@ -39,6 +47,7 @@ struct AvatarView: View {
                 // over it — as a VStack sibling, the reflection card was taking real layout
                 // space and squeezing the figure into the top half.
                 Avatar3DView(
+                    mode: shown,
                     color: { axisColor[$0] ?? .gray },
                     growth: { axisGrowth[$0] ?? 0 },
                     regionMaturity: { axisMat[$0] ?? 0 },
@@ -53,8 +62,8 @@ struct AvatarView: View {
                     focusRequest: model.avatarFocus
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay { labelOverlay }
-                .overlay(alignment: .top) { focusPill }
+                .overlay { if shown == .graph { labelOverlay } }
+                .overlay(alignment: .top) { if shown == .graph { focusPill } }
                 .overlay(alignment: .bottom) {
                     VStack(spacing: 10) {
                         HStack { Spacer(); zoomControls }
@@ -69,7 +78,24 @@ struct AvatarView: View {
                     .padding(.bottom, 12)
                 }
             }
-            .navigationTitle("Numinous")
+            .navigationTitle(shown == .graph ? "Connections" : "You")
+            // Both screens, one tap apart. Which one you land on depends on how you got here —
+            // tapping the little figure opens the figure; "see in graph" opens the graph.
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            mode = shown == .graph ? .avatar : .graph
+                        }
+                    } label: {
+                        Label(shown == .graph ? "You" : "Connections",
+                              systemImage: shown == .graph ? "figure.stand"
+                                                           : "point.3.connected.trianglepath.dotted")
+                            .labelStyle(.titleAndIcon)
+                            .font(.footnote)
+                    }
+                }
+            }
             .toolbarBackground(.hidden, for: .navigationBar)
             .onAppear { if reflection == nil { reflection = model.currentReflection() } }
             .onDisappear { model.avatarFocus = nil }   // don't re-focus next time the avatar opens

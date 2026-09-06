@@ -22,7 +22,26 @@ struct AvatarFocus: Equatable {
 /// translucent figure holds a glowing connectome (nodes at their regions, links as
 /// threads, cross-axis brighter). Proves the avatar + graph overlap naturally on a
 /// placeholder body; a sculpted model replaces the primitives later.
+/// The two things this scene can be, and they are no longer the same thing.
+///
+/// They were fused: one screen where the connection web slowly gathered into a human figure.
+/// It made the graph a bad graph — the starfish bias bent every cluster toward a head or a
+/// limb, so the shape you were reading was the app's silhouette and not your own connections
+/// — and it made the avatar a bad avatar, because a body assembled out of note-dots can never
+/// be more than suggestive.
+///
+/// Split, each can be itself. The graph is a graph: force-directed, clusters spread, no
+/// figure pulling on it. The avatar is a body: solid, growing region by region, with no dots
+/// in it at all.
+enum AvatarMode {
+    /// Your connections, and nothing else. No body, no starfish bias.
+    case graph
+    /// The figure, and nothing else. No nodes, no links.
+    case avatar
+}
+
 struct Avatar3DView: UIViewRepresentable {
+    var mode: AvatarMode = .graph
     var color: (String) -> UIColor
     var growth: (String) -> CGFloat
     var regionMaturity: (String) -> Double = { _ in 1 }
@@ -79,6 +98,7 @@ struct Avatar3DView: UIViewRepresentable {
         view.addGestureRecognizer(tap)
         context.coordinator.view = view
         context.coordinator.builtMaturity = maturity
+        context.coordinator.builtMode = mode
         context.coordinator.onTapNode = onTapNode
         context.coordinator.zoom = zoom
         context.coordinator.onZoomChange = onZoomChange
@@ -99,8 +119,10 @@ struct Avatar3DView: UIViewRepresentable {
         if focusRequest != context.coordinator.appliedFocus { context.coordinator.applyFocus(focusRequest) }
         // Rebuild when maturity changes (e.g. the "watch it grow" animation stepping
         // it) so the birth sequence plays; otherwise just track zoom.
-        if abs(context.coordinator.builtMaturity - maturity) > 0.004 {
+        if abs(context.coordinator.builtMaturity - maturity) > 0.004
+            || context.coordinator.builtMode != mode {
             context.coordinator.builtMaturity = maturity   // set now so we don't re-trigger mid-build
+            context.coordinator.builtMode = mode
             buildSceneAsync(into: view, context.coordinator)
         }
         // Orthographic zoom: scale the viewport, never dolly the camera — so foreground and
@@ -131,6 +153,8 @@ struct Avatar3DView: UIViewRepresentable {
     final class Coordinator: NSObject, UIGestureRecognizerDelegate, SCNSceneRendererDelegate {
         weak var view: SCNView?
         var builtMaturity: Double = -1
+        /// Which mode the current scene was built for, so switching rebuilds it.
+        var builtMode: AvatarMode?
         var buildGeneration = 0
         var onTapNode: ((UUID) -> Void)?
         var onZoomChange: ((Double) -> Void)?
@@ -464,6 +488,12 @@ struct Avatar3DView: UIViewRepresentable {
     }
 
     private func buildScene() -> BuiltAvatarScene {
+        // The avatar has no connectome. Emptying the lists here rather than guarding each of
+        // the dozen places they are used means none of that work happens at all — and the
+        // node loop is the expensive part of this scene, not the body.
+        let nodes = mode == .avatar ? [] : self.nodes
+        let links = mode == .avatar ? [] : self.links
+
         let scene = SCNScene()
         func v(_ x: Double, _ y: Double, _ z: Double) -> SCNVector3 { SCNVector3(Float(x), Float(y), Float(z)) }
         func ball(_ r: Double) -> SCNSphere { let s = SCNSphere(radius: r); s.segmentCount = 64; return s }
@@ -506,9 +536,18 @@ struct Avatar3DView: UIViewRepresentable {
         // Translucent body: overlapping forms, grey→axis color with growth. It
         // doesn't write depth, so the connectome inside stays fully visible.
         func part(_ geo: SCNGeometry, _ axis: String, _ pos: SCNVector3, scale: SCNVector3 = SCNVector3(1, 1, 1), euler: SCNVector3 = SCNVector3(0, 0, 0)) {
-            // Only solidify in the upper maturity range — invisible (stardust) below.
+            guard mode == .avatar else { return }
+            // Begin at the FIRST note, not at forty per cent.
+            //
+            // The old gate held every part invisible below 0.4 region maturity, which was
+            // right when this scene was mostly a connectome and the body was its late reward.
+            // On a screen whose only job is the figure it means months of looking at nothing,
+            // and nothing is not a picture of an early life — it is a picture of a bug.
+            //
+            // So a region is faintly present from its first note and firms up from there. The
+            // arc is the same, it just starts where the user does.
             let mr = max(0, min(1, regionMaturity(axis)))
-            let form = mr <= 0.4 ? 0.0 : (mr - 0.4) / 0.6
+            let form = mr <= 0.02 ? 0.0 : (0.10 + 0.90 * pow(mr, 0.85))
             guard form > 0.01 else { return }
             let g = min(1, max(0, growth(axis)))
             let m = SCNMaterial()
@@ -524,6 +563,35 @@ struct Avatar3DView: UIViewRepresentable {
             n.position = pos; n.scale = scale; n.eulerAngles = euler; n.renderingOrder = 0
             bodyFloat.addChildNode(n)
         }
+        // WHERE EACH AXIS WILL GROW, visible before there is anything there yet.
+        //
+        // A body that appears part by part needs somewhere for the eye to rest while the parts
+        // are still coming: five faint lights at the places the parts will be — the brain
+        // hemispheres for Mind and Meaning, the chest for Heart, the solar plexus for Spirit,
+        // the torso for Body. Each brightens and swells with its own axis, so an empty figure
+        // is not an empty screen: it is a diagram of what you have not filled in yet.
+        if mode == .avatar {
+            for axis in ["mind", "meaning", "heart", "spirit", "body"] {
+                let mr = max(0, min(1, regionMaturity(axis)))
+                let r = GLTFBody.region(axis)
+                let seed = SCNSphere(radius: 0.06 + 0.10 * mr)
+                seed.segmentCount = 24
+                let m = SCNMaterial()
+                m.lightingModel = .constant
+                // Self-lit and solid. The floor on transparency is what keeps the figure
+                // legible on the first day, when every axis is still at zero.
+                m.diffuse.contents = color(axis)
+                m.emission.contents = color(axis)
+                m.transparency = 0.34 + 0.56 * CGFloat(mr)
+                m.writesToDepthBuffer = false
+                seed.materials = [m]
+                let n = SCNNode(geometry: seed)
+                n.position = v(r.0 * 2.0, r.1 * 2.0, r.2 * 2.0)
+                n.renderingOrder = -1
+                bodyFloat.addChildNode(n)
+            }
+        }
+
         // ── Maturation: begin as a diffuse cloud that coalesces into a body ──
         let matur = max(0, min(1, maturity))
         // WHOLE-BODY maturity from the density of the web itself — the more connections, the more
@@ -572,11 +640,11 @@ struct Avatar3DView: UIViewRepresentable {
         if showSculptedBody {
             if maxRegion > 0.62,
                let rigged = RiggedBody.load(dominantColor: color(dominantAxis), growth01: growth(dominantAxis), maturity: matur) {
-                bodyFloat.addChildNode(rigged)
+                if mode == .avatar { bodyFloat.addChildNode(rigged) }
                 usedRigged = true
             }
             if let loaded = GLTFBody.load(color: color, growth: growth, regionMaturity: regionMaturity) {
-                if maxRegion > 0.62 && !usedRigged { bodyFloat.addChildNode(loaded.node) }
+                if mode == .avatar, maxRegion > 0.62, !usedRigged { bodyFloat.addChildNode(loaded.node) }
                 bodySamples = loaded.samples
             }
         }
@@ -682,7 +750,13 @@ struct Avatar3DView: UIViewRepresentable {
 
         // Ambience: occasional comets streak across the far field, plus a lone
         // satellite drifting by with a blinking beacon.
+        //
+        // This is the AVATAR's cosmos, and it belongs to the avatar. A connections graph is a
+        // diagram, and on a young vault with few nodes the comets are the only moving things
+        // on screen, so they stop being ambience and become the subject — the graph reads as
+        // a starburst with some dots in it.
         func addComet(delay: Double, period: Double, from: SCNVector3, to: SCNVector3, headR: Double, color: UIColor) {
+            guard mode == .avatar else { return }
             let comet = SCNNode()
             func glow(_ r: Double, _ intensity: CGFloat, _ alpha: CGFloat) -> SCNNode {
                 let s = SCNSphere(radius: r); s.segmentCount = 8
@@ -816,7 +890,7 @@ struct Avatar3DView: UIViewRepresentable {
             let c = region(axisKey)
             organ.position = v(c.0, c.1, c.2)
             organ.renderingOrder = 2
-            bodyFloat.addChildNode(organ)
+            if mode == .avatar { bodyFloat.addChildNode(organ) }
         }
 
         // ── Force-directed graph layout (Obsidian-style). Run Fruchterman–Reingold
@@ -1073,8 +1147,12 @@ struct Avatar3DView: UIViewRepresentable {
                     // and the starfish figure emerges and defines. Rises fast early so a modest web
                     // already reads as a gathering form, easing toward a firm pull by mid-maturity.
                     _ = n
-                    let stretch = smoothstep(0.02, 0.5, bodyMaturity) * 0.72
-                    p = lerpV(graphPos(gn.id), starfishTarget(gn.id, i), stretch)
+                    // In GRAPH mode there is no figure to gather toward, so nodes sit where
+                    // the force-directed layout put them — which is the whole point of asking
+                    // a graph what your connections look like.
+                    let stretch = mode == .avatar ? smoothstep(0.02, 0.5, bodyMaturity) * 0.72 : 0
+                    p = stretch > 0 ? lerpV(graphPos(gn.id), starfishTarget(gn.id, i), stretch)
+                                    : graphPos(gn.id)
                 } else {
                     p = graphPos(gn.id)   // the surrounding shell — loose, unintegrated
                 }
