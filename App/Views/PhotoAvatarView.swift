@@ -26,6 +26,27 @@ struct PhotoAvatarView: View {
     /// actually got to.
     @State private var undoing: Double = 0
 
+    /// Take the picture apart, a frame at a time.
+    ///
+    /// `withAnimation` cannot do this. It animates a view's own animatable properties —
+    /// opacity, position, scale — and a float handed to a SHADER is not one of them: it snaps
+    /// to its final value the instant the state changes. So the first version faded you out
+    /// slightly and never coarsened at all, which is exactly what "only progresses minimally"
+    /// looks like.
+    ///
+    /// Stepping the value by hand gives the shader a new block size on every frame, which is
+    /// the only way the coarsening is visible at all. Eased at both ends so it does not start
+    /// or stop abruptly.
+    private func comeApart(seconds: Double = 4.2, frames: Int = 90) async {
+        let step = UInt64(seconds / Double(frames) * 1_000_000_000)
+        for frame in 0...frames {
+            let t = Double(frame) / Double(frames)
+            undoing = 1 - (t * t * (3 - 2 * t))
+            try? await Task.sleep(nanoseconds: step)
+        }
+        undoing = 0
+    }
+
     /// What to draw: the real maturity, or the intro's, whichever is further along.
     private func showing(_ axis: String) -> Double {
         max(maturity(axis), undoing)
@@ -92,8 +113,7 @@ struct PhotoAvatarView: View {
             // It also fixes the order in which the eye reads the thing. You have to see it
             // whole before "not whole yet" can mean anything.
             guard introduce else { return }
-            undoing = 1
-            withAnimation(.easeInOut(duration: 3.4)) { undoing = 0 }
+            Task { await comeApart() }
         }
     }
 
