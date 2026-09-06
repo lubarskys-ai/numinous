@@ -632,10 +632,12 @@ struct Avatar3DView: UIViewRepresentable {
         var bodySamples: [SCNVector3] = []
         // Prefer the RIGGED, animated body (Mixamo → USDZ) once the form emerges — it keeps
         // its skeleton + breathing/idle animation. Falls back to the static sculpted mesh.
-        // PROTOTYPE: the body is the THREAD structure (the axes) now — no organ meshes, no
-        // sculpted/rigged solid body, no stardust-gather. (The rigged consolidation stage will
-        // come back later as the FINAL state.) Kept behind a flag so it's easy to restore.
-        let showSculptedBody = false
+        // Switched off while this scene was mostly a connectome and the body was a late,
+        // optional flourish on top of it. It is not optional any more: the avatar has its own
+        // screen now, and a screen whose only job is the figure cannot be a screen with no
+        // figure on it. The flag stays, because it is still the switch between "the body is
+        // the thread structure" and "the body is a body".
+        let showSculptedBody = mode == .avatar
         var usedRigged = false
         if showSculptedBody {
             if maxRegion > 0.62,
