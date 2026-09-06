@@ -375,19 +375,32 @@ struct Avatar3DView: UIViewRepresentable {
                 overlay.addChildNode(n)
             }
             func brightThread(_ a: SCNVector3, _ b: SCNVector3) {
-                // Follow the SAME curvature as the resting design (a quadratic bow toward the
-                // core), drawn as short segments, so a focused link mimics the real thread.
+                // MATCH WHAT THE RESTING GRAPH DOES, which is a straight line.
+                //
+                // This used to bow toward the core, copying the avatar's thread shape so that a
+                // focused link looked like the real one. Then the graph's own links were
+                // straightened — a curve implies a route, and a link has none — and this copy
+                // was left behind, so previewing a folder drew bright BENT threads across a
+                // graph of straight faint ones.
+                //
+                // It looked far worse than a gentle bow, too. The control point is a fraction of
+                // the midpoint in world coordinates, not an offset perpendicular to the line, so
+                // it drags toward the origin: the further from the centre a pair of nodes sits,
+                // the harder its thread is yanked inward, and a folder out at the edge got a
+                // sharp fold rather than a bow.
+                let steps = builtMode == .graph ? 1 : 6
                 let ax = Double(a.x), ay = Double(a.y), az = Double(a.z)
                 let bx = Double(b.x), by = Double(b.y), bz = Double(b.z)
                 let cx = ((ax + bx) / 2) * 0.12, cy = ((ay + by) / 2) * 0.45, cz = ((az + bz) / 2) * 0.12 + 0.03
                 let col = UIColor(red: 0.7, green: 0.9, blue: 1.0, alpha: 1)
-                let steps = 6
                 var prev = a
                 for i in 1...steps {
                     let t = Double(i) / Double(steps), u = 1 - t
-                    let px = u * u * ax + 2 * u * t * cx + t * t * bx
-                    let py = u * u * ay + 2 * u * t * cy + t * t * by
-                    let pz = u * u * az + 2 * u * t * cz + t * t * bz
+                    // One step is the whole line, and a Bézier evaluated at t=1 is exactly its
+                    // endpoint, so the control point simply drops out in graph mode.
+                    let px = steps == 1 ? bx : u * u * ax + 2 * u * t * cx + t * t * bx
+                    let py = steps == 1 ? by : u * u * ay + 2 * u * t * cy + t * t * by
+                    let pz = steps == 1 ? bz : u * u * az + 2 * u * t * cz + t * t * bz
                     let cur = SCNVector3(Float(px), Float(py), Float(pz))
                     let dx = px - Double(prev.x), dy = py - Double(prev.y), dz = pz - Double(prev.z)
                     let d = (dx * dx + dy * dy + dz * dz).squareRoot()
