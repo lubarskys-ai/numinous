@@ -655,9 +655,17 @@ struct Avatar3DView: UIViewRepresentable {
             }
         }
 
+        // THE SPACE THEME IS OFF. Stars, constellations, galaxies and comets were the backdrop
+        // for a figure assembled out of a connectome — a cosmos for a thing being born in one.
+        // Neither screen is that any more: one is a graph of your notes and the other is a
+        // photograph of you. A starfield behind either is decoration arguing with the subject.
+        //
+        // Kept behind a flag rather than deleted, because it was lovely and this is "for now".
+        let showCosmos = false
+
         // A boundless background starfield on a far shell that surrounds the camera,
         // so the cosmos keeps going (never shows an edge) however far you zoom out.
-        for i in 0..<360 {
+        for i in 0..<(showCosmos ? 360 : 0) {
             let u = hrand(i, 11) * 2 - 1
             let phi = hrand(i, 12) * 2 * .pi
             let r = 26 + hrand(i, 13) * 16
@@ -679,6 +687,7 @@ struct Avatar3DView: UIViewRepresentable {
         // Real named constellations + galaxies in the far sky (billboarded so the
         // patterns stay readable), for a cosmos that feels earned, not random.
         func addConstellation(_ stars: [(Double, Double)], _ lines: [(Int, Int)], at: SCNVector3, scale: Double, tint: UIColor) {
+            guard showCosmos else { return }
             let group = SCNNode()
             // Just brighter stars in the constellation's shape — no drawn lines;
             // the eye fills in the pattern, like the real sky. (`lines` unused.)
@@ -698,6 +707,7 @@ struct Avatar3DView: UIViewRepresentable {
             figure.addChildNode(group)
         }
         func addGalaxy(at: SCNVector3, scale: Double, tint: UIColor, elong: Double, alpha: CGFloat) {
+            guard showCosmos else { return }
             let plane = SCNPlane(width: CGFloat(scale * elong), height: CGFloat(scale))
             let m = SCNMaterial(); m.lightingModel = .constant
             m.diffuse.contents = Self.radialGlow(tint)
@@ -736,7 +746,7 @@ struct Avatar3DView: UIViewRepresentable {
         // on screen, so they stop being ambience and become the subject — the graph reads as
         // a starburst with some dots in it.
         func addComet(delay: Double, period: Double, from: SCNVector3, to: SCNVector3, headR: Double, color: UIColor) {
-            guard mode == .avatar else { return }
+            guard showCosmos, mode == .avatar else { return }
             let comet = SCNNode()
             func glow(_ r: Double, _ intensity: CGFloat, _ alpha: CGFloat) -> SCNNode {
                 let s = SCNSphere(radius: r); s.segmentCount = 8
@@ -897,8 +907,17 @@ struct Avatar3DView: UIViewRepresentable {
             // while a stronger, long-range repulsion drives *separate* groups far apart —
             // leaving generous empty space between clusters. Lower kSpring = tighter clusters;
             // higher kRepel = more space between groups.
-            let kSpring = 0.14   // looser springs let the dense central mass expand (higher = more spread)
-            let kRepel  = 2.2    // stronger repulsion inflates the interconnected core, not just the edges
+            // Condensed clusters, separated from EACH OTHER — not one evenly spread field.
+            //
+            // Repulsion acts on every pair, so raising it pushes the whole graph apart evenly
+            // and produces exactly the uniform scatter that made this hard to read: no shape,
+            // just dots at a polite distance. The separation between groups should come from
+            // moving the GROUPS (below), which leaves their internal structure alone.
+            //
+            // So: a shorter, stronger spring to pull each cluster into a knot, weaker global
+            // repulsion so knots are allowed to be knots, and a bigger push between components.
+            let kSpring = 0.075  // shorter, stronger springs — tight clusters
+            let kRepel  = 1.35   // less all-pairs push, so density can vary across the graph
             // How connected each node is. HIGH-degree nodes (hubs) otherwise pile up in the centre
             // (the "hairball"); we give hub↔hub pairs extra repulsion so they fan out — but a hub's
             // links to its low-degree leaves get NO boost, so those axes keep their length.
@@ -966,7 +985,7 @@ struct Avatar3DView: UIViewRepresentable {
                 // Wider now that nothing is pulling the web into a figure. The starfish used
                 // to do the separating as a side effect of dragging clusters out to five
                 // limbs; with it gone the graph has to spread on its own account.
-                let spread = mode == .graph ? 3.4 : 1.9
+                let spread = mode == .graph ? 5.2 : 1.9
                 for (_, members) in comps {
                     let mn = Double(members.count)
                     let cx = members.reduce(0.0) { $0 + fx[$1]! } / mn

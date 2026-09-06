@@ -214,11 +214,14 @@ struct AvatarView: View {
     }
 
     /// A deep-space backdrop so the connectome and stardust actually glow.
+    /// A quiet dark ground, no longer a night sky.
+    ///
+    /// The blue-black vignette was the far end of the space theme — it read as deep space
+    /// because it was meant to. A graph of your notes wants a surface to sit on, and a
+    /// photograph brings its own light, so both are better served by something that stays out
+    /// of the way.
     private var spaceBackground: some View {
-        RadialGradient(
-            colors: [Color(red: 0.07, green: 0.08, blue: 0.15), Color(red: 0.02, green: 0.02, blue: 0.05)],
-            center: .center, startRadius: 40, endRadius: 620
-        )
+        Color(red: 0.07, green: 0.07, blue: 0.075)
     }
 
     /// "Numinous noticed…" — the app reflecting a true pattern back to you.

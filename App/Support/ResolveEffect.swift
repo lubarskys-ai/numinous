@@ -38,6 +38,10 @@ struct ResolveEffect: ViewModifier {
     /// finished long before they were. Squaring the input holds the coarse end open: half
     /// grown is still unmistakably blocks, and only the last stretch resolves.
     static func blockSize(maturity m: Double, side: CGFloat, blocksAtZero: Double = 4) -> CGFloat {
+        // WHOLE MEANS WHOLE. The curve tops out at 136 blocks across, which on a phone-sized
+        // view is a block about three points wide — small, and still visibly not a photograph.
+        // A life fully lived should end at the picture, not at a fine mosaic of it.
+        if m >= 0.99 { return 1 }
         // The ceiling stays put — whole is whole — so a higher floor also means a gentler
         // climb, which is right: a big picture needs less coarsening to read as unfinished.
         let top = max(2.0, 136.0 / blocksAtZero)
