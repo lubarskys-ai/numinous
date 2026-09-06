@@ -164,14 +164,55 @@ enum PhotoAvatar {
            let buffer = try? result.generateScaledMaskForImage(forInstances: [instance], from: handler) {
             return scaled(CIImage(cvPixelBuffer: buffer), to: extent)
         }
-        // Older or unusual photographs: fall back to "everyone", which is right when there is
-        // only one person and honest when there is not.
+        // When instance masking is unavailable or inconclusive, fall back to "everyone" — and
+        // then CUT IT DOWN to the person who was chosen.
+        //
+        // Falling back to everyone on its own is what erased both people. It was written as
+        // "right when there is only one person and honest when there is not", which was wrong:
+        // there is nothing honest about dissolving somebody's wife because the first method
+        // did not resolve. If a photograph has two people in it, the one that was tapped is
+        // the only acceptable answer.
+        //
+        // The chosen body's own joints give a box around it. Intersecting the everyone-mask
+        // with that box isolates one person reliably whenever they are not overlapping, which
+        // covers the ordinary case of two people standing apart in a photograph.
         let whole = VNGeneratePersonSegmentationRequest()
         whole.qualityLevel = .accurate
         whole.outputPixelFormat = kCVPixelFormatType_OneComponent8
         try VNImageRequestHandler(cgImage: cg).perform([whole])
         guard let buffer = whole.results?.first?.pixelBuffer else { throw Failure.noPersonFound }
-        return scaled(CIImage(cvPixelBuffer: buffer), to: extent)
+        let everyone = scaled(CIImage(cvPixelBuffer: buffer), to: extent)
+
+        guard let box = bodyBox(cg, personIndex: personIndex, extent: extent) else { return everyone }
+        // A soft-edged box, so the cut does not leave a straight vertical line down the
+        // photograph where it clipped.
+        let keep = CIImage(color: .white).cropped(to: box)
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 24])
+            .cropped(to: extent)
+        return everyone.applyingFilter("CIMultiplyCompositing", parameters: [
+            kCIInputBackgroundImageKey: keep]).cropped(to: extent)
+    }
+
+    /// A padded box around one body, from its own joints.
+    private static func bodyBox(_ cg: CGImage, personIndex: Int, extent: CGRect) -> CGRect? {
+        let request = VNDetectHumanBodyPoseRequest()
+        try? VNImageRequestHandler(cgImage: cg).perform([request])
+        guard let bodies = request.results, bodies.count > 1,
+              let body = bodies[safe: personIndex],
+              let points = try? body.recognizedPoints(.all) else { return nil }
+        let found = points.values.filter { $0.confidence > 0.15 }.map(\.location)
+        guard found.count >= 4 else { return nil }
+
+        let minX = found.map(\.x).min()!, maxX = found.map(\.x).max()!
+        let minY = found.map(\.y).min()!, maxY = found.map(\.y).max()!
+        // Generous padding: joints sit inside a body, and hair, hats, shoes and outstretched
+        // hands all live outside the last joint.
+        let padX = max(0.10, (maxX - minX) * 0.65), padY = max(0.08, (maxY - minY) * 0.22)
+        let x0 = max(0, minX - padX), x1 = min(1, maxX + padX)
+        let y0 = max(0, minY - padY), y1 = min(1, maxY + padY)
+        // Vision counts up from the bottom; a CIImage does too, so no flip is needed here.
+        return CGRect(x: x0 * extent.width, y: y0 * extent.height,
+                      width: (x1 - x0) * extent.width, height: (y1 - y0) * extent.height)
     }
 
     /// Which outline covers this point on the body.

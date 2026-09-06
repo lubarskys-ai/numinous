@@ -40,7 +40,10 @@ struct PhotoAvatarView: View {
     /// Stepping the value by hand gives the shader a new block size on every frame, which is
     /// the only way the coarsening is visible at all. Eased at both ends so it does not start
     /// or stop abruptly.
-    private func comeApart(seconds: Double = 5.0, frames: Int = 110) async {
+    /// Slower than feels sensible, because the whole point is the coming apart and not the
+    /// arrival at an empty photograph. Nine seconds is long for an animation and about right
+    /// for watching something be undone.
+    private func comeApart(seconds: Double = 9.0, frames: Int = 200) async {
         running = true
         let step = UInt64(seconds / Double(frames) * 1_000_000_000)
         for frame in 0...frames {
