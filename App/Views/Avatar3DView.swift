@@ -1328,18 +1328,31 @@ struct Avatar3DView: UIViewRepresentable {
         // form only from DENSITY: the more connections you make, the more threads fill the limbs
         // and torso. Pale, not organ-coloured; each curves toward the core so it flows along the
         // form it's building.
-        for e in links where linksAppear > 0.05 {
-            guard let a = pos[e.a], let b = pos[e.b] else { continue }
-            let col = e.cross ? UIColor(white: 0.94, alpha: 1) : UIColor(white: 0.78, alpha: 1)   // neutral, no colour
+        // TWO MATERIALS, NOT ONE PER LINK. Every thread was building its own SCNMaterial, and
+        // there are only ever two of them — a cross-axis link and a same-axis link — because
+        // everything that varies is constant across the whole graph. On a real vault that was
+        // hundreds of identical objects made and thrown at the renderer separately.
+        func threadMaterial(cross: Bool) -> SCNMaterial {
+            let col = cross ? UIColor(white: 0.94, alpha: 1) : UIColor(white: 0.78, alpha: 1)
             let mat = SCNMaterial(); mat.lightingModel = .constant
             mat.diffuse.contents = col; mat.emission.contents = col
-            mat.emission.intensity = (e.cross ? 0.5 : 0.36) * linksAppear
-            mat.transparency = CGFloat((e.cross ? 0.55 : 0.42) * linksAppear)
+            mat.emission.intensity = (cross ? 0.5 : 0.36) * linksAppear
+            mat.transparency = CGFloat((cross ? 0.55 : 0.42) * linksAppear)
             mat.writesToDepthBuffer = false
+            return mat
+        }
+        let crossMaterial = threadMaterial(cross: true)
+        let sameMaterial = threadMaterial(cross: false)
+
+        for e in links where linksAppear > 0.05 {
+            guard let a = pos[e.a], let b = pos[e.b] else { continue }
             let r: CGFloat = e.cross ? 0.0024 : 0.0016   // thin, consistent — density does the work
+            // A straight link is ONE segment. curve() already returns two points in graph mode,
+            // so this only costs six segments where a body is being suggested.
             let cv = curve(a, b, 6)
             for k in 0..<(cv.count - 1) {
-                thread(cv[k], cv[k + 1], r, mat, name: "link:\(e.a.uuidString):\(e.b.uuidString)")
+                thread(cv[k], cv[k + 1], r, e.cross ? crossMaterial : sameMaterial,
+                       name: "link:\(e.a.uuidString):\(e.b.uuidString)")
             }
         }
 
