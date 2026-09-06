@@ -113,16 +113,28 @@ struct PhotoAvatarView: View {
                     // nothing to a photograph — that is for template images — so Spirit moved
                     // its slider and changed the screen not at all. Colouring a rectangle and
                     // cutting your shape out of it gives an actual glow of an actual colour.
+                    // THE FADE GOES ON THE COLOUR, NOT ON THE VIEW, and that distinction was
+                    // the black blob on his chest.
+                    //
+                    // .blendMode followed by .opacity makes SwiftUI draw the layer on its own,
+                    // against BLACK, and then composite the result — so the black comes with
+                    // it. The glow is masked by a blurred cut-out of the person, which is
+                    // densest through the torso, so the black landed precisely there: a soft
+                    // oval on the chest with a halo round it, exactly as reported, and nothing
+                    // whatever to do with the erase it was blamed on for three rounds.
+                    //
+                    // Fading the colour itself adds no layer, so plusLighter keeps blending
+                    // with the photograph underneath, which is the only thing it can lighten.
                     spiritColor
+                        .opacity(running && preview == nil
+                                 ? 0.85 * min(1, max(0, (undoing - 0.07) * 3.0))
+                                 : 0.85 * presence(preview?["spirit"] ?? maturity("spirit")))
                         .mask {
                             Image(uiImage: person)
                                 .resizable().scaledToFit()
                                 .blur(radius: 30)
                         }
                         .blendMode(.plusLighter)
-                        .opacity(running && preview == nil
-                                 ? 0.85 * min(1, max(0, (undoing - 0.07) * 3.0))
-                                 : 0.85 * presence(preview?["spirit"] ?? maturity("spirit")))
                         .allowsHitTesting(false)
 
                     // Each region is the same picture of you, coarsened by its own axis and
