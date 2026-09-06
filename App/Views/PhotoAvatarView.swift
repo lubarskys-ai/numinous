@@ -27,6 +27,8 @@ struct PhotoAvatarView: View {
     /// this and the real one, so the picture starts whole and falls to wherever your life has
     /// actually got to.
     @State private var undoing: Double = 0
+    /// True from the moment the dissolve starts and never set back, so the screen HOLDS at
+    /// the emptied photograph rather than snapping to the resting state at the end of it.
     @State private var running = false
 
     /// Take the picture apart, a frame at a time.
@@ -51,8 +53,12 @@ struct PhotoAvatarView: View {
             undoing = 1 - (t * t * (3 - 2 * t))
             try? await Task.sleep(nanoseconds: step)
         }
+        // FREEZE AT THE FAREST POINT. Handing the screen back to the resting state the instant
+        // the dissolve finished put a faint ghost of you back on the wall between one frame and
+        // the next — the picture came apart beautifully and then flinched. Whatever you have
+        // actually grown belongs to the next time this screen is opened, not to the last
+        // quarter-second of watching yourself go.
         undoing = 0
-        running = false
     }
 
     /// What to draw: the real maturity, or the intro's, whichever is further along.
