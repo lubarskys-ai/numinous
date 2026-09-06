@@ -46,8 +46,14 @@ enum AvatarMode {
 /// that is most of a second of arithmetic, and it was being redone every single time the
 /// screen opened, every time the mode was switched, and every time the maturity ticked. None
 /// of those change where a note sits. The graph does.
-@MainActor
+///
+/// NOT MAIN-ACTOR ISOLATED, which the first version was, and which froze the app the moment
+/// the graph was opened. buildScene() runs on a background queue deliberately — it is the
+/// expensive thing and it must not block the screen — so reaching into main-actor state from
+/// inside it is illegal, and asserting that it is safe hangs rather than complains. A lock
+/// costs nanoseconds and works from any thread.
 enum GraphLayoutCache {
+    private static let lock = NSLock()
     private static var key: String = ""
     private static var positions: [UUID: SCNVector3] = [:]
 
@@ -61,10 +67,12 @@ enum GraphLayoutCache {
     }
 
     static func cached(_ signature: String) -> [UUID: SCNVector3]? {
-        key == signature && !positions.isEmpty ? positions : nil
+        lock.lock(); defer { lock.unlock() }
+        return key == signature && !positions.isEmpty ? positions : nil
     }
 
     static func store(_ signature: String, _ layout: [UUID: SCNVector3]) {
+        lock.lock(); defer { lock.unlock() }
         key = signature
         positions = layout
     }
@@ -926,7 +934,7 @@ struct Avatar3DView: UIViewRepresentable {
         let linkedSet: Set<UUID> = Set(links.flatMap { [$0.a, $0.b] }).intersection(idSet)
         // The settled layout, from before if the graph has not changed.
         let layoutKey = GraphLayoutCache.signature(nodes: nodes, links: links, mode: mode)
-        let reuse = MainActor.assumeIsolated { GraphLayoutCache.cached(layoutKey) }
+        let reuse = GraphLayoutCache.cached(layoutKey)
 
         let fdIds = ids.filter { linkedSet.contains($0) }
         var fx = [UUID: Double](), fy = [UUID: Double](), fz = [UUID: Double]()
@@ -1098,7 +1106,7 @@ struct Avatar3DView: UIViewRepresentable {
         if reuse == nil {
             var settled: [UUID: SCNVector3] = [:]
             for id in fdIds { settled[id] = v(fx[id] ?? 0, fy[id] ?? 0, fz[id] ?? 0) }
-            MainActor.assumeIsolated { GraphLayoutCache.store(layoutKey, settled) }
+            GraphLayoutCache.store(layoutKey, settled)
         }
         func graphPos(_ id: UUID) -> SCNVector3 {
             if let hit = reuse?[id] { return hit }
