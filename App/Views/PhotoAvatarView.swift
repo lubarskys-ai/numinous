@@ -80,6 +80,16 @@ struct PhotoAvatarView: View {
         max(axis == "all" ? wholeLife() : (preview?[axis] ?? maturity(axis)), undoing)
     }
 
+    /// The five maturities, in the order the shader deals its squares out.
+    ///
+    /// During the dissolve they are all driven together — the picture comes apart as one thing
+    /// even though it comes back as five.
+    private func axisValues() -> [Double] {
+        ["mind", "heart", "body", "meaning", "spirit"].map { axis in
+            max(preview?[axis] ?? maturity(axis), undoing)
+        }
+    }
+
     /// The regions are gone, so the axes are read as one number: the least-grown part of a
     /// life holds the whole picture back a little, which is truer to the idea than an average
     /// that lets a strong axis paper over an empty one.
@@ -117,22 +127,23 @@ struct PhotoAvatarView: View {
                         .blendMode(.plusLighter)
                         .allowsHitTesting(false)
 
-                    // ONE LAYER FOR THE WHOLE BODY.
+                    // ONE LAYER, AND EVERY SQUARE BELONGS TO AN AXIS.
                     //
-                    // It was four — head, chest, hips and shoulders — each the same picture of
-                    // you, coarsened by its own axis and shown through a soft circular mask.
-                    // Around the torso all four masks reach at once, so four partly-opaque
-                    // copies of the same person stacked on top of each other, each with a
-                    // different block pattern. That is what made the middle dense and dark
-                    // while the head and legs, covered by one mask apiece, resolved cleanly.
+                    // Two arrangements have failed here. Four anatomical regions stacked four
+                    // copies of the person around the torso and made the middle dense and dark.
+                    // One layer at one maturity fixed that and meant a single new link nudged
+                    // the whole figure by an amount nobody could see — and made the per-axis
+                    // sliders identical, because they all drove the same number.
                     //
-                    // Overlapping soft masks cannot be made to add up to one: the fix is not to
-                    // overlap. The whole of you now comes back together, at the pace of your
-                    // whole life rather than of one part of it.
+                    // Neither is how a life fills in. It fills in unevenly, in patches. So each
+                    // square is dealt an axis, scattered across the whole body rather than
+                    // pooled in a region, and lights when its own axis passes the lot it was
+                    // dealt. Mind fills Mind's squares wherever they fall; nothing overlaps,
+                    // because a square has exactly one owner; and one connection is a handful
+                    // of squares somewhere, which is a thing you can watch happen.
                     Image(uiImage: person)
                         .resizable().scaledToFit()
-                        .resolving(maturity: showing("all"), side: fitted.width,
-                                   seed: 7, blocksAtZero: 9)
+                        .scattered(maturities: axisValues(), side: fitted.width, seed: 7)
                         .opacity(visible("all"))
                 }
                 .frame(width: fitted.width, height: fitted.height)

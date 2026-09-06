@@ -58,7 +58,35 @@ struct ResolveEffect: ViewModifier {
     }
 }
 
+/// The same effect, dealt out per axis — see `resolveByAxis` in Resolve.metal.
+///
+/// Blocks stay a constant, moderate size: what changes is HOW MANY of them are there. A life
+/// comes back in patches, one axis's patches at a time, and a single new connection lights a
+/// few squares somewhere rather than sharpening the whole figure by an amount nobody could see.
+struct ScatteredResolve: ViewModifier {
+    /// Five maturities, in the order the shader deals them out.
+    let maturities: [Double]
+    let side: CGFloat
+    let seed: Double
+    /// How many blocks span the view. Fixed, because coarseness is no longer the story.
+    var blocks: Double = 26
+
+    func body(content: Content) -> some View {
+        let block = max(2, side / CGFloat(blocks))
+        let m = (0..<5).map { Float(min(1, max(0, maturities.indices.contains($0) ? maturities[$0] : 0))) }
+        content.layerEffect(
+            ShaderLibrary.resolveByAxis(.float(block), .float(Float(seed)),
+                                        .float(m[0]), .float(m[1]), .float(m[2]),
+                                        .float(m[3]), .float(m[4])),
+            maxSampleOffset: CGSize(width: block, height: block))
+    }
+}
+
 extension View {
+    func scattered(maturities: [Double], side: CGFloat, seed: Double, blocks: Double = 26) -> some View {
+        modifier(ScatteredResolve(maturities: maturities, side: side, seed: seed, blocks: blocks))
+    }
+
     func resolving(maturity: Double, side: CGFloat, seed: Double, blocksAtZero: Double = 4) -> some View {
         modifier(ResolveEffect(maturity: maturity, side: side, seed: seed, blocksAtZero: blocksAtZero))
     }
