@@ -106,16 +106,23 @@ struct PhotoAvatarView: View {
                     Image(uiImage: background)
                         .resizable().scaledToFit()
 
-                    // Spirit is not a body part, so it is not drawn as one: a glow gathering
-                    // around the whole of you, present before any of you is.
-                    Image(uiImage: person)
-                        .resizable().scaledToFit()
-                        .blur(radius: 26)
+                    // Spirit is not a body part, so it is not drawn as one: a coloured glow
+                    // in the shape of you, gathering around the whole figure.
+                    //
+                    // The first version tinted the photograph with foregroundStyle, which does
+                    // nothing to a photograph — that is for template images — so Spirit moved
+                    // its slider and changed the screen not at all. Colouring a rectangle and
+                    // cutting your shape out of it gives an actual glow of an actual colour.
+                    spiritColor
+                        .mask {
+                            Image(uiImage: person)
+                                .resizable().scaledToFit()
+                                .blur(radius: 30)
+                        }
                         .blendMode(.plusLighter)
                         .opacity(running && preview == nil
-                                 ? 0.46 * min(1, max(0, (undoing - 0.07) * 3.0))
-                                 : 0.46 * presence(preview?["spirit"] ?? maturity("spirit")))
-                        .foregroundStyle(spiritColor)
+                                 ? 0.85 * min(1, max(0, (undoing - 0.07) * 3.0))
+                                 : 0.85 * presence(preview?["spirit"] ?? maturity("spirit")))
                         .allowsHitTesting(false)
 
                     // Each region is the same picture of you, coarsened by its own axis and
@@ -239,16 +246,38 @@ struct PhotoAvatarView: View {
 
     private struct Region { let axis: String; let centre: CGPoint; let reach: CGFloat; let seed: Double }
 
+    /// A soft band centred on this region's own height, in the picture's top-down coordinates.
+    private func bandStops(_ region: Region) -> [Gradient.Stop] {
+        let centre = 1 - region.centre.y                 // Vision counts up; a gradient counts down
+        let half = max(0.06, region.reach * max(0.25, anchors.height))
+        let fade = half * 0.85
+        func at(_ y: CGFloat) -> CGFloat { min(1, max(0, y)) }
+        return [
+            .init(color: .clear, location: at(centre - half - fade)),
+            .init(color: .white, location: at(centre - half)),
+            .init(color: .white, location: at(centre + half)),
+            .init(color: .clear, location: at(centre + half + fade)),
+        ]
+    }
+
     /// Which axis owns which part of you. Read off the body the phone actually found in your
     /// photograph, so it is your head and your chest — not a rectangle's top third.
     private var regions: [Region] {
-        [
-            Region(axis: "mind", centre: anchors.head, reach: 0.42, seed: 3),
-            Region(axis: "heart", centre: anchors.chest, reach: 0.52, seed: 17),
-            // Body is the whole standing frame rather than a spot: legs, arms, the lot. Anchored
-            // at the hips, which is where a body's mass actually sits.
-            Region(axis: "body", centre: anchors.hip, reach: 1.15, seed: 29),
-            Region(axis: "meaning", centre: CGPoint(x: anchors.neck.x, y: anchors.neck.y), reach: 0.75, seed: 41),
+        // Five axes and one body, so the heights have to be genuinely apart or they read as
+        // one thing moving. Top to bottom: head, chest, waist, legs — and Spirit around all
+        // of it rather than anywhere on it.
+        let head = anchors.head.y
+        let chest = anchors.chest.y
+        let hip = anchors.hip.y
+        let waist = (chest + hip) / 2
+        let legs = hip - (head - hip) * 0.55
+        return [
+            Region(axis: "mind", centre: CGPoint(x: anchors.head.x, y: head), reach: 0.16, seed: 3),
+            Region(axis: "heart", centre: CGPoint(x: anchors.chest.x, y: chest), reach: 0.14, seed: 17),
+            // Meaning has no organ of its own, so it takes the middle — the part of a standing
+            // figure that is neither thought nor feeling nor legs.
+            Region(axis: "meaning", centre: CGPoint(x: anchors.chest.x, y: waist), reach: 0.13, seed: 41),
+            Region(axis: "body", centre: CGPoint(x: anchors.hip.x, y: legs), reach: 0.30, seed: 29),
         ]
     }
 
