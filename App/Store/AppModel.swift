@@ -637,6 +637,28 @@ final class AppModel: ObservableObject {
         cachedCoveredGround = ground
     }
 
+    /// The books you read around here, nearest first.
+    ///
+    /// The reverse of putting a place on a book, and the reason for doing it: arriving somewhere
+    /// and remembering what you read the last time you were here. Reads off `mappablePlaces`,
+    /// which already holds every note with a coordinate, so this costs a walk of the pins rather
+    /// than of the vault.
+    ///
+    /// A book can carry more than one place — read on the flight out and finished by the pool —
+    /// so only its nearest is returned, and each book appears once.
+    func booksRead(near lat: Double, _ lon: Double,
+                   withinKm radius: Double) -> [(place: MappablePlace, distanceKm: Double)] {
+        var best: [UUID: (MappablePlace, Double)] = [:]
+        for p in mappablePlaces where Self.isBookFolder(p.folderName) {
+            let d = Self.distanceKm(lat, lon, p.latitude, p.longitude)
+            guard d <= radius else { continue }
+            if let existing = best[p.noteID], existing.1 <= d { continue }
+            best[p.noteID] = (p, d)
+        }
+        return best.values.map { (place: $0.0, distanceKm: $0.1) }
+            .sorted { $0.distanceKm < $1.distanceKm }
+    }
+
     /// A patch of the world you've been to — every place within `newGroundRadiusKm` of the
     /// first one you recorded there, gathered under the date and name of that first visit.
     /// This is the unit the map counts in: "twelve regions, three of them new this year".

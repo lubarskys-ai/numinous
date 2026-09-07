@@ -45,6 +45,7 @@ struct MapView: View {
     @State private var locationDenied = false
     @State private var visibleRegion: MKCoordinateRegion?
     @State private var stacked: Pin?          // a tapped marker holding several notes
+    @State private var showingRead = false    // the "books you read around here" list
 
     private struct NoteRef: Identifiable { let id: UUID }
 
@@ -166,6 +167,7 @@ struct MapView: View {
                     searchBar
                     if searchResult != nil { saveSearchedBar }
                     filterBar(count: matching.count)
+                    readHereBar
                     reachBar(model.travelSummary(for: matching, isInPeriod: period.contains))
                 }
             }
@@ -175,6 +177,31 @@ struct MapView: View {
             .navigationBarTitleDisplayMode(.inline)
             .sheet(item: $openNote) { ref in
                 NoteSheet(noteID: ref.id)
+            }
+            .sheet(isPresented: $showingRead) {
+                NavigationStack {
+                    List(booksAround, id: \.place.id) { found in
+                        Button {
+                            showingRead = false
+                            openNote = NoteRef(id: found.place.noteID)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(found.place.title).foregroundStyle(.primary)
+                                Text(found.place.placeName + " · "
+                                     + DistanceFormat.short(km: found.distanceKm) + " away")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .navigationTitle("Read around here")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { showingRead = false }
+                        }
+                    }
+                }
+                .presentationDetents([.medium, .large])
             }
             .confirmationDialog(stacked.map { "\($0.members.count) notes here" } ?? "",
                                 isPresented: Binding(get: { stacked != nil },
@@ -234,6 +261,42 @@ struct MapView: View {
 
     /// When a search has landed on a place, offer to attach it to a note — either as its
     /// own place note or onto today's diary entry.
+    /// WHAT YOU READ HERE. The point of letting a book carry a place: you go somewhere and want
+    /// to know what you read the last time you were here. It follows whatever is on screen — a
+    /// place you searched, one you panned to, or your own position after tapping locate — so
+    /// there is nothing to ask for and nothing to set. It appears only when there is something
+    /// to say, and is silent everywhere you have never read anything.
+    private var booksAround: [(place: AppModel.MappablePlace, distanceKm: Double)] {
+        guard let r = visibleRegion else { return [] }
+        // Half the shorter side of what is on screen, so "around here" means what you can see.
+        // Clamped: a world view should not claim a book on another continent is nearby, and a
+        // street view should still reach the next block.
+        let span = min(r.span.latitudeDelta, r.span.longitudeDelta) * 111.0 / 2
+        return model.booksRead(near: r.center.latitude, r.center.longitude,
+                               withinKm: min(max(span, 1.5), 120))
+    }
+
+    @ViewBuilder
+    private var readHereBar: some View {
+        let found = booksAround
+        if !found.isEmpty {
+            Button { showingRead = true } label: {
+                Label(found.count == 1
+                        ? "You read “\(found[0].place.title)” around here"
+                        : "\(found.count) books you read around here",
+                      systemImage: "book.closed")
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                    .padding(.horizontal, 14).padding(.vertical, 9)
+                    .frame(maxWidth: .infinity)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(Capsule().strokeBorder(.secondary.opacity(0.25)))
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 12)
+        }
+    }
+
     private var saveSearchedBar: some View {
         Menu {
             Button { saveSearchedAsNote() } label: {
