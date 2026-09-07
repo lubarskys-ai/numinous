@@ -92,11 +92,18 @@ struct NoteDetailView: View {
             }
             .navigationTitle(note.displayName)
             .navigationBarTitleDisplayMode(.inline)
-            .alert("Add a place", isPresented: $editingLocation) {
-                TextField("Where were you?", text: $locationDraft)
+            .alert(AppModel.isBookFolder(note.folderName) ? "Where did you read it?" : "Add a place",
+                   isPresented: $editingLocation) {
+                TextField(AppModel.isBookFolder(note.folderName) ? "A café, a beach, a train…"
+                                                                : "Where were you?",
+                          text: $locationDraft)
                 Button("Cancel", role: .cancel) {}
                 Button("Add") { addTypedPlace(to: note.id, name: locationDraft) }
-            } message: { Text("Add a place to this note. You can add more than one.") }
+            } message: {
+                Text(AppModel.isBookFolder(note.folderName)
+                     ? "Where you were while you read it. You can add more than one."
+                     : "Add a place to this note. You can add more than one.")
+            }
             .sheet(item: $editingPlace) { ref in
                 PlaceEditorView(noteID: note.id, place: ref.place)
             }
@@ -286,7 +293,14 @@ struct NoteDetailView: View {
                 )
                 .font(.subheadline)
             }
-            if !AppModel.isBookFolder(note.folderName) { locationRows(note) }
+            // BOOKS GET A PLACE TOO — where you read it. It is often the most memorable thing
+            // about a book and it was the one kind of note forbidden from recording it.
+            //
+            // No travel value comes of it, and that is deliberate rather than an omission:
+            // travelReading() only scores place-like folders, so a book read on a beach in
+            // Thailand does not award the journey a second time. The trip was already logged as
+            // a trip. This just remembers where you were while you read it.
+            locationRows(note)
             // Every book — however it was imported (Readwise or the Obsidian vault) — gets the
             // read toggle. A book grows Mind only once you finish it.
             if AppModel.isBookFolder(note.folderName) {
@@ -434,7 +448,10 @@ struct NoteDetailView: View {
                 Label("Use current location", systemImage: "location.fill")
             }
         } label: {
-            Label(note.allPlaces.isEmpty ? "Add location" : "Add another location", systemImage: "plus.circle")
+            Label(AppModel.isBookFolder(note.folderName)
+                    ? (note.allPlaces.isEmpty ? "Where did you read it?" : "Add another place")
+                    : (note.allPlaces.isEmpty ? "Add location" : "Add another location"),
+                  systemImage: "plus.circle")
                 .foregroundStyle(.tint)
         }
     }
