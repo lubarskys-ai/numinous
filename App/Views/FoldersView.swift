@@ -964,7 +964,7 @@ struct AxisSettingsView: View {
         } footer: {
             Text(gameAlerts && alertsDenied
                  ? "Notifications are switched off for Numinous in iOS Settings, so nothing can be sent until they're on."
-                 : "Two hours before kickoff, never before 9am, and at most one a day. Add a team to somebody in their note.")
+                 : "The day before kickoff, never before 9am, and at most one a day. Add a team to somebody in their note.")
         }
     }
 

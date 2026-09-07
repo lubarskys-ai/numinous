@@ -1389,7 +1389,9 @@ final class AppModel: ObservableObject {
 
     /// "Tonight", "Tomorrow", "Saturday" — the way somebody would say it, because "in 2 days"
     /// is not how anybody mentions a match.
-    static func gameWhen(_ date: Date) -> String {
+    /// nonisolated: a pure function of a date, and the notification scheduler needs it off the
+    /// main actor to write the alert's title.
+    nonisolated static func gameWhen(_ date: Date) -> String {
         let cal = Calendar.current
         if cal.isDateInToday(date) { return date.timeIntervalSinceNow < 4 * 3600 ? "Starting soon" : "Tonight" }
         if cal.isDateInTomorrow(date) { return "Tomorrow" }

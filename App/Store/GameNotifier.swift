@@ -14,9 +14,11 @@ import UserNotifications
 ///   Nothing is scheduled until you have chosen a team for somebody. Permission is asked at that
 ///   moment and not at launch, so the question arrives with a reason attached.
 ///
-///   Two hours before kickoff, and never before nine in the morning. Two hours is late enough to
-///   be about tonight and early enough to still make a plan; the floor is there because a
-///   European kickoff would otherwise wake you at six.
+///   A day before kickoff, and never before nine in the morning. A day is what a person needs to
+///   actually do something about it — "want to watch it Saturday?" has to arrive while Saturday
+///   is still free. Two hours' warning only ever produces "big game tonight", which is a nicer
+///   message to receive than to be too late to act on. The 9am floor is there because an early
+///   kickoff would otherwise be announced at six in the morning.
 ///
 ///   One per person per game, and at most one a day. A season ticket holder would otherwise be
 ///   an alarm clock.
@@ -50,15 +52,29 @@ enum GameNotifier {
         }
     }
 
-    /// When to fire for a kickoff: two hours before, never before nine, never in the past.
-    static func fireDate(forKickoff kickoff: Date, calendar: Calendar = .current) -> Date? {
-        var when = kickoff.addingTimeInterval(-2 * 3600)
+    /// How far ahead of kickoff the alert lands.
+    static let leadTime: TimeInterval = 24 * 3600
+
+    /// When to fire for a kickoff: a day before, never before nine, never in the past.
+    static func fireDate(forKickoff kickoff: Date, now: Date = Date(),
+                         calendar: Calendar = .current) -> Date? {
+        var when = kickoff.addingTimeInterval(-leadTime)
+
+        // THE DAY-BEFORE MOMENT MAY ALREADY BE GONE — you added the team this morning and they
+        // play tonight. A day's notice is the intent, not a condition: better to say it soon
+        // than to say nothing about a game that has not started. Not within three hours of
+        // kickoff, though, because by then it is an interruption about something you can no
+        // longer make a plan around.
+        if when <= now, kickoff.timeIntervalSince(now) > 3 * 3600 {
+            when = now.addingTimeInterval(30 * 60)
+        }
+
         let nine = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: when) ?? when
         if when < nine { when = nine }
-        // A 9am floor must not push the alert PAST the game it is about — an 8am kickoff is
-        // better mentioned late than mentioned after the final whistle.
+        // The floor must never push the alert past the game it is about — a game tomorrow
+        // morning is better mentioned late tonight than after the final whistle.
         if when >= kickoff { when = kickoff.addingTimeInterval(-15 * 60) }
-        return when > Date().addingTimeInterval(60) ? when : nil
+        return when > now.addingTimeInterval(60) ? when : nil
     }
 
     /// Replace everything pending with the soonest games we know about.
@@ -85,8 +101,11 @@ enum GameNotifier {
             guard perDay[day, default: 0] < 1 else { continue }
             perDay[day] = perDay[day, default: 0] + 1
 
+            // ARRIVING A DAY OUT MEANS THE ALERT HAS TO SAY WHEN. Two hours before, "their team
+            // plays" could only mean tonight; a day before, a notification that does not name
+            // the time is a notification you have to open the app to understand.
             let content = UNMutableNotificationContent()
-            content.title = "\(game.name)'s team plays"
+            content.title = "\(game.name)'s team plays \(AppModel.gameWhen(game.kickoff).lowercased())"
             content.body = "\(game.line) · \(game.league)"
             content.sound = .default
             content.userInfo = ["noteID": game.personID.uuidString]
