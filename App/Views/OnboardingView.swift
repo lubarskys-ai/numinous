@@ -2,25 +2,31 @@ import SwiftUI
 import NuminousCore
 
 /// The guided first capture — a short, warm survey a brand-new user sees instead of an empty
-/// vault. A few people, hobbies, and books/ideas; Numinous weaves them into a first entry so
-/// the connectome (and several axes) come alive at once — enough to look like a life beginning,
-/// not a toy. The reveal shows those axes lighting up, earned from what they just entered.
+/// vault. A few people, hobbies, and books/ideas; Numinous weaves them into a first entry so the
+/// connectome comes alive at once — enough to look like a life beginning, not a toy.
+///
+/// NO AXES HERE. The first version named them: a coloured dot beside each field, and a reveal
+/// that lit up Heart, Meaning and Mind as "parts of you now awake". It taught the app's private
+/// vocabulary to somebody who had typed three names and could not yet want it — the reviewer's
+/// "too complicated" in miniature. The axes still do all the same work; they are simply not the
+/// first thing anybody is asked to understand. What the reveal shows now is the only thing that
+/// is actually true to a newcomer: the things they named are already joined up.
 struct OnboardingView: View {
     @EnvironmentObject var model: AppModel
 
     @State private var people: [String] = []
     @State private var hobbies: [String] = []
     @State private var books: [String] = []
-    @State private var revealed: [Axis]?          // non-nil → show the "already alive" reveal
-    @State private var shown = 0                   // how many axis chips have animated in
+    @State private var revealed = false            // true → show the "already alive" reveal
+    @State private var arrived = false             // drives the reveal's one animation
 
     private var total: Int { people.count + hobbies.count + books.count }
 
     var body: some View {
         ZStack {
             background
-            if let axes = revealed {
-                reveal(axes).transition(.opacity.combined(with: .move(edge: .trailing)))
+            if revealed {
+                reveal.transition(.opacity.combined(with: .move(edge: .trailing)))
             } else {
                 intake.transition(.opacity)
             }
@@ -33,11 +39,11 @@ struct OnboardingView: View {
                        startPoint: .top, endPoint: .bottom)
             .ignoresSafeArea()
             .overlay(alignment: .topTrailing) {
-                Circle().fill(Axis.heart.color.opacity(0.10)).frame(width: 320, height: 320)
+                Circle().fill(Color.accentColor.opacity(0.10)).frame(width: 320, height: 320)
                     .blur(radius: 80).offset(x: 90, y: -120)
             }
             .overlay(alignment: .bottomLeading) {
-                Circle().fill(Axis.meaning.color.opacity(0.10)).frame(width: 300, height: 300)
+                Circle().fill(Color.accentColor.opacity(0.07)).frame(width: 300, height: 300)
                     .blur(radius: 80).offset(x: -90, y: 120)
             }
     }
@@ -56,11 +62,11 @@ struct OnboardingView: View {
                 .padding(.top, 8)
 
                 CategoryField(title: "People who matter to you", example: "Mom, Alex, a mentor…",
-                              axis: .heart, items: $people)
+                              items: $people)
                 CategoryField(title: "Passions & hobbies", example: "hiking, cooking, guitar…",
-                              axis: .meaning, items: $hobbies)
+                              items: $hobbies)
                 CategoryField(title: "Books & ideas that shaped you", example: "Meditations, stoicism…",
-                              axis: .mind, items: $books)
+                              items: $books)
 
                 Button(action: begin) {
                     Text(total == 0 ? "Add a few to begin" : "Plant these \(total)")
@@ -82,45 +88,44 @@ struct OnboardingView: View {
     }
 
     private func begin() {
-        let axes = model.completeOnboarding(people: people, hobbies: hobbies, books: books)
-        withAnimation(.easeInOut(duration: 0.45)) { revealed = axes.isEmpty ? nil : axes }
-        if axes.isEmpty { model.dismissOnboarding(); return }
-        for i in axes.indices {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35 + Double(i) * 0.26) {
-                withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) { shown = i + 1 }
-            }
+        // The model still works out which axes these belong to — that is how a folder becomes
+        // part of a life. The screen just no longer reports it.
+        let planted = model.completeOnboarding(people: people, hobbies: hobbies, books: books)
+        guard !planted.isEmpty else { model.dismissOnboarding(); return }
+        withAnimation(.easeInOut(duration: 0.45)) { revealed = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) { arrived = true }
         }
     }
 
     // MARK: Reveal
-    private func reveal(_ axes: [Axis]) -> some View {
+    private var reveal: some View {
         VStack(spacing: 0) {
             Spacer()
             VStack(spacing: 14) {
                 Text("Your life is already taking shape.")
                     .font(.system(.title, design: .serif).weight(.semibold))
                     .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
-                Text("From \(total) small things, your first connections have formed — and these parts of you are awake:")
+                Text("\(total) things planted, and Numinous has already started joining them up.")
                     .font(.callout).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 30)
 
-            HStack(spacing: 16) {
-                ForEach(Array(axes.enumerated()), id: \.element.id) { idx, axis in
-                    VStack(spacing: 8) {
-                        ZStack {
-                            Circle().fill(axis.color.opacity(0.18)).frame(width: 52, height: 52)
-                            Circle().fill(axis.color).frame(width: 15, height: 15)
-                                .shadow(color: axis.color.opacity(0.7), radius: 8)
-                        }
-                        Text(axis.name).font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                    }
-                    .opacity(idx < shown ? 1 : 0)
-                    .scaleEffect(idx < shown ? 1 : 0.6)
-                }
+            // One quiet mark that something happened, rather than a row of chips naming machinery
+            // nobody has been introduced to yet.
+            ZStack {
+                Circle().stroke(Color.accentColor.opacity(0.25), lineWidth: 1)
+                    .frame(width: 118, height: 118)
+                    .scaleEffect(arrived ? 1 : 0.7).opacity(arrived ? 1 : 0)
+                Circle().fill(Color.accentColor.opacity(0.14)).frame(width: 74, height: 74)
+                    .scaleEffect(arrived ? 1 : 0.5)
+                Text("\(total)")
+                    .font(.system(.title2, design: .serif).weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .opacity(arrived ? 1 : 0)
             }
-            .padding(.vertical, 32)
+            .padding(.vertical, 34)
 
             Text("Keep tending them and a self takes shape — one you grow, not one you pose for.")
                 .font(.footnote).foregroundStyle(.secondary)
@@ -134,8 +139,8 @@ struct OnboardingView: View {
                     .foregroundStyle(.white)
             }
             .padding(.horizontal, 26).padding(.bottom, 30)
-            .opacity(shown >= axes.count ? 1 : 0)
-            .animation(.easeIn(duration: 0.4), value: shown)
+            .opacity(arrived ? 1 : 0)
+            .animation(.easeIn(duration: 0.4), value: arrived)
         }
     }
 }
@@ -144,7 +149,6 @@ struct OnboardingView: View {
 private struct CategoryField: View {
     let title: String
     let example: String
-    let axis: Axis
     @Binding var items: [String]
     @State private var draft = ""
     @FocusState private var focused: Bool
@@ -152,11 +156,11 @@ private struct CategoryField: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Circle().fill(axis.color).frame(width: 8, height: 8)
                 Text(title).font(.subheadline.weight(.medium))
                 Spacer()
                 if !items.isEmpty {
-                    Text("\(items.count)").font(.caption.weight(.medium)).foregroundStyle(axis.color)
+                    Text("\(items.count)").font(.caption.weight(.medium))
+                        .foregroundStyle(Color.accentColor)
                 }
             }
             if !items.isEmpty {
@@ -172,7 +176,7 @@ private struct CategoryField: View {
                 .padding(12)
                 .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 11))
                 .overlay(RoundedRectangle(cornerRadius: 11).stroke(
-                    focused ? axis.color.opacity(0.6) : Color.secondary.opacity(0.15), lineWidth: 1))
+                    focused ? Color.accentColor.opacity(0.6) : Color.secondary.opacity(0.15), lineWidth: 1))
         }
     }
 
@@ -193,7 +197,7 @@ private struct CategoryField: View {
             .buttonStyle(.plain).foregroundStyle(.secondary)
         }
         .padding(.leading, 12).padding(.trailing, 8).padding(.vertical, 7)
-        .background(axis.color.opacity(0.14), in: Capsule())
+        .background(Color.accentColor.opacity(0.14), in: Capsule())
     }
 }
 
