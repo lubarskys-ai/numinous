@@ -16,6 +16,7 @@ struct NotesView: View {
     @State private var importMessage: String?
     @State private var path: [UUID] = []
     @State private var nudge: AppModel.ReconnectPrompt?   // gentle "near an overdue friend" prompt
+    @State private var gameNudge: AppModel.ReconnectPrompt?   // "their team plays tonight"
     @State private var showReview = false
     @State private var reviewDue = false
 
@@ -80,14 +81,19 @@ struct NotesView: View {
     }
 
     /// Ask (gently, throttled) whether an overdue friend is near you right now.
+    ///
+    /// Only one card at a time, and proximity outranks a fixture: standing near someone is the
+    /// rarer event and the harder one to act on later. The game will still be there tomorrow.
     private func refreshNudge() async {
         guard nudge == nil else { return }
-        if let p = await model.nearbyOverduePrompt() { withAnimation { nudge = p } }
+        if let p = await model.nearbyOverduePrompt() { withAnimation { nudge = p }; return }
+        guard gameNudge == nil else { return }
+        if let g = await model.gameDayPrompt() { withAnimation { gameNudge = g } }
     }
 
     private func dismissNudge(_ p: AppModel.ReconnectPrompt) {
         model.recordNudged(p.id)
-        withAnimation { nudge = nil }
+        withAnimation { nudge = nil; gameNudge = nil }
     }
 
     @ViewBuilder
@@ -132,6 +138,8 @@ struct NotesView: View {
     private var nudgeBanner: some View {
         if let nudge, searchText.trimmingCharacters(in: .whitespaces).isEmpty {
             nudgeCard(nudge).padding(.horizontal).padding(.top, 8)
+        } else if let gameNudge, searchText.trimmingCharacters(in: .whitespaces).isEmpty {
+            gameCard(gameNudge).padding(.horizontal).padding(.top, 8)
         }
     }
 
@@ -165,6 +173,32 @@ struct NotesView: View {
         .padding(14)
         .background(Color.pink.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.pink.opacity(0.25)))
+        .contentShape(Rectangle())
+        .onTapGesture { let id = p.id; dismissNudge(p); path.append(id) }
+        .transition(.opacity.combined(with: .move(edge: .top)))
+    }
+
+    /// Their team plays. Tap to open their note; ✕ to leave it.
+    ///
+    /// The whole point is the first line: it hands you the message. "How are you" is hard to
+    /// send to somebody you have not spoken to in a while, and "big game tonight" is not.
+    private func gameCard(_ p: AppModel.ReconnectPrompt) -> some View {
+        HStack(spacing: 11) {
+            Image(systemName: "sportscourt.fill").foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(p.name)'s team plays").font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                Text(p.place).font(.caption).foregroundStyle(.primary)
+                Text(p.reason).font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button { dismissNudge(p) } label: {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+        .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.blue.opacity(0.25)))
         .contentShape(Rectangle())
         .onTapGesture { let id = p.id; dismissNudge(p); path.append(id) }
         .transition(.opacity.combined(with: .move(edge: .top)))

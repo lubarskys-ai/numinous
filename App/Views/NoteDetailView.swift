@@ -29,6 +29,7 @@ struct NoteDetailView: View {
     @State private var editingPlace: PlaceRef?
     @State private var photoViewerData: PhotoViewerData?   // attached photos opened full-screen
     @State private var foundLocations: [AppModel.NearbyPlace] = []   // places resolved from the note's links
+    @State private var editingTeam: TeamEdit?                        // which of a person's teams is being typed
     /// Drives the results sheet by VALUE. With `.sheet(isPresented:)` the content closure can
     /// capture state from before the results landed — the sheet then shows nothing and only
     /// works on a second press. `.sheet(item:)` is built from the results themselves.
@@ -112,6 +113,27 @@ struct NoteDetailView: View {
                     // Store the chosen place DIRECTLY on this note (no hub); the note is the pin.
                     model.addPlace(note.id, name: r.name, latitude: r.latitude, longitude: r.longitude)
                 }
+            }
+            .alert(editingTeam?.college == true ? "College team" : "Pro team",
+                   isPresented: Binding(get: { editingTeam != nil },
+                                        set: { if !$0 { editingTeam = nil } })) {
+                TextField(editingTeam?.college == true ? "Alabama, Michigan, Duke…"
+                                                       : "Chicago Bears, Yankees, Arsenal…",
+                          text: Binding(get: { editingTeam?.draft ?? "" },
+                                        set: { editingTeam?.draft = $0 }))
+                Button("Cancel", role: .cancel) { editingTeam = nil }
+                if model.team(note, college: editingTeam?.college ?? false) != nil {
+                    Button("Clear", role: .destructive) {
+                        if let e = editingTeam { model.setTeam(e.id, college: e.college, to: nil) }
+                        editingTeam = nil
+                    }
+                }
+                Button("Save") {
+                    if let e = editingTeam { model.setTeam(e.id, college: e.college, to: e.draft) }
+                    editingTeam = nil
+                }
+            } message: {
+                Text("A city, a nickname or the full name all work. Numinous will let you know when they play.")
             }
             .alert("New genre", isPresented: Binding(get: { newGenreForNote != nil }, set: { if !$0 { newGenreForNote = nil } })) {
                 TextField("Genre — e.g. Thriller", text: $newGenreDraft)
@@ -268,6 +290,13 @@ struct NoteDetailView: View {
             // Pick a genre for a book (existing or new) — groups it under books/genre/…
             if AppModel.isBookFolder(note.folderName) {
                 genreRow(note)
+            }
+            // Who they support. See gameDayPrompt(): the app watches for the night their team
+            // plays and says so, because "big game tonight" is an easy message to send and
+            // "how are you" is a hard one.
+            if Folder.normalize(note.folderName) == "people" {
+                teamRow(note, college: false)
+                teamRow(note, college: true)
             }
             // Date the entry actually belongs to — change it to backdate a diary entry so
             // it sorts under the day it happened, not the day you typed it. Shown for
@@ -578,6 +607,34 @@ struct NoteDetailView: View {
                 Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.tertiary)
             }
         }
+    }
+
+    private struct TeamEdit: Identifiable {
+        let id: UUID; let college: Bool; var draft: String
+    }
+
+    /// A person's team, typed once and then watched.
+    ///
+    /// Forgiving on purpose, because nobody writes a team the way a database does: a city
+    /// ("Chicago"), a nickname ("Bears"), the full name, or a college on its own all resolve.
+    /// A city that fields four teams matches all four, and the soonest game wins — which is the
+    /// right answer to "is there a game on".
+    @ViewBuilder private func teamRow(_ note: Note, college: Bool) -> some View {
+        let current = model.team(note, college: college)
+        Button {
+            editingTeam = TeamEdit(id: note.id, college: college, draft: current ?? "")
+        } label: {
+            HStack(spacing: 8) {
+                Label(college ? "College team" : "Pro team",
+                      systemImage: college ? "graduationcap" : "sportscourt")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                Spacer()
+                Text(current ?? "Add…").foregroundStyle(current == nil ? .secondary : .primary)
+                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     /// Editing the substance of a note happens in the full-screen composer (roomy editor +

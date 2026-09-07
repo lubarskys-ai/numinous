@@ -1282,6 +1282,82 @@ final class AppModel: ObservableObject {
         return "\(days / 30)mo out of touch"
     }
 
+    // MARK: - Game day (a reason to call somebody, supplied by their team)
+
+    /// The detail keys a person's teams live under. Free-form details already carry everything
+    /// else about a person, so this needed no new storage — just two agreed names.
+    static let proTeamKey = "Pro team"
+    static let collegeTeamKey = "College team"
+
+    func team(_ note: Note, college: Bool) -> String? {
+        let key = Self.norm(college ? Self.collegeTeamKey : Self.proTeamKey)
+        return note.details.first { Self.norm($0.key) == key }?.value
+    }
+
+    func setTeam(_ id: UUID, college: Bool, to value: String?) {
+        guard let i = notes.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = value?.trimmingCharacters(in: .whitespaces)
+        setDetail(&notes[i], key: college ? Self.collegeTeamKey : Self.proTeamKey,
+                  value: (trimmed?.isEmpty ?? true) ? nil : trimmed)
+        persist()
+    }
+
+    /// Everyone whose note names a team.
+    func peopleWithTeams() -> [(id: UUID, name: String, pro: String?, college: String?)] {
+        notes.compactMap { n in
+            let f = Folder.normalize(n.folderName)
+            guard f == "people" || f == "contacts" else { return nil }
+            let pro = team(n, college: false), college = team(n, college: true)
+            guard pro != nil || college != nil else { return nil }
+            return (n.id, n.displayName, pro, college)
+        }
+    }
+
+    private var lastGameCheck = Date.distantPast
+
+    /// "Alabama vs Kentucky, Saturday" — a friend whose team plays in the next few days.
+    ///
+    /// Deliberately NOT gated on being out of touch, unlike the nearby nudge. Forty-five days of
+    /// silence is what makes proximity worth mentioning; a game is worth mentioning to somebody
+    /// you spoke to on Tuesday, and that is most of its value — it is a reason to talk that
+    /// isn't "we should catch up".
+    ///
+    /// The same four-day quiet window applies, so a season ticket holder is not a daily alarm,
+    /// and the whole check runs at most once every six hours.
+    func gameDayPrompt() async -> ReconnectPrompt? {
+        guard Date().timeIntervalSince(lastGameCheck) > 6 * 3600 else { return nil }
+        lastGameCheck = Date()
+
+        let cal = Calendar.current
+        let nudged = (UserDefaults.standard.dictionary(forKey: Self.nudgeDatesKey) as? [String: Date]) ?? [:]
+        let quietUntil = cal.date(byAdding: .day, value: -4, to: Date()) ?? .distantPast
+
+        var best: (prompt: ReconnectPrompt, date: Date)?
+        for person in peopleWithTeams() {
+            guard (nudged[person.id.uuidString] ?? .distantPast) < quietUntil else { continue }
+            for (query, college) in [(person.pro, false), (person.college, true)] {
+                guard let query else { continue }
+                guard let game = await SportsService.nextGame(for: query, college: college) else { continue }
+                if let best, best.date <= game.date { continue }
+                best = (ReconnectPrompt(id: person.id, name: person.name,
+                                        place: game.line,
+                                        reason: Self.gameWhen(game.date) + " · " + game.league),
+                        game.date)
+            }
+        }
+        return best?.prompt
+    }
+
+    /// "Tonight", "Tomorrow", "Saturday" — the way somebody would say it, because "in 2 days"
+    /// is not how anybody mentions a match.
+    static func gameWhen(_ date: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(date) { return date.timeIntervalSinceNow < 4 * 3600 ? "Starting soon" : "Tonight" }
+        if cal.isDateInTomorrow(date) { return "Tomorrow" }
+        let f = DateFormatter(); f.dateFormat = "EEEE"
+        return f.string(from: date)
+    }
+
     /// Remember we nudged (or you dismissed) this person, so we don't nag again for a few days.
     func recordNudged(_ id: UUID) {
         var dates = (UserDefaults.standard.dictionary(forKey: Self.nudgeDatesKey) as? [String: Date]) ?? [:]
