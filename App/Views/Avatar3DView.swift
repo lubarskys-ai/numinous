@@ -1140,13 +1140,30 @@ struct Avatar3DView: UIViewRepresentable {
                 fx[id] = dx0 * s; fy[id] = dy0 * s; fz[id] = dz0 * s
             }
         }
-        // Unlinked files sit on a surrounding shell (fibonacci sphere).
+        // UNLINKED NOTES ARE NOT A BOUNDARY.
+        //
+        // They used to be placed on a fibonacci sphere at a fixed radius of 4 — every unconnected
+        // note the same distance from the middle, in every direction. That is a globe with dots
+        // on its surface, and it enclosed the graph inside it: the connections were straightened
+        // and the clusters unbound, and the thing was still sitting in a bubble, because the
+        // bubble was made of the notes that had nothing to do with any of it.
+        //
+        // A note with no connections is not the edge of your life. It is a loose piece of it. So
+        // they scatter at varied distances, starting outside the connected web and thinning out
+        // from there, at angles that owe nothing to each other — never twice at the same radius,
+        // which is the only thing that was making a surface. Flattened in depth as well, so they
+        // read as a field the graph is lying in rather than a shell around it.
         let unlinked = ids.filter { !linkedSet.contains($0) }
         let golden = Double.pi * (1 + 5.0.squareRoot())
         for (i, id) in unlinked.enumerated() {
             let t = (Double(i) + 0.5) / Double(max(1, unlinked.count))
-            let phi = acos(1 - 2 * t), theta = golden * Double(i)
-            fx[id] = 4.0 * sin(phi) * cos(theta); fy[id] = 4.0 * cos(phi); fz[id] = 4.0 * sin(phi) * sin(theta)
+            let theta = golden * Double(i) + hrand(i, 71) * 0.9
+            // sqrt keeps the density even as the field widens instead of piling up at the rim,
+            // and the jitter means no two sit on the same circle.
+            let r = 3.4 + 6.2 * (t.squareRoot() + (hrand(i, 72) - 0.5) * 0.28)
+            fx[id] = r * cos(theta)
+            fy[id] = r * sin(theta) * 0.86
+            fz[id] = (hrand(i, 73) - 0.5) * 2.2
         }
         // Keep what was worked out, and prefer what was worked out before.
         if reuse == nil {
