@@ -92,16 +92,16 @@ struct NoteDetailView: View {
             }
             .navigationTitle(note.displayName)
             .navigationBarTitleDisplayMode(.inline)
-            .alert(AppModel.isBookFolder(note.folderName) ? "Where did you read it?" : "Add a place",
+            .alert(AppModel.isBookFolder(note.folderName) ? "Where does it take you?" : "Add a place",
                    isPresented: $editingLocation) {
-                TextField(AppModel.isBookFolder(note.folderName) ? "A café, a beach, a train…"
+                TextField(AppModel.isBookFolder(note.folderName) ? "Rome, the Congo, Highway 61…"
                                                                 : "Where were you?",
                           text: $locationDraft)
                 Button("Cancel", role: .cancel) {}
                 Button("Add") { addTypedPlace(to: note.id, name: locationDraft) }
             } message: {
                 Text(AppModel.isBookFolder(note.folderName)
-                     ? "Where you were while you read it. You can add more than one."
+                     ? "Somewhere this book is set, or keeps going back to. Add as many as it has."
                      : "Add a place to this note. You can add more than one.")
             }
             .sheet(item: $editingPlace) { ref in
@@ -293,13 +293,17 @@ struct NoteDetailView: View {
                 )
                 .font(.subheadline)
             }
-            // BOOKS GET A PLACE TOO — where you read it. It is often the most memorable thing
-            // about a book and it was the one kind of note forbidden from recording it.
+            // BOOKS GET PLACES TOO — the ones the book itself goes to. Where it is set, where
+            // it keeps returning, the city it argues with. Not where you happened to read it:
+            // that is a fact about an afternoon, while this is a fact about the book, and it is
+            // the one that is still worth something years later when you arrive there.
+            //
+            // Several, therefore, and usually several: a novel can cross a continent. The "Find
+            // locations" button on the notes below reads them straight out of your highlights.
             //
             // No travel value comes of it, and that is deliberate rather than an omission:
-            // travelReading() only scores place-like folders, so a book read on a beach in
-            // Thailand does not award the journey a second time. The trip was already logged as
-            // a trip. This just remembers where you were while you read it.
+            // travelReading() only scores place-like folders, so a book that is set in Patagonia
+            // does not award you a journey you never made.
             locationRows(note)
             // Every book — however it was imported (Readwise or the Obsidian vault) — gets the
             // read toggle. A book grows Mind only once you finish it.
@@ -449,7 +453,7 @@ struct NoteDetailView: View {
             }
         } label: {
             Label(AppModel.isBookFolder(note.folderName)
-                    ? (note.allPlaces.isEmpty ? "Where did you read it?" : "Add another place")
+                    ? (note.allPlaces.isEmpty ? "Where does it take you?" : "Add another place")
                     : (note.allPlaces.isEmpty ? "Add location" : "Add another location"),
                   systemImage: "plus.circle")
                 .foregroundStyle(.tint)

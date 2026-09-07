@@ -637,17 +637,19 @@ final class AppModel: ObservableObject {
         cachedCoveredGround = ground
     }
 
-    /// The books you read around here, nearest first.
+    /// The books that take you here, nearest first.
     ///
-    /// The reverse of putting a place on a book, and the reason for doing it: arriving somewhere
-    /// and remembering what you read the last time you were here. Reads off `mappablePlaces`,
-    /// which already holds every note with a coordinate, so this costs a walk of the pins rather
-    /// than of the vault.
+    /// A place on a book is somewhere the BOOK goes — where it is set, or a place it keeps
+    /// returning to — not where you happened to read it. That is the version worth having: you
+    /// arrive somewhere and the shelf tells you what it already knows about it. Reads off
+    /// `mappablePlaces`, which already holds every note with a coordinate, so this costs a walk
+    /// of the pins rather than of the vault.
     ///
-    /// A book can carry more than one place — read on the flight out and finished by the pool —
-    /// so only its nearest is returned, and each book appears once.
-    func booksRead(near lat: Double, _ lon: Double,
-                   withinKm radius: Double) -> [(place: MappablePlace, distanceKm: Double)] {
+    /// One book carries many places, which is the whole point of it — a novel can cross a
+    /// continent. Only its nearest is returned, so a book appears once rather than three times
+    /// at three distances.
+    func booksAbout(near lat: Double, _ lon: Double,
+                    withinKm radius: Double) -> [(place: MappablePlace, distanceKm: Double)] {
         var best: [UUID: (MappablePlace, Double)] = [:]
         for p in mappablePlaces where Self.isBookFolder(p.folderName) {
             let d = Self.distanceKm(lat, lon, p.latitude, p.longitude)

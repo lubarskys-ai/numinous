@@ -45,7 +45,7 @@ struct MapView: View {
     @State private var locationDenied = false
     @State private var visibleRegion: MKCoordinateRegion?
     @State private var stacked: Pin?          // a tapped marker holding several notes
-    @State private var showingRead = false    // the "books you read around here" list
+    @State private var showingRead = false    // the "books that take you here" list
 
     private struct NoteRef: Identifiable { let id: UUID }
 
@@ -193,7 +193,7 @@ struct MapView: View {
                             }
                         }
                     }
-                    .navigationTitle("Read around here")
+                    .navigationTitle("Books about here")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
@@ -261,19 +261,19 @@ struct MapView: View {
 
     /// When a search has landed on a place, offer to attach it to a note — either as its
     /// own place note or onto today's diary entry.
-    /// WHAT YOU READ HERE. The point of letting a book carry a place: you go somewhere and want
-    /// to know what you read the last time you were here. It follows whatever is on screen — a
-    /// place you searched, one you panned to, or your own position after tapping locate — so
-    /// there is nothing to ask for and nothing to set. It appears only when there is something
-    /// to say, and is silent everywhere you have never read anything.
+    /// WHAT THIS PLACE HAS BEEN WRITTEN ABOUT. The point of letting a book carry places: you
+    /// arrive somewhere and the shelf tells you what it already knows about it — the novel set
+    /// in this city, the history of this coast. It follows whatever is on screen — a place you
+    /// searched, one you panned to, or your own position after tapping locate — so there is
+    /// nothing to ask for and nothing to set. It appears only when there is something to say.
     private var booksAround: [(place: AppModel.MappablePlace, distanceKm: Double)] {
         guard let r = visibleRegion else { return [] }
         // Half the shorter side of what is on screen, so "around here" means what you can see.
         // Clamped: a world view should not claim a book on another continent is nearby, and a
         // street view should still reach the next block.
         let span = min(r.span.latitudeDelta, r.span.longitudeDelta) * 111.0 / 2
-        return model.booksRead(near: r.center.latitude, r.center.longitude,
-                               withinKm: min(max(span, 1.5), 120))
+        return model.booksAbout(near: r.center.latitude, r.center.longitude,
+                                withinKm: min(max(span, 1.5), 120))
     }
 
     @ViewBuilder
@@ -282,8 +282,8 @@ struct MapView: View {
         if !found.isEmpty {
             Button { showingRead = true } label: {
                 Label(found.count == 1
-                        ? "You read “\(found[0].place.title)” around here"
-                        : "\(found.count) books you read around here",
+                        ? "“\(found[0].place.title)” takes you here"
+                        : "\(found.count) books take you here",
                       systemImage: "book.closed")
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
