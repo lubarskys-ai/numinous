@@ -72,11 +72,57 @@ enum SportsService {
         return soonest
     }
 
+    // MARK: - The list you choose from
+
+    /// One choosable team. `league` is what the picker groups by; `name` is what gets stored,
+    /// and is exactly a string `nextGame(for:)` will resolve, so choosing from the list can
+    /// never produce a team that then fails to be found.
+    struct TeamOption: Identifiable, Hashable, Comparable {
+        let id: String          // league path + team id, unique across leagues
+        let name: String
+        let league: String
+        static func < (a: TeamOption, b: TeamOption) -> Bool { a.name < b.name }
+    }
+
+    /// Every team you might support, for the picker.
+    ///
+    /// A COLLEGE IS LISTED AS A SCHOOL, not as a team. Somebody supports Alabama, not "Alabama
+    /// Crimson Tide" as distinct from "Alabama Crimson Tide" the basketball side — so the two
+    /// college leagues are folded into one list of schools, and the stored name resolves in
+    /// both. Whichever plays first is the one you hear about.
+    ///
+    /// Everything is listed, including the small schools. Searching makes the size free, and
+    /// leaving out somebody's alma mater because it plays in Division III would be worse than
+    /// a long list nobody has to read.
+    static func options(college: Bool) async -> [TeamOption] {
+        var seen = Set<String>()
+        var out: [TeamOption] = []
+        for league in (college ? collegeLeagues : proLeagues) {
+            for (id, team) in await rawTeams(in: league.path) {
+                let name = college ? team.location : team.display
+                guard !name.isEmpty else { continue }
+                // ESPN NUMBERS TEAMS PER LEAGUE, so ids collide across them — the Bears are 3
+                // and so is somebody in the NBA. Keying the dedupe on the bare id quietly threw
+                // away most of four leagues: searching "Chicago" returned the Bears and the Fire
+                // and no Bulls, Cubs, White Sox or Blackhawks. The league is part of the key.
+                let key = college ? normalize(name) : "\(league.path)|\(id)"
+                guard seen.insert(key).inserted else { continue }
+                out.append(TeamOption(id: "\(league.path)|\(id)", name: name,
+                                      league: college ? "Colleges" : league.name))
+            }
+        }
+        return out.sorted()
+    }
+
     // MARK: - Teams
 
     private struct Team { let id: String; let name: String }
 
-    private static func team(matching q: String, in leaguePath: String) async -> Team? {
+    private struct RawTeam { let display: String; let location: String; let names: [String] }
+
+    /// A league's teams, straight off the cached JSON. One reader for both the picker and the
+    /// matcher, so what you can choose and what can be resolved are the same set by construction.
+    private static func rawTeams(in leaguePath: String) async -> [(String, RawTeam)] {
         guard let data = await cached(
             url: "https://site.api.espn.com/apis/site/v2/sports/\(leaguePath)/teams?limit=1000",
             as: "teams-\(leaguePath.replacingOccurrences(of: "/", with: "-"))",
@@ -84,22 +130,28 @@ enum SportsService {
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let sports = root["sports"] as? [[String: Any]],
               let leagues = sports.first?["leagues"] as? [[String: Any]],
-              let entries = leagues.first?["teams"] as? [[String: Any]] else { return nil }
+              let entries = leagues.first?["teams"] as? [[String: Any]] else { return [] }
 
+        return entries.compactMap { entry in
+            guard let t = entry["team"] as? [String: Any], let id = t["id"] as? String else { return nil }
+            let display = (t["displayName"] as? String) ?? ""
+            let location = (t["location"] as? String) ?? ""
+            let names = [display, (t["name"] as? String) ?? "", location,
+                         (t["shortDisplayName"] as? String) ?? "",
+                         (t["abbreviation"] as? String) ?? ""].map(normalize)
+            return (id, RawTeam(display: display, location: location, names: names))
+        }
+    }
+
+    private static func team(matching q: String, in leaguePath: String) async -> Team? {
         // An exact hit on any of a team's names beats a partial one anywhere. Without that,
         // "Chicago" matched "Chicago Bears" and also, by substring, nothing sensible at all —
         // and a typed "Jets" would have taken whichever team happened to be listed first.
         var partial: Team?
-        for entry in entries {
-            guard let t = entry["team"] as? [String: Any],
-                  let id = t["id"] as? String else { continue }
-            let display = (t["displayName"] as? String) ?? ""
-            let names = [display, (t["name"] as? String) ?? "", (t["location"] as? String) ?? "",
-                         (t["shortDisplayName"] as? String) ?? "",
-                         (t["abbreviation"] as? String) ?? ""].map(normalize)
-            if names.contains(q) { return Team(id: id, name: display) }
-            if partial == nil, names.contains(where: { !$0.isEmpty && $0.contains(q) }) {
-                partial = Team(id: id, name: display)
+        for (id, t) in await rawTeams(in: leaguePath) {
+            if t.names.contains(q) { return Team(id: id, name: t.display) }
+            if partial == nil, t.names.contains(where: { !$0.isEmpty && $0.contains(q) }) {
+                partial = Team(id: id, name: t.display)
             }
         }
         return partial

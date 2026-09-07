@@ -1286,29 +1286,39 @@ final class AppModel: ObservableObject {
 
     /// The detail keys a person's teams live under. Free-form details already carry everything
     /// else about a person, so this needed no new storage — just two agreed names.
-    static let proTeamKey = "Pro team"
-    static let collegeTeamKey = "College team"
+    static let proTeamKey = "Pro teams"
+    static let collegeTeamKey = "Colleges"
 
-    func team(_ note: Note, college: Bool) -> String? {
-        let key = Self.norm(college ? Self.collegeTeamKey : Self.proTeamKey)
-        return note.details.first { Self.norm($0.key) == key }?.value
+    /// SEVERAL, BECAUSE PEOPLE SUPPORT SEVERAL. A friend has a football team and a baseball
+    /// team and the school they went to, and asking them to pick one favourite is a worse
+    /// question than the app needs to ask. Stored as one detail line, semicolon-separated, so
+    /// the vault stays plain text and a person's note still reads like a sentence.
+    static func splitTeams(_ raw: String?) -> [String] {
+        (raw ?? "").split(separator: ";")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
     }
 
-    func setTeam(_ id: UUID, college: Bool, to value: String?) {
+    func teams(_ note: Note, college: Bool) -> [String] {
+        let key = Self.norm(college ? Self.collegeTeamKey : Self.proTeamKey)
+        return Self.splitTeams(note.details.first { Self.norm($0.key) == key }?.value)
+    }
+
+    func setTeams(_ id: UUID, college: Bool, to values: [String]) {
         guard let i = notes.firstIndex(where: { $0.id == id }) else { return }
-        let trimmed = value?.trimmingCharacters(in: .whitespaces)
+        let cleaned = values.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         setDetail(&notes[i], key: college ? Self.collegeTeamKey : Self.proTeamKey,
-                  value: (trimmed?.isEmpty ?? true) ? nil : trimmed)
+                  value: cleaned.isEmpty ? nil : cleaned.joined(separator: "; "))
         persist()
     }
 
     /// Everyone whose note names a team.
-    func peopleWithTeams() -> [(id: UUID, name: String, pro: String?, college: String?)] {
+    func peopleWithTeams() -> [(id: UUID, name: String, pro: [String], college: [String])] {
         notes.compactMap { n in
             let f = Folder.normalize(n.folderName)
             guard f == "people" || f == "contacts" else { return nil }
-            let pro = team(n, college: false), college = team(n, college: true)
-            guard pro != nil || college != nil else { return nil }
+            let pro = teams(n, college: false), college = teams(n, college: true)
+            guard !pro.isEmpty || !college.isEmpty else { return nil }
             return (n.id, n.displayName, pro, college)
         }
     }
@@ -1335,8 +1345,8 @@ final class AppModel: ObservableObject {
         var best: (prompt: ReconnectPrompt, date: Date)?
         for person in peopleWithTeams() {
             guard (nudged[person.id.uuidString] ?? .distantPast) < quietUntil else { continue }
-            for (query, college) in [(person.pro, false), (person.college, true)] {
-                guard let query else { continue }
+            let queries = person.pro.map { ($0, false) } + person.college.map { ($0, true) }
+            for (query, college) in queries {
                 guard let game = await SportsService.nextGame(for: query, college: college) else { continue }
                 if let best, best.date <= game.date { continue }
                 best = (ReconnectPrompt(id: person.id, name: person.name,
