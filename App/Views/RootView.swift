@@ -86,7 +86,13 @@ struct RootView: View {
         .onChange(of: model.avatarFocus) { if $0 != nil { avatarMode = .graph; showAvatar = true } }
         // Refresh already-connected sources (contacts, Readwise) when returning to the app.
         .onChange(of: scenePhase) {
-            if $0 == .active { Task { await model.autoSync() } }
+            if $0 == .active {
+                Task { await model.autoSync() }
+                // Top the notification queue back up. iOS holds only so many pending alerts, and
+                // the app cannot wake itself to look at fixtures, so every time you open it is
+                // the chance to schedule the next week.
+                Task { await model.refreshGameNotifications() }
+            }
             else if $0 == .background { model.flush() }   // truly leaving → force-write pending save
         }
         .onChange(of: quickCapture.requested) { if $0 { showCapture = true; quickCapture.requested = false } }

@@ -917,6 +917,16 @@ struct AxisSettingsView: View {
     @State private var homeDraft = ""
     @State private var showReadwise = false
     @State private var showCalendarSubscribe = false
+    /// @AppStorage, NOT a @State copy of the stored value.
+    ///
+    /// Two attempts failed here and both for the same reason: UserDefaults publishes nothing, so
+    /// a switch bound to a plain computed property over it flips in memory and never redraws,
+    /// and a @State mirror gets re-initialised from the old value whenever this sheet rebuilds.
+    /// On screen both look identical and both look like a broken control — the switch simply
+    /// will not move, with no error anywhere. @AppStorage is the wrapper that both stores and
+    /// publishes, which is the whole problem in one line.
+    @AppStorage(GameNotifier.enabledKey) private var gameAlerts = false
+    @State private var alertsDenied = false
 
     /// Folders offered as the landing spot, with the current choice always present even if
     /// that folder has since been renamed away.
@@ -930,9 +940,52 @@ struct AxisSettingsView: View {
     }
     @StateObject private var locator = LocationService()
 
+    /// The only alert this app sends, and the only one it should.
+    ///
+    /// THE SWITCH RECORDS WHAT YOU WANT, AND NEVER ARGUES WITH YOU. The first version asked iOS
+    /// for permission and, if it was refused, flipped itself back off — which on screen is a
+    /// switch that will not move, the single most broken-feeling thing a setting can do. Your
+    /// preference is kept either way; when iOS is the thing saying no, the page says so and
+    /// offers the way to fix it, rather than silently undoing your tap.
+    @ViewBuilder private var gameAlertsSection: some View {
+        Section {
+            Toggle(isOn: $gameAlerts) {
+                Label("Tell me when their team plays", systemImage: "bell.badge")
+            }
+            if gameAlerts, alertsDenied {
+                Button {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    Label("Turn on notifications in Settings", systemImage: "arrow.up.forward.app")
+                }
+            }
+        } footer: {
+            Text(gameAlerts && alertsDenied
+                 ? "Notifications are switched off for Numinous in iOS Settings, so nothing can be sent until they're on."
+                 : "Two hours before kickoff, never before 9am, and at most one a day. Add a team to somebody in their note.")
+        }
+    }
+
+    /// NOT ATTACHED TO THE SECTION. A modifier on a `Section` inside a `Form` wraps it in
+    /// something the form does not lay out as a section any more, and the switch inside it
+    /// stopped taking taps — it drew perfectly and did nothing, which cost three rewrites of
+    /// code that was never the problem. Modifiers belong on the Form.
+    private func syncGameAlerts() async {
+        guard gameAlerts else {
+            alertsDenied = false
+            await GameNotifier.cancelAll()
+            return
+        }
+        alertsDenied = await GameNotifier.requestPermission() == false
+        await model.refreshGameNotifications()
+    }
+
     var body: some View {
         NavigationStack {
             Form {
+                gameAlertsSection
                 Section {
                     Button { syncContacts() } label: {
                         Label("Sync contacts", systemImage: "person.crop.circle.badge.plus")
@@ -1053,6 +1106,7 @@ struct AxisSettingsView: View {
                     Text("Credits")
                 }
             }
+            .task(id: gameAlerts) { await syncGameAlerts() }
             .navigationTitle("Setup")
             .sheet(isPresented: $showReadwise) { ReadwiseConnectView() }
             .sheet(isPresented: $showCalendarSubscribe) { CalendarSubscribeSheet() }

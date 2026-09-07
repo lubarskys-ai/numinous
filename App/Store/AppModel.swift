@@ -1310,6 +1310,9 @@ final class AppModel: ObservableObject {
         setDetail(&notes[i], key: college ? Self.collegeTeamKey : Self.proTeamKey,
                   value: cleaned.isEmpty ? nil : cleaned.joined(separator: "; "))
         persist()
+        // The queue is rebuilt the moment a team changes, so a team added today produces an
+        // alert for Saturday without waiting for the app to be opened again.
+        Task { await refreshGameNotifications() }
     }
 
     /// Everyone whose note names a team.
@@ -1356,6 +1359,32 @@ final class AppModel: ObservableObject {
             }
         }
         return best?.prompt
+    }
+
+    /// Every upcoming game across everybody who has a team, for the notification scheduler.
+    ///
+    /// A wider net than gameDayPrompt(), which wants the single best card to show right now.
+    /// This wants everything worth an alert over the next week, because the app cannot count on
+    /// being opened again before Saturday — a notification is only useful if it was scheduled
+    /// while somebody happened to be looking at their notes on Tuesday.
+    func upcomingGames(withinDays days: Int = 7)
+    async -> [(personID: UUID, name: String, line: String, league: String, kickoff: Date)] {
+        var out: [(personID: UUID, name: String, line: String, league: String, kickoff: Date)] = []
+        for person in peopleWithTeams() {
+            for (query, college) in person.pro.map({ ($0, false) }) + person.college.map({ ($0, true) }) {
+                guard let game = await SportsService.nextGame(for: query, college: college,
+                                                              withinDays: days) else { continue }
+                out.append((person.id, person.name, game.line, game.league, game.date))
+            }
+        }
+        return out
+    }
+
+    /// Ask the notifier to rebuild its queue from what we know now. Cheap and idempotent: the
+    /// fixtures are cached, so this is a walk of the people who have teams and nothing more.
+    func refreshGameNotifications() async {
+        guard GameNotifier.enabled else { await GameNotifier.cancelAll(); return }
+        await GameNotifier.reschedule(await upcomingGames())
     }
 
     /// "Tonight", "Tomorrow", "Saturday" — the way somebody would say it, because "in 2 days"
