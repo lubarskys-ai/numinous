@@ -61,7 +61,8 @@ struct AvatarView: View {
                     PhotoAvatarView(person: photo.person, anchors: photo.anchors,
                                     maturity: { model.axisMaturity($0) },
                                     spiritColor: model.axis(id: "spirit")?.color ?? .purple,
-                                    introduce: justChosen || replays > 0)
+                                    introduce: justChosen,
+                                    onIntroDone: { justChosen = false })
                         // A new identity restarts the view, which is what re-runs the intro.
                         .id(replays)
                 } else {
@@ -120,7 +121,7 @@ struct AvatarView: View {
                                 // Handy while the timing is still being argued about, and
                                 // worth keeping afterwards: it is a nice thing to watch.
                                 Button("Play the erasure again", systemImage: "arrow.counterclockwise") {
-                                    replays += 1
+                                    justChosen = true; replays += 1
                                 }
                                 Button("Back to the drawn figure", systemImage: "figure.stand",
                                        role: .destructive) {
@@ -150,7 +151,13 @@ struct AvatarView: View {
                 if photo == nil { photo = PhotoAvatar.stored() }
             }
             .sheet(isPresented: $pickingPhoto) {
-                PhotoAvatarPicker { photo = PhotoAvatar.stored(); justChosen = true }
+                // A NEW PHOTOGRAPH, NOT A NEW LIFE. The identity bump gives the erasure a fresh
+                // view to play in; the stage it comes back to is read from the vault as always,
+                // so choosing a different picture of yourself changes the picture and nothing
+                // else. `introduce` used to be `justChosen || replays > 0`, and neither of those
+                // was ever set back to false — so after one photo change the erasure replayed on
+                // every visit and the avatar was never seen at its real stage again.
+                PhotoAvatarPicker { photo = PhotoAvatar.stored(); justChosen = true; replays += 1 }
             }
             .onDisappear { model.avatarFocus = nil }   // don't re-focus next time the avatar opens
             // Push within the avatar's own stack rather than a sheet: this view lives

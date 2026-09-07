@@ -19,6 +19,9 @@ struct PhotoAvatarView: View {
     let spiritColor: Color
     /// Play the erasure once, on the way in.
     var introduce: Bool = false
+    /// Called when that erasure has finished and the picture has come back to its real stage,
+    /// so the screen that asked for it can stop asking.
+    var onIntroDone: (() -> Void)? = nil
     /// True while the intro is running, so opacity can behave differently than it does across
     /// the months.
 
@@ -26,9 +29,18 @@ struct PhotoAvatarView: View {
     /// this and the real one, so the picture starts whole and falls to wherever your life has
     /// actually got to.
     @State private var undoing: Double = 0
-    /// True from the moment the dissolve starts and never set back, so the screen HOLDS at
-    /// the emptied photograph rather than snapping to the resting state at the end of it.
+    /// True only while the dissolve is actually playing.
     @State private var running = false
+    /// 0 → 1 as the picture is handed back to where the life has really got to.
+    ///
+    /// CHANGING THE PHOTOGRAPH MUST NOT CHANGE THE STAGE. It never changed the underlying
+    /// numbers — those are read from the vault — but the screen used to hold at the emptied
+    /// photograph for good: `running` was set at the start of the dissolve and never cleared,
+    /// so what you saw after picking a new picture was nothing at all, permanently. Handing it
+    /// straight back was the original problem — the picture came apart beautifully and then a
+    /// ghost of you snapped onto the wall between one frame and the next — so it is handed back
+    /// over a second and a half instead. Nothing is lost and nothing flinches.
+    @State private var handback: Double = 1
 
     // Zoom and move the picture. A photograph chosen for a life is going to be looked at
     // closely — at a face coming back, at whether a hand has sharpened — and a fixed frame
@@ -65,12 +77,20 @@ struct PhotoAvatarView: View {
             undoing = 1 - (t * t * (3 - 2 * t))
             try? await Task.sleep(nanoseconds: step)
         }
-        // FREEZE AT THE FAREST POINT. Handing the screen back to the resting state the instant
-        // the dissolve finished put a faint ghost of you back on the wall between one frame and
-        // the next — the picture came apart beautifully and then flinched. Whatever you have
-        // actually grown belongs to the next time this screen is opened, not to the last
-        // quarter-second of watching yourself go.
         undoing = 0
+
+        // Then back to where the life has actually got to, over a second and a half. The pause
+        // first, so the empty photograph is allowed to land before anything returns to it.
+        try? await Task.sleep(nanoseconds: 700_000_000)
+        running = false
+        let back = 60
+        for frame in 0...back {
+            let t = Double(frame) / Double(back)
+            handback = t * t * (3 - 2 * t)
+            try? await Task.sleep(nanoseconds: 25_000_000)
+        }
+        handback = 1
+        onIntroDone?()
     }
 
     /// What to draw: the real maturity, or the intro's, whichever is further along.
@@ -170,6 +190,7 @@ struct PhotoAvatarView: View {
         .ignoresSafeArea()
         .onAppear {
             guard introduce else { return }
+            handback = 0
             Task { await comeApart() }
         }
     }
@@ -190,10 +211,10 @@ struct PhotoAvatarView: View {
     /// time the coarsening becomes dramatic, and the whole thing reads as a fade with some
     /// texture in it rather than as a picture coming apart.
     private func visible(_ axis: String) -> Double {
-        // The freeze holds the emptied photograph after the dissolve; once it is over, what
-        // shows is simply how far the life has actually got.
+        // Once the dissolve is over, what shows is how far the life has actually got — faded up
+        // rather than snapped on, and at full strength on any ordinary opening of the screen.
         guard running else {
-            return presence(axis == "all" ? wholeLife() : maturity(axis))
+            return presence(axis == "all" ? wholeLife() : maturity(axis)) * handback
         }
         // Zero a little BEFORE the run ends. Fading to nothing exactly at the last frame left
         // a few surviving cells twinkling out one at a time, which read as the effect finishing
