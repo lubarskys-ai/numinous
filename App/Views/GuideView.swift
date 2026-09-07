@@ -18,14 +18,24 @@ struct GuideView: View {
         let body: String
     }
 
-    private let moves: [Step] = [
-        Step(icon: "square.and.pencil", title: "Capture",
-             body: "Note something — a person, a place, a book, an evening. Tap the mic on the keyboard and just say it if that's easier. It's understood on your phone and filed for you."),
-        Step(icon: "point.3.connected.trianglepath.dotted", title: "Connect",
-             body: "Type [[ to link a note to anything else, or tap the link button and it writes the brackets for you. Numinous also spots connections you didn't make — that's when it's working."),
-        Step(icon: "figure.stand", title: "Become",
-             body: "Every note feeds one part of you: Body, Mind, Heart, Meaning, Spirit, Gut, Influences. Your figure on Home grows from what you actually did. There's no way to fake it fuller.")
-    ]
+    /// THE AXES ARE READ FROM THE MODEL, NOT TYPED HERE. This sentence still named Gut and
+    /// Influences months after both were retired, because it was a string and nothing about
+    /// retiring an axis could reach it. The one screen whose whole job is explaining the app
+    /// was the last place still describing a version of it that no longer existed.
+    private var moves: [Step] {
+        let parts = model.lifeAxes.map(\.name)
+        let named = parts.count > 1
+            ? parts.dropLast().joined(separator: ", ") + " and " + parts[parts.count - 1]
+            : (parts.first ?? "one part of you")
+        return [
+            Step(icon: "square.and.pencil", title: "Capture",
+                 body: "Note something — a person, a place, a book, an evening. Tap the mic on the keyboard and just say it if that's easier. It's understood on your phone and filed for you."),
+            Step(icon: "point.3.connected.trianglepath.dotted", title: "Connect",
+                 body: "Type [[ to link a note to anything else, or tap the link button and it writes the brackets for you. Numinous also spots connections you didn't make — that's when it's working."),
+            Step(icon: "figure.stand", title: "Become",
+                 body: "Every note feeds one part of you: \(named). Your figure on Home grows from what you actually did. There's no way to fake it fuller."),
+        ]
+    }
 
     private let places: [Step] = [
         Step(icon: "note.text", title: "Notes",
