@@ -236,13 +236,38 @@ enum SportsService {
             .trimmingCharacters(in: .whitespaces)
     }
 
+    /// ESPN write their kickoff times to the minute — "2026-09-07T23:30Z", with no seconds
+    /// field — and ISO8601DateFormatter will not accept that. `.withInternetDateTime` demands
+    /// seconds, so every event of every fixture list failed to parse, `nextGame` returned nil
+    /// for everybody, and the notifier rebuilt its queue out of an empty list forever. The
+    /// feature had never fired once, in any league, and said nothing about why: a nudge that
+    /// does not arrive looks exactly like a friend whose team is not playing.
+    ///
+    /// So minute precision is tried first, because it is what the endpoint actually sends. The
+    /// two stricter readings stay behind it, because an undocumented endpoint is free to start
+    /// sending seconds on a Tuesday and this should keep working when it does.
     private static func isoDate(_ s: String) -> Date? {
+        if let d = minutePrecision.date(from: s) { return d }
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
         if let d = f.date(from: s) { return d }
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f.date(from: s)
     }
+
+    /// "2026-09-07T23:30Z", and "2026-09-07T19:30-04:00" too — ESPN send UTC today, but the
+    /// offset form costs one character in the pattern to accept.
+    ///
+    /// POSIX locale and a fixed zone, because this is a machine format: a phone set to a
+    /// Buddhist or Japanese calendar would otherwise read 2026 as some other year entirely and
+    /// put every game decades away from now.
+    private static let minutePrecision: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        f.dateFormat = "yyyy-MM-dd'T'HH:mmXXXXX"
+        return f
+    }()
 
     private static var folder: URL? {
         try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask,
