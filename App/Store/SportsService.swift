@@ -79,10 +79,33 @@ enum SportsService {
     /// never produce a team that then fails to be found.
     struct TeamOption: Identifiable, Hashable, Comparable {
         let id: String          // league path + team id, unique across leagues
-        let name: String
+        let name: String        // what is shown, and what gets stored
         let league: String
+        /// Every other thing this team is called, lowercased, for the search box to match on.
+        /// Searching has to find a team by the name the person uses, which is very often not
+        /// the name ESPN prints.
+        let search: String
         static func < (a: TeamOption, b: TeamOption) -> Bool { a.name < b.name }
     }
+
+    /// Schools and clubs whose everyday name shares no letters with the one ESPN prints.
+    ///
+    /// ESPN calls Connecticut "UConn", so searching "Connecticut" returned Central, Southern and
+    /// Western Connecticut State and not the one anybody meant — the most conspicuous possible
+    /// way to look broken. Nicknames come free from the data ("Huskies", "Crimson Tide"); these
+    /// are the cases where no amount of substring matching helps, because "UConn" and
+    /// "Connecticut" have nothing in common to match on.
+    private static let alsoKnownAs: [String: String] = [
+        "uconn": "connecticut", "ole miss": "mississippi", "pitt": "pittsburgh",
+        "umass": "massachusetts", "usc": "southern california", "smu": "southern methodist",
+        "tcu": "texas christian", "lsu": "louisiana state", "byu": "brigham young",
+        "ucf": "central florida", "uab": "alabama birmingham", "unlv": "nevada las vegas",
+        "utep": "texas el paso", "utsa": "texas san antonio", "fiu": "florida international",
+        "fau": "florida atlantic", "vcu": "virginia commonwealth", "cal": "california",
+        "penn": "pennsylvania", "ul monroe": "louisiana monroe", "usf": "south florida",
+        "utah tech": "dixie state", "unc": "north carolina", "uic": "illinois chicago",
+        "umbc": "maryland baltimore county", "siu edwardsville": "southern illinois edwardsville",
+    ]
 
     /// Every team you might support, for the picker.
     ///
@@ -108,7 +131,8 @@ enum SportsService {
                 let key = college ? normalize(name) : "\(league.path)|\(id)"
                 guard seen.insert(key).inserted else { continue }
                 out.append(TeamOption(id: "\(league.path)|\(id)", name: name,
-                                      league: college ? "Colleges" : league.name))
+                                      league: college ? "Colleges" : league.name,
+                                      search: searchBlob(team, shown: name)))
             }
         }
         return out.sorted()
@@ -119,6 +143,14 @@ enum SportsService {
     private struct Team { let id: String; let name: String }
 
     private struct RawTeam { let display: String; let location: String; let names: [String] }
+
+    /// Everything a team can be typed as: what is shown, every name ESPN gives it, and the
+    /// everyday name where that shares nothing with either.
+    private static func searchBlob(_ t: RawTeam, shown: String) -> String {
+        var parts = t.names + [normalize(shown)]
+        for term in parts where alsoKnownAs[term] != nil { parts.append(alsoKnownAs[term]!) }
+        return Set(parts.filter { !$0.isEmpty }).joined(separator: " ")
+    }
 
     /// A league's teams, straight off the cached JSON. One reader for both the picker and the
     /// matcher, so what you can choose and what can be resolved are the same set by construction.
@@ -149,8 +181,9 @@ enum SportsService {
         // and a typed "Jets" would have taken whichever team happened to be listed first.
         var partial: Team?
         for (id, t) in await rawTeams(in: leaguePath) {
-            if t.names.contains(q) { return Team(id: id, name: t.display) }
-            if partial == nil, t.names.contains(where: { !$0.isEmpty && $0.contains(q) }) {
+            let names = t.names + t.names.compactMap { alsoKnownAs[$0] }
+            if names.contains(q) { return Team(id: id, name: t.display) }
+            if partial == nil, names.contains(where: { !$0.isEmpty && $0.contains(q) }) {
                 partial = Team(id: id, name: t.display)
             }
         }

@@ -56,7 +56,9 @@ struct TeamPickerView: View {
     private var matches: [SportsService.TeamOption] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return options }
-        return options.filter { $0.name.lowercased().contains(q) }
+        // Match on every name a team goes by, not just the one on the row. ESPN prints
+        // "UConn"; people type "Connecticut", or "Huskies", or "Crimson Tide".
+        return options.filter { $0.name.lowercased().contains(q) || $0.search.contains(q) }
     }
 
     /// Chosen teams that the current search has hidden.
