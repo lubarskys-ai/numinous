@@ -1181,7 +1181,7 @@ final class AppModel: ObservableObject {
         var out: [PersonLocation] = []
         for n in notes {
             let f = Folder.normalize(n.folderName)
-            guard f == "people" || f == "contacts" else { continue }
+            guard Self.isPersonFolder(f) else { continue }
             var coord = n.allPlaces.first(where: { $0.hasCoordinate }).map { ($0.latitude!, $0.longitude!) }
             if coord == nil { for t in n.linkTargets { if let c = placeCoord[Self.norm(t)] { coord = c; break } } }
             guard let c = coord else { continue }
@@ -1212,7 +1212,7 @@ final class AppModel: ObservableObject {
         var out: [PersonPlaces] = []
         for n in notes {
             let f = Folder.normalize(n.folderName)
-            guard f == "people" || f == "contacts" else { continue }
+            guard Self.isPersonFolder(f) else { continue }
             let placeNames = n.allPlaces.map(\.name).joined(separator: " ")
             let text = (n.body + " " + placeNames).lowercased()
             // Last time you were "in touch": their note's own date, or the newest note that
@@ -1316,7 +1316,7 @@ final class AppModel: ObservableObject {
     func peopleWithTeams() -> [(id: UUID, name: String, pro: [String], college: [String])] {
         notes.compactMap { n in
             let f = Folder.normalize(n.folderName)
-            guard f == "people" || f == "contacts" else { return nil }
+            guard Self.isPersonFolder(f) else { return nil }
             let pro = teams(n, college: false), college = teams(n, college: true)
             guard !pro.isEmpty || !college.isEmpty else { return nil }
             return (n.id, n.displayName, pro, college)
@@ -1423,7 +1423,7 @@ final class AppModel: ObservableObject {
             let top = n.folderName.prefix { $0 != "/" }
             guard top.count == 6 || top.count == 8 else { continue }   // "people" / "contacts"
             let f = top.lowercased()
-            guard f == "people" || f == "contacts" else { continue }
+            guard Self.isPersonFolder(f) else { continue }
             // Times you actually wrote about them. A contact with no mentions was never a
             // relationship this app saw, so there's nothing to have drifted from.
             let mentions = backlinks(to: n)
@@ -1942,6 +1942,17 @@ final class AppModel: ObservableObject {
     }
 
     /// True when a note is a book (under books/, but not a genre grouping note).
+    /// A note about a person, in either folder they can land in.
+    ///
+    /// Contacts imported from the phone go to "contacts"; ones you write yourself go to
+    /// "people". Every reconnection feature already accepted both, spelled out inline four
+    /// times — and the team picker, added later, checked only "people", so it was invisible on
+    /// exactly the notes most likely to want it. One name for the rule now.
+    static func isPersonFolder(_ folderName: String) -> Bool {
+        let f = Folder.normalize(folderName)
+        return f == "people" || f == "contacts"
+    }
+
     static func isBookFolder(_ folderName: String) -> Bool {
         let f = Folder.normalize(folderName)
         return (f == "books" || f.hasPrefix("books/")) && !f.hasPrefix("books/genre")

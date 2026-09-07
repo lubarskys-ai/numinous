@@ -279,7 +279,7 @@ struct NoteDetailView: View {
             // Who they support. See gameDayPrompt(): the app watches for the night their team
             // plays and says so, because "big game tonight" is an easy message to send and
             // "how are you" is a hard one.
-            if Folder.normalize(note.folderName) == "people" {
+            if AppModel.isPersonFolder(note.folderName) {
                 teamRow(note, college: false)
                 teamRow(note, college: true)
             }
@@ -864,7 +864,7 @@ struct NoteDetailView: View {
 
     /// A sensible default reminder title — person-aware ("Call Sam").
     private func defaultFollowUpTitle(_ note: Note) -> String {
-        Folder.normalize(note.folderName) == "people"
+        AppModel.isPersonFolder(note.folderName)
             ? "Call \(note.displayName)"
             : "Follow up: \(note.displayName)"
     }
