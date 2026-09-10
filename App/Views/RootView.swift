@@ -9,11 +9,25 @@ struct RootView: View {
     // screenshots). The avatar is no longer a tab — it's the floating companion.
     @State private var selection: String =
         ProcessInfo.processInfo.environment["NUMINOUS_TAB"] ?? "home"
-    @State private var showAvatar = false
-    /// Which of the two screens the next open lands on — see `AvatarMode`.
-    @State private var avatarMode: AvatarMode = .avatar
-    @State private var showCapture = false
-    @State private var showDiary = false
+    /// ONE COVER, DRIVEN BY AN ENUM. There were four `.fullScreenCover` modifiers stacked on
+    /// this same view — onboarding, avatar, capture, diary — and SwiftUI honours only one of a
+    /// stack reliably: the rest silently fail to present. FoldersView already learned this the
+    /// hard way ("stacking several .sheet(item:) on one view let some, like Merge, silently
+    /// fail to present") and collapsed to a single enum-driven sheet. This is the same fix,
+    /// and it is why the Action Button appeared to need pressing twice.
+    private enum Cover: Identifiable {
+        case avatar(AvatarMode)
+        case capture
+        case diary
+        var id: String {
+            switch self {
+            case .avatar(let m): return "avatar-\(m)"
+            case .capture:       return "capture"
+            case .diary:         return "diary"
+            }
+        }
+    }
+    @State private var cover: Cover?
     @State private var companionAction: CompanionAction = .idle
     @State private var companionActionStart = Date()
     @ObservedObject private var quickCapture = QuickCapture.shared
@@ -51,7 +65,7 @@ struct RootView: View {
                               action: companionAction, actionStart: companionActionStart)
                     .frame(width: 100, height: 116)
                     .contentShape(Rectangle())
-                    .onTapGesture { avatarMode = .avatar; showAvatar = true }
+                    .onTapGesture { cover = .avatar(.avatar) }
                     .padding(.trailing, 8)
                     .padding(.bottom, 54)
                     .accessibilityLabel("Open avatar")
@@ -72,18 +86,26 @@ struct RootView: View {
             get: { model.needsOnboarding },
             set: { if !$0 { model.dismissOnboarding() } }
         )) { OnboardingView() }
-        .fullScreenCover(isPresented: $showAvatar) { AvatarExpandedView(mode: avatarMode) }
-        // Quick-capture (from the Action Button / Siri / Shortcuts) opens here.
-        .fullScreenCover(isPresented: $showCapture) { ComposeView(prefillTitle: nil, onSaved: { _ in selection = "notes" }) }
-        // "Today's diary" (Action Button / Siri) opens the diary with the keyboard up.
-        .fullScreenCover(isPresented: $showDiary) { ComposeView(prefillTitle: nil, diary: true, autofocus: true, onSaved: { _ in selection = "notes" }) }
+        // The avatar, quick-capture (Action Button / Siri / Shortcuts) and "Today's diary"
+        // all present through this one cover — see `Cover`.
+        .fullScreenCover(item: $cover) { which in
+            switch which {
+            case .avatar(let mode):
+                AvatarExpandedView(mode: mode)
+            case .capture:
+                ComposeView(prefillTitle: nil, onSaved: { _ in selection = "notes" })
+            case .diary:
+                ComposeView(prefillTitle: nil, diary: true, autofocus: true,
+                            onSaved: { _ in selection = "notes" })
+            }
+        }
         // The companion strolls when you change pages…
         .onChange(of: selection) { _ in trigger(.walk) }
         // …and does a joyful, heart-popping cheer when a new connection forms.
         .onChange(of: model.spark?.id) { id in if id != nil { trigger(.cheer) } }
         // "See in graph" from a note opens the avatar, spotlighting that note's connections.
         // "See in graph" is about connections, so it opens the graph and not the figure.
-        .onChange(of: model.avatarFocus) { if $0 != nil { avatarMode = .graph; showAvatar = true } }
+        .onChange(of: model.avatarFocus) { if $0 != nil { cover = .avatar(.graph) } }
         // Refresh already-connected sources (contacts, Readwise) when returning to the app.
         .onChange(of: scenePhase) {
             if $0 == .active {
@@ -92,14 +114,34 @@ struct RootView: View {
                 // the app cannot wake itself to look at fixtures, so every time you open it is
                 // the chance to schedule the next week.
                 Task { await model.refreshGameNotifications() }
+                // A press that arrived before the scene was live is still waiting.
+                presentPending()
             }
             else if $0 == .background { model.flush() }   // truly leaving → force-write pending save
         }
-        .onChange(of: quickCapture.requested) { if $0 { showCapture = true; quickCapture.requested = false } }
-        .onChange(of: quickCapture.diaryRequested) { if $0 { showDiary = true; quickCapture.diaryRequested = false } }
-        .onAppear {
-            if quickCapture.requested { showCapture = true; quickCapture.requested = false }
-            if quickCapture.diaryRequested { showDiary = true; quickCapture.diaryRequested = false }
+        .onChange(of: quickCapture.requested) { _ in presentPending() }
+        .onChange(of: quickCapture.diaryRequested) { _ in presentPending() }
+        .onAppear { presentPending() }
+    }
+
+    /// Raise whatever the Action Button asked for — but only once there is a live scene to
+    /// raise it into.
+    ///
+    /// THE OTHER HALF OF THE DOUBLE PRESS. An App Intent with `openAppWhenRun` sets its flag
+    /// and hands the app to the system to foreground, so on a cold launch the request arrives
+    /// while the scene is still `.inactive` — and a cover presented then is dropped on the
+    /// floor by UIKit. The flag was being cleared in the same breath, so that press was simply
+    /// gone, and the app only responded to the second one, by which time it was already
+    /// running. Holding the request until `.active` means the first press is the one that
+    /// works.
+    private func presentPending() {
+        guard scenePhase == .active, cover == nil else { return }
+        if quickCapture.requested {
+            quickCapture.requested = false
+            cover = .capture
+        } else if quickCapture.diaryRequested {
+            quickCapture.diaryRequested = false
+            cover = .diary
         }
     }
 

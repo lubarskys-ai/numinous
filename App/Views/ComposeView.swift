@@ -144,6 +144,20 @@ struct ComposeView: View {
                 Divider()
                 if reviewing && !manualEdit {
                     reviewArea
+                } else if diaryMode && !diaryResolved {
+                    // TODAY'S ENTRY IS STILL BEING PULLED FORWARD, AND THE EDITOR MUST NOT
+                    // EXIST YET. `resolveDiary()` runs from .onAppear, which is after this
+                    // body has already built the editor — so the editor was being handed an
+                    // empty string and, with autofocus, made first responder a moment later.
+                    // `updateUIView` deliberately refuses to overwrite a first responder
+                    // (that guard is what stopped live typing dropping characters), so the
+                    // loaded entry never reached the screen; the selection write-back then
+                    // pushed the empty text view back into `text`, and Save wrote that over
+                    // the note. A whole day's diary, gone, via the Action Button.
+                    //
+                    // Holding the editor back one frame removes the race rather than
+                    // refereeing it: when it is finally built, `text` is already the entry.
+                    Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     LinkingEditor(text: $text, autofocus: autofocus)
                         .padding(.horizontal, 14)

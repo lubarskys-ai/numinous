@@ -401,7 +401,15 @@ private struct LinkTextView: UIViewRepresentable {
         func textViewDidChangeSelection(_ tv: UITextView) {
             // Sync the binding BEFORE updateQuery re-renders (showing the [[ suggestions),
             // so updateUIView never sees a stale, one-behind value to snap the caret to.
-            if parent.text != tv.text { parent.text = tv.text }
+            //
+            // NEVER EMPTY THE BINDING FROM HERE. Moving the caret is not editing, so a
+            // selection change that would replace real text with nothing is always the text
+            // view being behind the binding rather than the user having deleted anything —
+            // and writing it through erased the note. Deliberate deletion arrives through
+            // textViewDidChange, which is left alone.
+            if parent.text != tv.text, !(tv.text.isEmpty && !parent.text.isEmpty) {
+                parent.text = tv.text
+            }
             updateQuery()
             // Fold/unfold the link the caret moved into or out of — but DEFER it so dragging
             // the insertion point doesn't reflow links mid-gesture and yank the caret around.

@@ -20,8 +20,9 @@ import UserNotifications
 ///   message to receive than to be too late to act on. The 9am floor is there because an early
 ///   kickoff would otherwise be announced at six in the morning.
 ///
-///   One per person per game, and at most one a day. A season ticket holder would otherwise be
-///   an alarm clock.
+///   One per person per game, and at most one a day PER PERSON, with a ceiling of three a day
+///   overall. A season ticket holder would otherwise be an alarm clock — but capping the day
+///   globally meant a busy Saturday announced one friend and silently swallowed the rest.
 ///
 /// iOS holds sixty-four pending local notifications per app, and no more, so this schedules the
 /// soonest few and refills whenever the app is opened.
@@ -90,15 +91,29 @@ enum GameNotifier {
 
         guard enabled, await requestPermission() else { return }
 
+        // ONE A DAY PER PERSON, NOT ONE A DAY IN TOTAL.
+        //
+        // The cap used to be global, and the day-before rule funnels an entire Saturday of
+        // fixtures into Friday — so a weekend on which five different friends' teams played
+        // produced exactly one notification and silently dropped the other four people. Which
+        // reads, from the outside, as a feature that mostly does not work: the card on the
+        // notes tab names a game the phone never mentioned.
+        //
+        // The reason written down for the cap was the season ticket holder, and that is one
+        // PERSON's repeated games — so that is what is limited here. A ceiling on the day
+        // survives it, because a vault full of fans still must not become an alarm clock.
+        let dailyCeiling = 3
+        var perPersonDay: Set<String> = []
         var perDay: [Date: Int] = [:]
         var made = 0
         let calendar = Calendar.current
         for game in upcoming.sorted(by: { $0.kickoff < $1.kickoff }) {
             guard made < 20, let when = fireDate(forKickoff: game.kickoff) else { continue }
-            // At most one a day. Somebody with four teams has a game most evenings, and four
-            // notifications on a Saturday is the behaviour this app exists to avoid.
             let day = calendar.startOfDay(for: when)
-            guard perDay[day, default: 0] < 1 else { continue }
+            let personDay = game.personID.uuidString + "@" + String(Int(day.timeIntervalSince1970))
+            guard !perPersonDay.contains(personDay) else { continue }
+            guard perDay[day, default: 0] < dailyCeiling else { continue }
+            perPersonDay.insert(personDay)
             perDay[day] = perDay[day, default: 0] + 1
 
             // ARRIVING A DAY OUT MEANS THE ALERT HAS TO SAY WHEN. Two hours before, "their team
